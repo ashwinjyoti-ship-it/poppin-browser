@@ -24,6 +24,10 @@ beforeEach(async () => {
       response.end('<!doctype html><title>Popup page</title><h1>Popup page</h1>');
       return;
     }
+    if (route === '/client-redirect') {
+      response.end("<!doctype html><title>Redirecting</title><script>location.replace('/second')</script>");
+      return;
+    }
     response.setHeader('Set-Cookie', 'poppin-session=restored; Path=/; SameSite=Lax');
     response.end(`<!doctype html>
       <title>Local fixture</title>
@@ -98,6 +102,15 @@ describe('packaged browser workflow', () => {
       node: 'undefined',
       bridge: 'undefined',
     });
+
+    await address.fill(`${origin}/client-redirect`);
+    await address.press('Enter');
+    await expect.poll(() => exactPageInfo(application!, `${origin}/second`)).toMatchObject({ title: 'Second page' });
+    expect(await shell.getByRole('alert').count()).toBe(0);
+
+    await address.fill(origin);
+    await address.press('Enter');
+    await expect.poll(() => pageInfo(application!, origin)).toMatchObject({ title: 'Local fixture' });
 
     await application.evaluate(async ({ webContents }, prefix) => {
       const contents = webContents.getAllWebContents().find((candidate) => candidate.getURL().startsWith(prefix));

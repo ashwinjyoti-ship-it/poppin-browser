@@ -282,20 +282,18 @@ export class BrowserEngine {
     return { ok: true };
   }
 
-  private async navigate(tabId: string, input: string): Promise<BrowserCommandResult> {
+  private navigate(tabId: string, input: string): BrowserCommandResult {
     const tab = this.tabs.get(tabId);
     if (!tab) return { ok: false, message: 'That tab is no longer available.' };
     const normalized = normalizeAddressInput(input);
     if (normalized.kind === 'invalid') return { ok: false, message: normalized.message };
     tab.snapshot.failure = null;
-    try {
-      await tab.view.webContents.loadURL(normalized.url);
-      return { ok: true };
-    } catch {
-      return tab.snapshot.failure
-        ? { ok: true }
-        : { ok: false, message: 'Poppin could not open that page.' };
-    }
+    // A page can intentionally replace or redirect its initial navigation. Electron
+    // rejects the superseded loadURL promise with ERR_ABORTED even when the final
+    // page succeeds, so command acceptance must not be treated as load completion.
+    // Genuine failures are handled by did-fail-load and shown in the tab itself.
+    void tab.view.webContents.loadURL(normalized.url).catch(() => undefined);
+    return { ok: true };
   }
 
   private goBack(tabId: string): BrowserCommandResult {
