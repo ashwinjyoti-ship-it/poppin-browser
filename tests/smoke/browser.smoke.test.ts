@@ -103,6 +103,17 @@ describe('packaged browser workflow', () => {
       bridge: 'undefined',
     });
 
+    const workspace = shell.getByLabel('Workspace');
+    await workspace.getByLabel('Workspace name').fill('Launch workspace');
+    await workspace.getByRole('button', { name: 'Create workspace' }).click();
+    await expect.poll(() => workspace.getByRole('heading', { name: 'Launch workspace' }).isVisible()).toBe(true);
+    const tabContextCheckbox = workspace.getByRole('checkbox', { name: 'Local fixture' });
+    await tabContextCheckbox.click();
+    await expect.poll(() => tabContextCheckbox.isChecked()).toBe(true);
+    const context = shell.getByLabel('Context');
+    await expect.poll(() => context.getByText('Local fixture', { exact: true }).count()).toBeGreaterThan(0);
+    await expect.poll(() => context.locator('pre').first().textContent()).toContain('Open popup');
+
     await address.fill(`${origin}/client-redirect`);
     await address.press('Enter');
     await expect.poll(() => exactPageInfo(application!, `${origin}/second`)).toMatchObject({ title: 'Second page' });
@@ -132,6 +143,7 @@ describe('packaged browser workflow', () => {
 
     ({ app: application, shell } = await launch(userDataPath));
     await expect.poll(() => shell.getByRole('tab').count()).toBe(2);
+    await expect.poll(() => shell.getByLabel('Workspace').getByRole('heading', { name: 'Launch workspace' }).isVisible()).toBe(true);
     const cookies = await application.evaluate(async ({ session }, fixtureOrigin) => {
       return session.fromPartition('persist:poppin-browser').cookies.get({ url: fixtureOrigin });
     }, origin);

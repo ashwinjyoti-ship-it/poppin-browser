@@ -24,7 +24,7 @@ This roadmap is living guidance, not pre-authorization to implement every phase.
 
 ## Phase 1 — Persistent Browser Foundation
 
-**Status:** Completed on 2026-08-06; awaiting hands-on approval.
+**Status:** Completed and approved through hands-on browsing, YouTube playback, and Google sign-in on 2026-08-06.
 
 **Outcome:** Browse normally in a calm Poppin shell.
 
@@ -41,17 +41,23 @@ Verification includes unit/component coverage, a packaged application build, a l
 
 ## Phase 2 — One Workspace
 
+**Status:** Completed in Checkpoint A on 2026-08-06.
+
 **Provisional outcome:** Create and use exactly one workspace that groups browser content.
 
 The workspace contains tabs, documents, a project connection, and tasks. It has no archive flow, workspace limit, switching system, collaboration, or cloud sync. Workspace behavior must be an engine surfaced through a collapsible left pane without diminishing full-focus browsing.
 
 ## Phase 3 — Explicit Context
 
+**Status:** Completed in Checkpoint A on 2026-08-06.
+
 **Provisional outcome:** Check workspace tabs and documents and see the exact context package that would be sent.
 
 Every eligible item has an explicit checkbox. The right pane mirrors the serialized selection with no implicit page, history, hidden metadata, or automatic expansion.
 
 ## Phase 4 — Local Project Connection
+
+**Status:** Completed in Checkpoint A on 2026-08-06.
 
 **Provisional outcome:** Attach the one workspace to a usable local Git project.
 
@@ -87,5 +93,8 @@ Launch the configured preview process, open its URL in the centre browser, show 
 - **2026-08-06:** Later phases are explicitly provisional pending daily Phase 1 use.
 - **2026-08-06:** Phase 1 uses DuckDuckGo for address-bar searches and restores cookies, tabs, active tab, and window state.
 - **2026-08-06:** Phase 1 stays at the strict browser core; downloads UI, permissions UI, bookmarks, history UI, password management, and profiles are deferred.
+- **2026-08-06:** Daily-use testing approves Phase 1 after successful YouTube playback and Google sign-in; a false redirect warning is fixed separately.
+- **2026-08-06:** Remaining work is grouped into three manual checkpoints: A (Phases 2–4), B (Phases 5–6), and C (Phases 7–8), while each capability retains small commits.
+- **2026-08-06:** Checkpoint A freezes selected tab and document content so the right pane is the exact bounded context payload; Git operations use argument-safe Git CLI execution without a shell.
 
 Future decisions should be added here only after an approved phase boundary or meaningful user feedback.
