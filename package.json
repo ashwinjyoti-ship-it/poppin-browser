@@ -10,7 +10,7 @@
     "start": "electron-forge start",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:smoke": "npm run package && vitest run --config vitest.smoke.config.ts",
+    "test:smoke": "npm run package && vitest run --config vitest.smoke.config.mts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint . --max-warnings=0",
     "package": "electron-forge package",
@@ -50,4 +50,3 @@
     "vitest": "^4.0.15"
   }
 }
-

@@ -18,6 +18,5 @@
     "target": "ES2022",
     "types": ["node", "vitest/globals", "@testing-library/jest-dom"]
   },
-  "include": ["src", "tests", "*.ts"]
+  "include": ["src", "tests", "*.ts", "*.mts"]
 }
-

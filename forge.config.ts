@@ -12,7 +12,6 @@ const config: ForgeConfig = {
   packagerConfig: {
     asar: true,
     icon: './src/renderer/assets/poppin-app-icon',
-    osxSign: {},
   },
   makers: [
     new MakerZIP({}, ['darwin']),
@@ -48,4 +47,3 @@ const config: ForgeConfig = {
 };
 
 export default config;
-
