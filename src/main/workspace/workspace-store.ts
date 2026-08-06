@@ -4,6 +4,7 @@ import type {
   TabContextSnapshot,
   WorkspaceDocumentSnapshot,
   WorkspaceRecordSnapshot,
+  WorkspaceProjectSnapshot,
 } from '../../shared/workspace';
 
 interface WorkspaceRow {
@@ -29,6 +30,15 @@ interface TabContextRow {
   captured_text: string;
   truncated: number;
   captured_at: string;
+}
+
+interface ProjectRow {
+  repository_path: string;
+  remote: string | null;
+  branch: string;
+  install_command: string;
+  dev_command: string;
+  preview_url: string;
 }
 
 export class WorkspaceStore {
@@ -60,6 +70,15 @@ export class WorkspaceStore {
         captured_text TEXT NOT NULL,
         truncated INTEGER NOT NULL DEFAULT 0 CHECK (truncated IN (0, 1)),
         captured_at TEXT NOT NULL
+      ) STRICT;
+      CREATE TABLE IF NOT EXISTS project (
+        id TEXT PRIMARY KEY CHECK (id = 'primary'),
+        repository_path TEXT NOT NULL,
+        remote TEXT,
+        branch TEXT NOT NULL,
+        install_command TEXT NOT NULL DEFAULT '',
+        dev_command TEXT NOT NULL DEFAULT '',
+        preview_url TEXT NOT NULL DEFAULT 'http://localhost:3000'
       ) STRICT;
     `);
   }
@@ -167,6 +186,43 @@ export class WorkspaceStore {
 
   removeTabContext(tabId: string): void {
     this.database.prepare('DELETE FROM tab_context WHERE tab_id = ?').run(tabId);
+  }
+
+  getProject(): WorkspaceProjectSnapshot | null {
+    const row = this.database.prepare(`
+      SELECT repository_path, remote, branch, install_command, dev_command, preview_url
+      FROM project WHERE id = ?
+    `).get('primary') as unknown as ProjectRow | undefined;
+    if (!row) return null;
+    return {
+      repositoryPath: row.repository_path,
+      remote: row.remote,
+      branch: row.branch,
+      installCommand: row.install_command,
+      devCommand: row.dev_command,
+      previewUrl: row.preview_url,
+    };
+  }
+
+  saveProject(project: WorkspaceProjectSnapshot): void {
+    this.database.prepare(`
+      INSERT INTO project (id, repository_path, remote, branch, install_command, dev_command, preview_url)
+      VALUES ('primary', ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        repository_path = excluded.repository_path,
+        remote = excluded.remote,
+        branch = excluded.branch,
+        install_command = excluded.install_command,
+        dev_command = excluded.dev_command,
+        preview_url = excluded.preview_url
+    `).run(
+      project.repositoryPath,
+      project.remote,
+      project.branch,
+      project.installCommand,
+      project.devCommand,
+      project.previewUrl,
+    );
   }
 
   close(): void {

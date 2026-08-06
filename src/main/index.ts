@@ -14,6 +14,7 @@ import { clampWindowState, DEFAULT_WINDOW_STATE } from './browser/window-state';
 import { WORKSPACE_CHANNELS, type WorkspaceCommand } from '../shared/workspace';
 import { WorkspaceEngine } from './workspace/workspace-engine';
 import { WorkspaceStore } from './workspace/workspace-store';
+import { GitEngine } from './project/git-engine';
 
 registerInternalScheme();
 
@@ -61,7 +62,7 @@ async function createWindow(): Promise<void> {
 
   browserEngine = new BrowserEngine(mainWindow, browserSession, stateStore, getWindowState);
   if (!workspaceStore) throw new Error('Workspace storage is not ready.');
-  workspaceEngine = new WorkspaceEngine(mainWindow, workspaceStore, browserEngine);
+  workspaceEngine = new WorkspaceEngine(mainWindow, workspaceStore, browserEngine, new GitEngine());
   browserEngine.restore(
     persisted
       ? { tabs: persisted.tabs, activeTabId: persisted.activeTabId }
@@ -111,7 +112,7 @@ app.whenReady().then(async () => {
   });
   ipcMain.handle(WORKSPACE_CHANNELS.getSnapshot, (event) => {
     if (!isTrustedShellSender(event.sender)) throw new Error('Untrusted workspace snapshot request.');
-    return workspaceEngine?.getSnapshot() ?? { workspace: null, documents: [], tabContexts: [] };
+    return workspaceEngine?.getSnapshot() ?? { workspace: null, documents: [], tabContexts: [], project: null };
   });
   ipcMain.handle(WORKSPACE_CHANNELS.command, (event, command: WorkspaceCommand) => {
     if (!isTrustedShellSender(event.sender)) throw new Error('Untrusted workspace command.');

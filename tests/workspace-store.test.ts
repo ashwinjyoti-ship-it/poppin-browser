@@ -33,6 +33,14 @@ describe('workspace store', () => {
       truncated: false,
       capturedAt: '2026-08-06T00:00:00.000Z',
     });
+    store.saveProject({
+      repositoryPath: '/tmp/project',
+      remote: 'https://github.com/example/project.git',
+      branch: 'main',
+      installCommand: 'npm install',
+      devCommand: 'npm run dev',
+      previewUrl: 'http://localhost:3000',
+    });
     store.renameWorkspace('Calm launch');
     expect(store.getWorkspace()).toMatchObject({ id: 'primary', name: 'Calm launch' });
     store.close();
@@ -45,6 +53,7 @@ describe('workspace store', () => {
     expect(restored.listTabContexts()).toEqual([
       expect.objectContaining({ tabId: 'tab-one', capturedText: 'Visible page' }),
     ]);
+    expect(restored.getProject()).toMatchObject({ repositoryPath: '/tmp/project', branch: 'main' });
     restored.close();
   });
 });

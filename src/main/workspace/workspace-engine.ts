@@ -12,6 +12,7 @@ import {
 } from '../../shared/workspace';
 import { WorkspaceStore } from './workspace-store';
 import { BrowserEngine } from '../browser/browser-engine';
+import { GitEngine } from '../project/git-engine';
 
 const MAX_DOCUMENT_BYTES = 60_000;
 const TEXT_DOCUMENT_EXTENSIONS = new Set([
@@ -23,6 +24,7 @@ export class WorkspaceEngine {
     private readonly window: BrowserWindow,
     private readonly store: WorkspaceStore,
     private readonly browser: BrowserEngine,
+    private readonly git: GitEngine,
   ) {}
 
   getSnapshot(): WorkspaceSnapshot {
@@ -30,6 +32,7 @@ export class WorkspaceEngine {
       workspace: this.store.getWorkspace(),
       documents: this.store.listDocuments(),
       tabContexts: this.store.listTabContexts(),
+      project: this.store.getProject(),
     };
   }
 
@@ -53,6 +56,14 @@ export class WorkspaceEngine {
         break;
       case 'refreshTabContext':
         return this.captureTab(command.tabId);
+      case 'connectExistingProject':
+        return this.connectExistingProject();
+      case 'cloneRepository':
+        return this.cloneRepository(command.remote);
+      case 'createNewProject':
+        return this.createNewProject();
+      case 'updateProjectSettings':
+        return this.updateProjectSettings(command);
     }
     this.emitSnapshot();
     return { ok: true };
@@ -124,10 +135,71 @@ export class WorkspaceEngine {
     return { ok: true };
   }
 
+  private async connectExistingProject(): Promise<WorkspaceCommandResult> {
+    const directory = await this.chooseDirectory('Connect existing local Git project');
+    if (!directory) return { ok: true };
+    return this.runGitOperation(() => this.git.inspect(directory));
+  }
+
+  private async cloneRepository(remote: string): Promise<WorkspaceCommandResult> {
+    const parent = await this.chooseDirectory('Choose where to clone the repository');
+    if (!parent) return { ok: true };
+    return this.runGitOperation(() => this.git.clone(remote, parent));
+  }
+
+  private async createNewProject(): Promise<WorkspaceCommandResult> {
+    const directory = await this.chooseDirectory('Choose or create an empty project folder', true);
+    if (!directory) return { ok: true };
+    return this.runGitOperation(() => this.git.create(directory));
+  }
+
+  private updateProjectSettings(command: Extract<WorkspaceCommand, { type: 'updateProjectSettings' }>): WorkspaceCommandResult {
+    const project = this.store.getProject();
+    if (!project) return { ok: false, message: 'Connect a project first.' };
+    const previewUrl = normalizePreviewUrl(command.previewUrl);
+    if (!previewUrl) return { ok: false, message: 'Use a valid HTTP preview URL.' };
+    this.store.saveProject({
+      ...project,
+      installCommand: command.installCommand.trim(),
+      devCommand: command.devCommand.trim(),
+      previewUrl,
+    });
+    this.emitSnapshot();
+    return { ok: true };
+  }
+
+  private async chooseDirectory(title: string, createDirectory = false): Promise<string | null> {
+    const result = await dialog.showOpenDialog(this.window, {
+      title,
+      properties: createDirectory ? ['openDirectory', 'createDirectory'] : ['openDirectory'],
+    });
+    return result.canceled ? null : result.filePaths[0] ?? null;
+  }
+
+  private async runGitOperation(operation: () => Promise<import('../../shared/workspace').WorkspaceProjectSnapshot>): Promise<WorkspaceCommandResult> {
+    try {
+      this.store.saveProject(await operation());
+      this.emitSnapshot();
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, message: error instanceof Error ? error.message : 'Git could not complete that operation.' };
+    }
+  }
+
   private emitSnapshot(): void {
     if (!this.window.isDestroyed() && !this.window.webContents.isDestroyed()) {
       this.window.webContents.send(WORKSPACE_CHANNELS.snapshot, this.getSnapshot());
     }
+  }
+}
+
+function normalizePreviewUrl(input: string): string | null {
+  try {
+    const value = input.trim();
+    const url = new URL(/^https?:\/\//i.test(value) ? value : `http://${value}`);
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.toString().replace(/\/$/, '') : null;
+  } catch {
+    return null;
   }
 }
 

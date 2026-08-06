@@ -9,7 +9,7 @@ import { WorkspacePane } from './WorkspacePane';
 import { ContextPane } from './ContextPane';
 
 const EMPTY_SNAPSHOT: BrowserSnapshot = { tabs: [], activeTabId: '' };
-const EMPTY_WORKSPACE: WorkspaceSnapshot = { workspace: null, documents: [], tabContexts: [] };
+const EMPTY_WORKSPACE: WorkspaceSnapshot = { workspace: null, documents: [], tabContexts: [], project: null };
 
 export function App() {
   const [snapshot, setSnapshot] = useState<BrowserSnapshot>(EMPTY_SNAPSHOT);
@@ -126,7 +126,7 @@ export function App() {
         tabs={snapshot.tabs}
         onCollapseChange={setWorkspaceCollapsed}
         onCreate={(name) => sendWorkspaceCommand({ type: 'createWorkspace', name })}
-        onCommand={(command) => { void sendWorkspaceCommand(command); }}
+        onCommand={sendWorkspaceCommand}
       />
       <ContextPane
         collapsed={contextCollapsed}

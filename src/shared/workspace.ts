@@ -14,6 +14,16 @@ export interface WorkspaceSnapshot {
   workspace: WorkspaceRecordSnapshot | null;
   documents: WorkspaceDocumentSnapshot[];
   tabContexts: TabContextSnapshot[];
+  project: WorkspaceProjectSnapshot | null;
+}
+
+export interface WorkspaceProjectSnapshot {
+  repositoryPath: string;
+  remote: string | null;
+  branch: string;
+  installCommand: string;
+  devCommand: string;
+  previewUrl: string;
 }
 
 export interface WorkspaceDocumentSnapshot {
@@ -49,7 +59,16 @@ export type WorkspaceCommand =
   | { type: 'removeDocument'; documentId: string }
   | { type: 'setDocumentSelected'; documentId: string; selected: boolean }
   | { type: 'setTabSelected'; tabId: string; selected: boolean }
-  | { type: 'refreshTabContext'; tabId: string };
+  | { type: 'refreshTabContext'; tabId: string }
+  | { type: 'connectExistingProject' }
+  | { type: 'cloneRepository'; remote: string }
+  | { type: 'createNewProject' }
+  | {
+      type: 'updateProjectSettings';
+      installCommand: string;
+      devCommand: string;
+      previewUrl: string;
+    };
 
 export interface WorkspaceCommandResult {
   ok: boolean;

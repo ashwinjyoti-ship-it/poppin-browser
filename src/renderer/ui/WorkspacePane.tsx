@@ -3,6 +3,7 @@ import { type FormEvent, useState } from 'react';
 
 import type { WorkspaceSnapshot } from '../../shared/workspace';
 import type { BrowserTabSnapshot } from '../../shared/browser';
+import { ProjectSection } from './ProjectSection';
 
 interface WorkspacePaneProps {
   collapsed: boolean;
@@ -10,7 +11,7 @@ interface WorkspacePaneProps {
   tabs: BrowserTabSnapshot[];
   onCollapseChange: (collapsed: boolean) => void;
   onCreate: (name: string) => Promise<string | null>;
-  onCommand: (command: import('../../shared/workspace').WorkspaceCommand) => void;
+  onCommand: (command: import('../../shared/workspace').WorkspaceCommand) => Promise<string | null>;
 }
 
 export function WorkspacePane({ collapsed, snapshot, tabs, onCollapseChange, onCreate, onCommand }: WorkspacePaneProps) {
@@ -58,7 +59,7 @@ export function WorkspacePane({ collapsed, snapshot, tabs, onCollapseChange, onC
                 const selectable = tab.url.startsWith('http://') || tab.url.startsWith('https://');
                 return (
                   <label className={`selection-row ${selectable ? '' : 'selection-row-disabled'}`} key={tab.id}>
-                    <input type="checkbox" checked={selected} disabled={!selectable} onChange={(event) => onCommand({ type: 'setTabSelected', tabId: tab.id, selected: event.target.checked })} />
+                    <input type="checkbox" checked={selected} disabled={!selectable} onChange={(event) => { void onCommand({ type: 'setTabSelected', tabId: tab.id, selected: event.target.checked }); }} />
                     <Globe2 size={14} />
                     <span>{tab.title}</span>
                   </label>
@@ -67,21 +68,22 @@ export function WorkspacePane({ collapsed, snapshot, tabs, onCollapseChange, onC
             </div>
           </section>
           <section className="workspace-section">
-            <div className="section-heading"><span>Documents</span><button type="button" onClick={() => onCommand({ type: 'chooseDocuments' })}><FilePlus2 size={14} /> Add</button></div>
+            <div className="section-heading"><span>Documents</span><button type="button" onClick={() => { void onCommand({ type: 'chooseDocuments' }); }}><FilePlus2 size={14} /> Add</button></div>
             <div className="selection-list">
               {snapshot.documents.length === 0 ? <span className="section-empty">No documents added.</span> : null}
               {snapshot.documents.map((document) => (
                 <div className="document-row" key={document.id}>
                   <label className="selection-row">
-                    <input type="checkbox" checked={document.selected} onChange={(event) => onCommand({ type: 'setDocumentSelected', documentId: document.id, selected: event.target.checked })} />
+                    <input type="checkbox" checked={document.selected} onChange={(event) => { void onCommand({ type: 'setDocumentSelected', documentId: document.id, selected: event.target.checked }); }} />
                     <FileText size={14} />
                     <span>{document.name}</span>
                   </label>
-                  <button type="button" onClick={() => onCommand({ type: 'removeDocument', documentId: document.id })} aria-label={`Remove ${document.name}`}><X size={13} /></button>
+                  <button type="button" onClick={() => { void onCommand({ type: 'removeDocument', documentId: document.id }); }} aria-label={`Remove ${document.name}`}><X size={13} /></button>
                 </div>
               ))}
             </div>
           </section>
+          <ProjectSection project={snapshot.project} onCommand={onCommand} />
         </div>
       ) : (
         <form className="workspace-create" onSubmit={submit}>
