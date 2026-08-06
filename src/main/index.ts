@@ -41,6 +41,7 @@ async function createWindow(): Promise<void> {
   });
 
   const browserSession = session.fromPartition('persist:poppin-browser', { cache: true });
+  handleInternalPages(browserSession);
   const getWindowState = (): WindowState => {
     if (!mainWindow) return windowState;
     const normalBounds = mainWindow.getNormalBounds();
@@ -89,7 +90,6 @@ function isTrustedShellSender(sender: Electron.WebContents): boolean {
 
 app.whenReady().then(async () => {
   Menu.setApplicationMenu(null);
-  handleInternalPages();
   ipcMain.handle(BROWSER_CHANNELS.getSnapshot, (event) => {
     if (!isTrustedShellSender(event.sender)) throw new Error('Untrusted browser snapshot request.');
     return browserEngine?.getSnapshot();

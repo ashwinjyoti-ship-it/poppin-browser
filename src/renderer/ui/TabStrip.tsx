@@ -17,24 +17,29 @@ export function TabStrip({ tabs, activeTabId, onActivate, onClose, onCreate }: T
         {tabs.map((tab) => {
           const isActive = tab.id === activeTabId;
           return (
-            <button
+            <div
               className={`tab ${isActive ? 'tab-active' : ''}`}
               key={tab.id}
               role="tab"
               aria-selected={isActive}
+              tabIndex={isActive ? 0 : -1}
               onClick={() => onActivate(tab.id)}
-              type="button"
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  onActivate(tab.id);
+                }
+              }}
             >
               <span className="tab-icon" aria-hidden="true">
                 {tab.faviconUrl ? <img src={tab.faviconUrl} alt="" /> : <Globe2 size={15} />}
               </span>
               <span className="tab-title">{tab.title || 'Untitled'}</span>
               {tab.isLoading ? <span className="tab-loading" aria-label="Loading" /> : null}
-              <span
+              <button
                 className="tab-close"
-                role="button"
+                type="button"
                 aria-label={`Close ${tab.title || 'tab'}`}
-                tabIndex={0}
                 onClick={(event) => {
                   event.stopPropagation();
                   onClose(tab.id);
@@ -48,8 +53,8 @@ export function TabStrip({ tabs, activeTabId, onActivate, onClose, onCreate }: T
                 }}
               >
                 <X size={14} />
-              </span>
-            </button>
+              </button>
+            </div>
           );
         })}
       </div>
@@ -59,4 +64,3 @@ export function TabStrip({ tabs, activeTabId, onActivate, onClose, onCreate }: T
     </div>
   );
 }
-

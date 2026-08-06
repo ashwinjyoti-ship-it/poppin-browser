@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { type FormEvent, useEffect, useRef, useState } from 'react';
 
 import type { BrowserCommand, BrowserSnapshot } from '../../shared/browser';
 import { Brand } from './Brand';
@@ -14,10 +14,7 @@ export function App() {
   const [isEditingAddress, setIsEditingAddress] = useState(false);
   const addressInputRef = useRef<HTMLInputElement>(null);
 
-  const activeTab = useMemo(
-    () => snapshot.tabs.find((tab) => tab.id === snapshot.activeTabId) ?? null,
-    [snapshot],
-  );
+  const activeTab = snapshot.tabs.find((tab) => tab.id === snapshot.activeTabId) ?? null;
   const address = isEditingAddress ? addressDraft : activeTab?.url ?? '';
 
   useEffect(() => {
@@ -38,8 +35,12 @@ export function App() {
   }, []);
 
   const sendCommand = async (command: BrowserCommand) => {
-    const result = await window.poppinBrowser.command(command);
-    setAddressError(result.ok ? '' : result.message ?? 'That action is not available.');
+    try {
+      const result = await window.poppinBrowser.command(command);
+      setAddressError(result.ok ? '' : result.message ?? 'That action is not available.');
+    } catch {
+      setAddressError('Poppin could not complete that action.');
+    }
   };
 
   const withActiveTab = (type: 'back' | 'forward' | 'reload') => {

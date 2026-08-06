@@ -185,6 +185,7 @@ button { color: inherit; }
   background: rgba(247, 241, 231, .52);
   cursor: default;
   text-align: left;
+  user-select: none;
   transition: transform 140ms ease, background-color 140ms ease, box-shadow 140ms ease;
 }
 .tab:hover { background: rgba(255, 252, 247, .72); }
@@ -199,7 +200,7 @@ button { color: inherit; }
 .tab-icon { display: grid; place-items: center; width: 17px; height: 17px; color: #9b6b32; }
 .tab-icon img { display: block; width: 16px; height: 16px; border-radius: 4px; object-fit: contain; }
 .tab-title { overflow: hidden; font-size: 13px; font-weight: 520; text-overflow: ellipsis; white-space: nowrap; }
-.tab-close { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 7px; opacity: .55; }
+.tab-close { display: grid; place-items: center; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 7px; color: inherit; background: transparent; opacity: .55; }
 .tab-close:hover, .tab-close:focus-visible { background: rgba(88, 58, 30, .1); opacity: 1; outline: none; }
 .tab-loading { position: absolute; left: 15px; bottom: 0; width: 36%; height: 2px; border-radius: 999px; background: var(--amber); animation: tab-progress 1s ease-in-out infinite alternate; }
 @keyframes tab-progress { to { left: 58%; } }
@@ -226,4 +227,3 @@ button { color: inherit; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; }
 }
-

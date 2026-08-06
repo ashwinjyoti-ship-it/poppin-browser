@@ -1,4 +1,4 @@
-import { protocol } from 'electron';
+import { protocol, type Session } from 'electron';
 
 import { escapeHtml } from './safe-html';
 
@@ -11,8 +11,9 @@ export function registerInternalScheme(): void {
   ]);
 }
 
-export function handleInternalPages(): void {
-  protocol.handle('poppin', (request) => {
+export function handleInternalPages(browserSession: Session): void {
+  if (browserSession.protocol.isProtocolHandled('poppin')) return;
+  browserSession.protocol.handle('poppin', (request) => {
     const url = new URL(request.url);
     if (url.hostname === 'error') {
       return htmlResponse(renderErrorPage(url));
@@ -106,4 +107,3 @@ function pageShell(content: string, title: string): string {
     <body>${content}</body>
   </html>`;
 }
-

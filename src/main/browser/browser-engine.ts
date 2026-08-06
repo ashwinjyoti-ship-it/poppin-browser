@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import {
+  app,
   BrowserWindow,
   type Input,
   type Rectangle,
@@ -150,7 +151,7 @@ export class BrowserEngine {
         sandbox: true,
         webSecurity: true,
         allowRunningInsecureContent: false,
-        devTools: !this.window.isDestroyed() && !this.window.webContents.isDestroyed(),
+        devTools: !app.isPackaged,
       },
     });
     view.setBorderRadius(18);
@@ -172,7 +173,7 @@ export class BrowserEngine {
     this.window.contentView.addChildView(view);
     this.attachTabEvents(record);
     this.activateTab(id);
-    void view.webContents.loadURL(initialUrl);
+    void view.webContents.loadURL(initialUrl).catch(() => undefined);
 
     if (focusAddress && initialUrl === NEW_TAB_URL) {
       this.window.webContents.send(BROWSER_CHANNELS.focusAddress);
@@ -187,6 +188,12 @@ export class BrowserEngine {
     contents.setWindowOpenHandler(({ url }) => {
       this.createTab(url, randomUUID(), false);
       return { action: 'deny' };
+    });
+    contents.on('will-navigate', (event, url) => {
+      const protocol = safeProtocol(url);
+      if (protocol !== 'http:' && protocol !== 'https:' && protocol !== 'poppin:') {
+        event.preventDefault();
+      }
     });
     contents.on('before-input-event', (event, input) => {
       if (this.handleShortcut(input)) event.preventDefault();
@@ -281,8 +288,14 @@ export class BrowserEngine {
     const normalized = normalizeAddressInput(input);
     if (normalized.kind === 'invalid') return { ok: false, message: normalized.message };
     tab.snapshot.failure = null;
-    await tab.view.webContents.loadURL(normalized.url);
-    return { ok: true };
+    try {
+      await tab.view.webContents.loadURL(normalized.url);
+      return { ok: true };
+    } catch {
+      return tab.snapshot.failure
+        ? { ok: true }
+        : { ok: false, message: 'Poppin could not open that page.' };
+    }
   }
 
   private goBack(tabId: string): BrowserCommandResult {
@@ -338,5 +351,13 @@ export class BrowserEngine {
       height: Math.max(1, height - CHROME_HEIGHT - PAGE_MARGIN),
     };
     for (const tab of this.tabs.values()) tab.view.setBounds(bounds);
+  }
+}
+
+function safeProtocol(value: string): string {
+  try {
+    return new URL(value).protocol;
+  } catch {
+    return '';
   }
 }
