@@ -12,11 +12,44 @@ export interface WorkspaceRecordSnapshot {
 
 export interface WorkspaceSnapshot {
   workspace: WorkspaceRecordSnapshot | null;
+  documents: WorkspaceDocumentSnapshot[];
+  tabContexts: TabContextSnapshot[];
+}
+
+export interface WorkspaceDocumentSnapshot {
+  id: string;
+  name: string;
+  path: string;
+  sizeBytes: number;
+  selected: boolean;
+  capturedText: string | null;
+  truncated: boolean;
+}
+
+export interface TabContextSnapshot {
+  tabId: string;
+  title: string;
+  url: string;
+  capturedText: string;
+  truncated: boolean;
+  capturedAt: string;
+}
+
+export interface CapturedTabContext {
+  title: string;
+  url: string;
+  text: string;
+  truncated: boolean;
 }
 
 export type WorkspaceCommand =
   | { type: 'createWorkspace'; name: string }
-  | { type: 'renameWorkspace'; name: string };
+  | { type: 'renameWorkspace'; name: string }
+  | { type: 'chooseDocuments' }
+  | { type: 'removeDocument'; documentId: string }
+  | { type: 'setDocumentSelected'; documentId: string; selected: boolean }
+  | { type: 'setTabSelected'; tabId: string; selected: boolean }
+  | { type: 'refreshTabContext'; tabId: string };
 
 export interface WorkspaceCommandResult {
   ok: boolean;

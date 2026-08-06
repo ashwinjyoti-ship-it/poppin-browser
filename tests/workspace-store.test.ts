@@ -16,12 +16,35 @@ describe('workspace store', () => {
 
     expect(store.getWorkspace()).toBeNull();
     expect(store.createWorkspace('Launch site')).toMatchObject({ id: 'primary', name: 'Launch site' });
+    store.upsertDocument({
+      id: 'doc-one',
+      name: 'brief.md',
+      path: '/tmp/brief.md',
+      sizeBytes: 20,
+      capturedText: null,
+      truncated: false,
+    });
+    expect(store.setDocumentContext('doc-one', true, 'Visible brief', false)).toBe(true);
+    store.upsertTabContext({
+      tabId: 'tab-one',
+      title: 'Example',
+      url: 'https://example.com/',
+      capturedText: 'Visible page',
+      truncated: false,
+      capturedAt: '2026-08-06T00:00:00.000Z',
+    });
     store.renameWorkspace('Calm launch');
     expect(store.getWorkspace()).toMatchObject({ id: 'primary', name: 'Calm launch' });
     store.close();
 
     const restored = new WorkspaceStore(filePath);
     expect(restored.getWorkspace()).toMatchObject({ id: 'primary', name: 'Calm launch' });
+    expect(restored.listDocuments()).toEqual([
+      expect.objectContaining({ id: 'doc-one', selected: true, capturedText: 'Visible brief' }),
+    ]);
+    expect(restored.listTabContexts()).toEqual([
+      expect.objectContaining({ tabId: 'tab-one', capturedText: 'Visible page' }),
+    ]);
     restored.close();
   });
 });

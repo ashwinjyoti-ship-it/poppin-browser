@@ -6,9 +6,10 @@ import { Brand } from './Brand';
 import { BrowserToolbar } from './BrowserToolbar';
 import { TabStrip } from './TabStrip';
 import { WorkspacePane } from './WorkspacePane';
+import { ContextPane } from './ContextPane';
 
 const EMPTY_SNAPSHOT: BrowserSnapshot = { tabs: [], activeTabId: '' };
-const EMPTY_WORKSPACE: WorkspaceSnapshot = { workspace: null };
+const EMPTY_WORKSPACE: WorkspaceSnapshot = { workspace: null, documents: [], tabContexts: [] };
 
 export function App() {
   const [snapshot, setSnapshot] = useState<BrowserSnapshot>(EMPTY_SNAPSHOT);
@@ -17,6 +18,7 @@ export function App() {
   const [isEditingAddress, setIsEditingAddress] = useState(false);
   const [workspaceSnapshot, setWorkspaceSnapshot] = useState<WorkspaceSnapshot>(EMPTY_WORKSPACE);
   const [workspaceCollapsed, setWorkspaceCollapsed] = useState(false);
+  const [contextCollapsed, setContextCollapsed] = useState(false);
   const addressInputRef = useRef<HTMLInputElement>(null);
 
   const activeTab = snapshot.tabs.find((tab) => tab.id === snapshot.activeTabId) ?? null;
@@ -48,10 +50,10 @@ export function App() {
     void window.poppinBrowser.command({
       type: 'setLayout',
       leftInset: workspaceCollapsed ? 46 : 300,
-      rightInset: 0,
+      rightInset: contextCollapsed ? 46 : 330,
       bottomInset: 0,
     });
-  }, [workspaceCollapsed]);
+  }, [contextCollapsed, workspaceCollapsed]);
 
   const sendCommand = async (command: BrowserCommand) => {
     try {
@@ -121,10 +123,18 @@ export function App() {
       <WorkspacePane
         collapsed={workspaceCollapsed}
         snapshot={workspaceSnapshot}
+        tabs={snapshot.tabs}
         onCollapseChange={setWorkspaceCollapsed}
         onCreate={(name) => sendWorkspaceCommand({ type: 'createWorkspace', name })}
+        onCommand={(command) => { void sendWorkspaceCommand(command); }}
       />
-      <div className={`browser-stage ${workspaceCollapsed ? 'workspace-collapsed' : ''}`} aria-hidden="true" />
+      <ContextPane
+        collapsed={contextCollapsed}
+        snapshot={workspaceSnapshot}
+        onCollapseChange={setContextCollapsed}
+        onRefreshTab={(tabId) => { void sendWorkspaceCommand({ type: 'refreshTabContext', tabId }); }}
+      />
+      <div className={`browser-stage ${workspaceCollapsed ? 'workspace-collapsed' : ''} ${contextCollapsed ? 'context-collapsed' : ''}`} aria-hidden="true" />
     </main>
   );
 }

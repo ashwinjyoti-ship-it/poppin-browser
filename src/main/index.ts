@@ -61,7 +61,7 @@ async function createWindow(): Promise<void> {
 
   browserEngine = new BrowserEngine(mainWindow, browserSession, stateStore, getWindowState);
   if (!workspaceStore) throw new Error('Workspace storage is not ready.');
-  workspaceEngine = new WorkspaceEngine(mainWindow, workspaceStore);
+  workspaceEngine = new WorkspaceEngine(mainWindow, workspaceStore, browserEngine);
   browserEngine.restore(
     persisted
       ? { tabs: persisted.tabs, activeTabId: persisted.activeTabId }
@@ -111,7 +111,7 @@ app.whenReady().then(async () => {
   });
   ipcMain.handle(WORKSPACE_CHANNELS.getSnapshot, (event) => {
     if (!isTrustedShellSender(event.sender)) throw new Error('Untrusted workspace snapshot request.');
-    return workspaceEngine?.getSnapshot() ?? { workspace: null };
+    return workspaceEngine?.getSnapshot() ?? { workspace: null, documents: [], tabContexts: [] };
   });
   ipcMain.handle(WORKSPACE_CHANNELS.command, (event, command: WorkspaceCommand) => {
     if (!isTrustedShellSender(event.sender)) throw new Error('Untrusted workspace command.');

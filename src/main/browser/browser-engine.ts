@@ -21,11 +21,13 @@ import {
 import { errorPageUrl } from './internal-pages';
 import { BrowserStateStore } from './state-store';
 import { displayUrl, NEW_TAB_URL, normalizeAddressInput } from './url-input';
+import type { CapturedTabContext } from '../../shared/workspace';
 
 const PAGE_MARGIN = 12;
 const CHROME_HEIGHT = 140;
 const SAVE_DELAY_MS = 250;
 const MAX_LAYOUT_INSET = 520;
+const MAX_TAB_CONTEXT_CHARACTERS = 60_000;
 
 interface BrowserTabRecord {
   view: WebContentsView;
@@ -75,6 +77,33 @@ export class BrowserEngine {
       tabs: Array.from(this.tabs.values(), ({ snapshot }) => ({ ...snapshot })),
       activeTabId: this.activeTabId,
     };
+  }
+
+  async captureTabContext(tabId: string): Promise<CapturedTabContext | null> {
+    const tab = this.tabs.get(tabId);
+    if (!tab || tab.view.webContents.isDestroyed()) return null;
+    const currentUrl = tab.view.webContents.getURL();
+    if (!currentUrl.startsWith('http://') && !currentUrl.startsWith('https://')) return null;
+    try {
+      const captured = await tab.view.webContents.executeJavaScript(`(() => {
+        const text = document.body?.innerText ?? '';
+        return {
+          title: document.title || location.hostname,
+          url: location.href,
+          text: text.slice(0, ${MAX_TAB_CONTEXT_CHARACTERS + 1})
+        };
+      })()`);
+      if (!isCapturedPage(captured)) return null;
+      const normalizedText = captured.text.replace(/\r\n/g, '\n').trim();
+      return {
+        title: captured.title.slice(0, 300),
+        url: captured.url,
+        text: normalizedText.slice(0, MAX_TAB_CONTEXT_CHARACTERS),
+        truncated: normalizedText.length > MAX_TAB_CONTEXT_CHARACTERS,
+      };
+    } catch {
+      return null;
+    }
   }
 
   async execute(command: BrowserCommand): Promise<BrowserCommandResult> {
@@ -364,6 +393,12 @@ export class BrowserEngine {
 
 function clampInset(value: number): number {
   return Number.isFinite(value) ? Math.min(MAX_LAYOUT_INSET, Math.max(0, Math.round(value))) : 0;
+}
+
+function isCapturedPage(value: unknown): value is { title: string; url: string; text: string } {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as Record<string, unknown>;
+  return typeof candidate.title === 'string' && typeof candidate.url === 'string' && typeof candidate.text === 'string';
 }
 
 function safeProtocol(value: string): string {
