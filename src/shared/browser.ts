@@ -34,7 +34,8 @@ export type BrowserCommand =
   | { type: 'navigate'; tabId: string; input: string }
   | { type: 'back'; tabId: string }
   | { type: 'forward'; tabId: string }
-  | { type: 'reload'; tabId: string };
+  | { type: 'reload'; tabId: string }
+  | { type: 'setLayout'; leftInset: number; rightInset: number; bottomInset: number };
 
 export interface BrowserCommandResult {
   ok: boolean;
@@ -68,4 +69,3 @@ export interface PoppinBrowserApi {
   subscribe: (listener: (snapshot: BrowserSnapshot) => void) => () => void;
   onFocusAddress: (listener: () => void) => () => void;
 }
-

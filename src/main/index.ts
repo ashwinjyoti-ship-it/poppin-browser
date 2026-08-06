@@ -1,3 +1,5 @@
+import path from 'node:path';
+
 import { app, BrowserWindow, ipcMain, Menu, screen, session } from 'electron';
 
 import {
@@ -9,11 +11,16 @@ import { BrowserEngine } from './browser/browser-engine';
 import { handleInternalPages, registerInternalScheme } from './browser/internal-pages';
 import { BrowserStateStore } from './browser/state-store';
 import { clampWindowState, DEFAULT_WINDOW_STATE } from './browser/window-state';
+import { WORKSPACE_CHANNELS, type WorkspaceCommand } from '../shared/workspace';
+import { WorkspaceEngine } from './workspace/workspace-engine';
+import { WorkspaceStore } from './workspace/workspace-store';
 
 registerInternalScheme();
 
 let mainWindow: BrowserWindow | null = null;
 let browserEngine: BrowserEngine | null = null;
+let workspaceEngine: WorkspaceEngine | null = null;
+let workspaceStore: WorkspaceStore | null = null;
 
 async function createWindow(): Promise<void> {
   const stateStore = new BrowserStateStore(app.getPath('userData'));
@@ -53,6 +60,8 @@ async function createWindow(): Promise<void> {
   };
 
   browserEngine = new BrowserEngine(mainWindow, browserSession, stateStore, getWindowState);
+  if (!workspaceStore) throw new Error('Workspace storage is not ready.');
+  workspaceEngine = new WorkspaceEngine(mainWindow, workspaceStore);
   browserEngine.restore(
     persisted
       ? { tabs: persisted.tabs, activeTabId: persisted.activeTabId }
@@ -71,6 +80,7 @@ async function createWindow(): Promise<void> {
   mainWindow.on('closed', () => {
     mainWindow = null;
     browserEngine = null;
+    workspaceEngine = null;
   });
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   mainWindow.webContents.on('will-navigate', (event) => event.preventDefault());
@@ -90,6 +100,7 @@ function isTrustedShellSender(sender: Electron.WebContents): boolean {
 
 app.whenReady().then(async () => {
   Menu.setApplicationMenu(null);
+  workspaceStore = new WorkspaceStore(path.join(app.getPath('userData'), 'poppin.sqlite'));
   ipcMain.handle(BROWSER_CHANNELS.getSnapshot, (event) => {
     if (!isTrustedShellSender(event.sender)) throw new Error('Untrusted browser snapshot request.');
     return browserEngine?.getSnapshot();
@@ -97,6 +108,14 @@ app.whenReady().then(async () => {
   ipcMain.handle(BROWSER_CHANNELS.command, (event, command: BrowserCommand) => {
     if (!isTrustedShellSender(event.sender)) throw new Error('Untrusted browser command.');
     return browserEngine?.execute(command) ?? { ok: false, message: 'Browser is not ready.' };
+  });
+  ipcMain.handle(WORKSPACE_CHANNELS.getSnapshot, (event) => {
+    if (!isTrustedShellSender(event.sender)) throw new Error('Untrusted workspace snapshot request.');
+    return workspaceEngine?.getSnapshot() ?? { workspace: null };
+  });
+  ipcMain.handle(WORKSPACE_CHANNELS.command, (event, command: WorkspaceCommand) => {
+    if (!isTrustedShellSender(event.sender)) throw new Error('Untrusted workspace command.');
+    return workspaceEngine?.execute(command) ?? { ok: false, message: 'Workspace is not ready.' };
   });
 
   const browsingSession = session.fromPartition('persist:poppin-browser');
@@ -115,6 +134,11 @@ app.on('before-quit', (event) => {
   const engine = browserEngine;
   browserEngine = null;
   void engine.flush().finally(() => app.quit());
+});
+
+app.on('quit', () => {
+  workspaceStore?.close();
+  workspaceStore = null;
 });
 
 app.on('window-all-closed', () => {

@@ -209,12 +209,79 @@ button { color: inherit; }
 .browser-stage {
   position: absolute;
   z-index: 1;
-  inset: 128px 10px 10px;
+  inset: 128px 10px 10px 310px;
   border: 1px solid rgba(226, 216, 204, .9);
   border-radius: 20px;
   background: var(--surface);
   box-shadow: 0 14px 42px rgba(65, 44, 20, .075), 0 2px 8px rgba(65, 44, 20, .035);
 }
+
+.browser-stage.workspace-collapsed { left: 56px; }
+
+.side-pane,
+.side-rail {
+  position: absolute;
+  z-index: 3;
+  top: 140px;
+  bottom: 12px;
+  border: 1px solid rgba(226, 216, 204, .92);
+  background: rgba(255, 253, 249, .94);
+  box-shadow: 0 12px 34px rgba(65, 44, 20, .06);
+  -webkit-app-region: no-drag;
+}
+
+.workspace-pane {
+  left: 12px;
+  width: 286px;
+  padding: 20px;
+  border-radius: 18px;
+}
+
+.side-rail-left {
+  left: 12px;
+  width: 34px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 0;
+  border-radius: 14px;
+  color: #8a7966;
+}
+
+.pane-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.eyebrow {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--amber);
+  font-size: 10px;
+  font-weight: 720;
+  letter-spacing: .13em;
+  text-transform: uppercase;
+}
+
+.pane-heading h2 { margin: 0; font-size: 19px; line-height: 1.2; letter-spacing: -.035em; }
+.pane-toggle { display: grid; place-items: center; width: 30px; height: 30px; padding: 0; border: 0; border-radius: 9px; color: #786f66; background: rgba(112, 83, 48, .06); }
+.pane-toggle:hover { background: rgba(112, 83, 48, .11); }
+
+.workspace-create { display: flex; flex-direction: column; gap: 11px; margin-top: 32px; }
+.workspace-create p, .workspace-empty-state p { margin: 0; color: var(--text-muted); font-size: 13px; line-height: 1.55; }
+.workspace-create label { margin-top: 8px; color: #655d55; font-size: 12px; font-weight: 620; }
+.workspace-create input { height: 40px; padding: 0 12px; border: 1px solid var(--border); border-radius: 11px; outline: 0; background: var(--surface); }
+.workspace-create input:focus { border-color: #dc9a4f; box-shadow: 0 0 0 3px rgba(232, 130, 11, .12); }
+.form-error { color: var(--error); font-size: 12px; }
+.primary-button { min-height: 40px; padding: 0 15px; border: 0; border-radius: 11px; color: white; background: var(--amber-strong); font-weight: 650; box-shadow: 0 8px 18px rgba(206, 122, 26, .18); }
+.primary-button:disabled { opacity: .55; }
+
+.workspace-empty-state { display: flex; flex-direction: column; align-items: flex-start; margin-top: 36px; }
+.workspace-empty-state h3 { margin: 16px 0 7px; font-size: 15px; letter-spacing: -.02em; }
+.workspace-mark { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 13px; color: var(--amber); background: var(--amber-soft); }
 
 @media (max-width: 1080px) {
   .browser-chrome { padding-left: 86px; }

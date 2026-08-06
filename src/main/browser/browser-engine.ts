@@ -25,6 +25,7 @@ import { displayUrl, NEW_TAB_URL, normalizeAddressInput } from './url-input';
 const PAGE_MARGIN = 12;
 const CHROME_HEIGHT = 140;
 const SAVE_DELAY_MS = 250;
+const MAX_LAYOUT_INSET = 520;
 
 interface BrowserTabRecord {
   view: WebContentsView;
@@ -42,6 +43,7 @@ export class BrowserEngine {
   private activeTabId = '';
   private saveTimer: NodeJS.Timeout | null = null;
   private isClosing = false;
+  private viewInsets = { left: 0, right: 0, bottom: 0 };
 
   constructor(
     private readonly window: BrowserWindow,
@@ -92,6 +94,14 @@ export class BrowserEngine {
         return this.goForward(command.tabId);
       case 'reload':
         return this.reload(command.tabId);
+      case 'setLayout':
+        this.viewInsets = {
+          left: clampInset(command.leftInset),
+          right: clampInset(command.rightInset),
+          bottom: clampInset(command.bottomInset),
+        };
+        this.layoutViews();
+        return { ok: true };
     }
   }
 
@@ -343,13 +353,17 @@ export class BrowserEngine {
     if (this.window.isDestroyed()) return;
     const [width = 1, height = 1] = this.window.getContentSize();
     const bounds: Rectangle = {
-      x: PAGE_MARGIN,
+      x: PAGE_MARGIN + this.viewInsets.left,
       y: CHROME_HEIGHT,
-      width: Math.max(1, width - PAGE_MARGIN * 2),
-      height: Math.max(1, height - CHROME_HEIGHT - PAGE_MARGIN),
+      width: Math.max(1, width - PAGE_MARGIN * 2 - this.viewInsets.left - this.viewInsets.right),
+      height: Math.max(1, height - CHROME_HEIGHT - PAGE_MARGIN - this.viewInsets.bottom),
     };
     for (const tab of this.tabs.values()) tab.view.setBounds(bounds);
   }
+}
+
+function clampInset(value: number): number {
+  return Number.isFinite(value) ? Math.min(MAX_LAYOUT_INSET, Math.max(0, Math.round(value))) : 0;
 }
 
 function safeProtocol(value: string): string {
