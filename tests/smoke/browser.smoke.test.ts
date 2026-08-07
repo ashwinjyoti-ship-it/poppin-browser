@@ -95,6 +95,14 @@ describe('packaged browser workflow', () => {
     await expect.poll(() => newTabPage!.getByRole('heading', { name: /where would you like to go/i }).isVisible()).toBe(true);
 
     const address = shell.getByLabel('Address and search');
+    const workspaceDivider = shell.getByRole('separator', { name: 'Resize workspace pane' });
+    const initialWorkspaceWidth = Number(await workspaceDivider.getAttribute('aria-valuenow'));
+    const initialBrowserX = await activeBrowserViewX(application);
+    await workspaceDivider.press('Shift+ArrowRight');
+    const resizedWorkspaceWidth = initialWorkspaceWidth + 24;
+    await expect.poll(() => workspaceDivider.getAttribute('aria-valuenow')).toBe(String(resizedWorkspaceWidth));
+    await expect.poll(() => activeBrowserViewX(application!)).toBe(initialBrowserX + 24);
+
     await address.fill(origin);
     await address.press('Enter');
     await expect.poll(() => pageInfo(application!, origin)).toMatchObject({
@@ -143,6 +151,7 @@ describe('packaged browser workflow', () => {
 
     ({ app: application, shell } = await launch(userDataPath));
     await expect.poll(() => shell.getByRole('tab').count()).toBe(2);
+    await expect.poll(() => shell.getByRole('separator', { name: 'Resize workspace pane' }).getAttribute('aria-valuenow')).toBe(String(resizedWorkspaceWidth));
     await expect.poll(() => shell.getByLabel('Workspace').getByRole('heading', { name: 'Launch workspace' }).isVisible()).toBe(true);
     const cookies = await application.evaluate(async ({ session }, fixtureOrigin) => {
       return session.fromPartition('persist:poppin-browser').cookies.get({ url: fixtureOrigin });
@@ -152,3 +161,11 @@ describe('packaged browser workflow', () => {
     );
   });
 });
+
+async function activeBrowserViewX(app: ElectronApplication): Promise<number> {
+  return app.evaluate(({ BrowserWindow }) => {
+    const window = BrowserWindow.getAllWindows()[0];
+    const child = window?.contentView.children.find((view) => view.getVisible());
+    return child?.getBounds().x ?? -1;
+  });
+}
