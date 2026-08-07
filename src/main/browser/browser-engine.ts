@@ -28,6 +28,7 @@ import {
 } from '../../shared/browser';
 import { errorPageUrl } from './internal-pages';
 import { BrowserStateStore } from './state-store';
+import { normalizeTabOrder } from './tab-model';
 import { displayUrl, NEW_TAB_URL, normalizeAddressInput, normalizeTabInput, TASK_RESULT_URL } from './url-input';
 import type { CapturedTabContext } from '../../shared/workspace';
 import type { VisualSelectionSnapshot } from '../../shared/workspace';
@@ -337,6 +338,8 @@ export class BrowserEngine {
         return this.toggleGroup(command.groupId);
       case 'renameGroup':
         return this.renameGroup(command.groupId, command.name);
+      case 'setGroupColor':
+        return this.setGroupColor(command.groupId, command.color);
       case 'showTabMenu':
         return this.showTabMenu(command.tabId);
       case 'showGroupMenu':
@@ -685,7 +688,7 @@ export class BrowserEngine {
     const beforeIndex = beforeTabId ? remaining.indexOf(beforeTabId) : -1;
     const insertionIndex = beforeIndex >= 0 ? beforeIndex : remaining.length;
     remaining.splice(insertionIndex, 0, tabId);
-    this.tabOrder = normalizePinnedOrder(remaining, this.tabs);
+    this.tabOrder = this.normalizeTabOrder(remaining);
     this.cleanupEmptyGroups();
     this.emitSnapshot();
     this.scheduleSave();
@@ -698,7 +701,7 @@ export class BrowserEngine {
     tab.snapshot.pinned = !tab.snapshot.pinned;
     if (tab.snapshot.pinned) tab.snapshot.groupId = null;
     this.cleanupEmptyGroups();
-    this.tabOrder = normalizePinnedOrder(this.tabOrder, this.tabs);
+    this.tabOrder = this.normalizeTabOrder();
     this.emitSnapshot();
     this.scheduleSave();
     return { ok: true };
@@ -718,7 +721,7 @@ export class BrowserEngine {
     tab.snapshot.pinned = false;
     tab.snapshot.groupId = id;
     this.cleanupEmptyGroups();
-    this.tabOrder = normalizePinnedOrder(this.tabOrder, this.tabs);
+    this.tabOrder = this.normalizeTabOrder();
     this.emitSnapshot();
     this.scheduleSave();
     return { ok: true };
@@ -738,7 +741,7 @@ export class BrowserEngine {
       this.tabOrder.splice(lastGroupIndex + 1, 0, tabId);
     }
     this.cleanupEmptyGroups();
-    this.tabOrder = normalizePinnedOrder(this.tabOrder, this.tabs);
+    this.tabOrder = this.normalizeTabOrder();
     this.emitSnapshot();
     this.scheduleSave();
     return { ok: true };
@@ -758,6 +761,15 @@ export class BrowserEngine {
     const normalized = name.trim().slice(0, 32);
     if (!group || !normalized) return { ok: false, message: 'Enter a name for this tab group.' };
     group.name = normalized;
+    this.emitSnapshot();
+    this.scheduleSave();
+    return { ok: true };
+  }
+
+  private setGroupColor(groupId: string, color: BrowserGroupColor): BrowserCommandResult {
+    const group = this.groups.get(groupId);
+    if (!group || !GROUP_COLORS.includes(color)) return { ok: false, message: 'That tab group or color is no longer available.' };
+    group.color = color;
     this.emitSnapshot();
     this.scheduleSave();
     return { ok: true };
@@ -795,6 +807,16 @@ export class BrowserEngine {
     if (!group) return { ok: false, message: 'That tab group is no longer available.' };
     Menu.buildFromTemplate([
       { label: group.collapsed ? 'Expand Group' : 'Collapse Group', click: () => this.toggleGroup(groupId) },
+      {
+        label: 'Group Color',
+        submenu: GROUP_COLORS.map((color) => ({
+          label: color[0]!.toUpperCase() + color.slice(1),
+          type: 'radio',
+          checked: group.color === color,
+          click: () => this.setGroupColor(groupId, color),
+        })),
+      },
+      { type: 'separator' },
       { label: 'Ungroup Tabs', click: () => this.removeGroup(groupId) },
       { label: 'Close Group', click: () => this.closeGroup(groupId) },
     ]).popup({ window: this.window });
@@ -818,7 +840,11 @@ export class BrowserEngine {
       const activeIndex = this.tabOrder.indexOf(this.activeTabId);
       this.tabOrder.splice(activeIndex >= 0 ? activeIndex + 1 : this.tabOrder.length, 0, id);
     }
-    this.tabOrder = normalizePinnedOrder(this.tabOrder, this.tabs);
+    this.tabOrder = this.normalizeTabOrder();
+  }
+
+  private normalizeTabOrder(order: string[] = this.tabOrder): string[] {
+    return normalizeTabOrder(order, (id) => this.tabs.get(id)?.snapshot);
   }
 
   private closeOtherTabs(tabId: string): void {
@@ -950,16 +976,6 @@ function isSupportedFaviconUrl(value: string): boolean {
   } catch {
     return false;
   }
-}
-
-function normalizePinnedOrder(order: string[], tabs: Map<string, BrowserTabRecord>): string[] {
-  const pinned: string[] = [];
-  const regular: string[] = [];
-  for (const id of order) {
-    if (tabs.get(id)?.snapshot.pinned) pinned.push(id);
-    else regular.push(id);
-  }
-  return [...pinned, ...regular];
 }
 
 function sanitizeBrowserSettings(settings: BrowserSettings): BrowserSettings {

@@ -81,6 +81,7 @@ export type BrowserCommand =
   | { type: 'moveToGroup'; tabId: string; groupId: string | null }
   | { type: 'toggleGroup'; groupId: string }
   | { type: 'renameGroup'; groupId: string; name: string }
+  | { type: 'setGroupColor'; groupId: string; color: BrowserGroupColor }
   | { type: 'showTabMenu'; tabId: string }
   | { type: 'showGroupMenu'; groupId: string }
   | { type: 'updateSettings'; settings: Partial<BrowserSettings> }
