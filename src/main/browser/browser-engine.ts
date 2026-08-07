@@ -46,6 +46,7 @@ export class BrowserEngine {
   private activeTabId = '';
   private saveTimer: NodeJS.Timeout | null = null;
   private isClosing = false;
+  private htmlFullscreenTabId: string | null = null;
   private viewInsets = { top: DEFAULT_CHROME_HEIGHT, left: 0, right: 0, bottom: 0 };
 
   constructor(
@@ -55,6 +56,11 @@ export class BrowserEngine {
     private readonly getWindowState: () => WindowState,
   ) {
     this.window.on('resize', () => this.layoutViews());
+    this.window.on('enter-full-screen', () => this.layoutViews());
+    this.window.on('leave-full-screen', () => {
+      this.htmlFullscreenTabId = null;
+      this.layoutViews();
+    });
     this.window.on('closed', () => {
       this.isClosing = true;
       if (this.saveTimer) clearTimeout(this.saveTimer);
@@ -78,6 +84,12 @@ export class BrowserEngine {
       tabs: Array.from(this.tabs.values(), ({ snapshot }) => ({ ...snapshot })),
       activeTabId: this.activeTabId,
     };
+  }
+
+  openExternalUrl(url: string): void {
+    const normalized = normalizeAddressInput(url);
+    if (normalized.kind !== 'url') return;
+    this.createTab(normalized.url, randomUUID(), false);
   }
 
   async captureTabContext(tabId: string): Promise<CapturedTabContext | null> {
@@ -240,6 +252,17 @@ export class BrowserEngine {
     });
     contents.on('before-input-event', (event, input) => {
       if (this.handleShortcut(input)) event.preventDefault();
+    });
+    contents.on('enter-html-full-screen', () => {
+      this.htmlFullscreenTabId = tab.snapshot.id;
+      this.window.setFullScreen(true);
+      this.layoutViews();
+    });
+    contents.on('leave-html-full-screen', () => {
+      if (this.htmlFullscreenTabId !== tab.snapshot.id) return;
+      this.htmlFullscreenTabId = null;
+      this.window.setFullScreen(false);
+      this.layoutViews();
     });
     contents.on('did-start-loading', () => this.updateTab(tab, { isLoading: true, failure: null }));
     contents.on('did-stop-loading', () => {
@@ -405,13 +428,17 @@ export class BrowserEngine {
   private layoutViews(): void {
     if (this.window.isDestroyed()) return;
     const [width = 1, height = 1] = this.window.getContentSize();
+    const isHtmlFullscreen = this.htmlFullscreenTabId === this.activeTabId;
     const bounds: Rectangle = {
-      x: PAGE_MARGIN + this.viewInsets.left,
-      y: this.viewInsets.top,
-      width: Math.max(1, width - PAGE_MARGIN * 2 - this.viewInsets.left - this.viewInsets.right),
-      height: Math.max(1, height - this.viewInsets.top - PAGE_MARGIN - this.viewInsets.bottom),
+      x: isHtmlFullscreen ? 0 : PAGE_MARGIN + this.viewInsets.left,
+      y: isHtmlFullscreen ? 0 : this.viewInsets.top,
+      width: isHtmlFullscreen ? width : Math.max(1, width - PAGE_MARGIN * 2 - this.viewInsets.left - this.viewInsets.right),
+      height: isHtmlFullscreen ? height : Math.max(1, height - this.viewInsets.top - PAGE_MARGIN - this.viewInsets.bottom),
     };
-    for (const tab of this.tabs.values()) tab.view.setBounds(bounds);
+    for (const tab of this.tabs.values()) {
+      tab.view.setBounds(bounds);
+      tab.view.setBorderRadius(isHtmlFullscreen && tab.snapshot.id === this.activeTabId ? 0 : 18);
+    }
   }
 }
 

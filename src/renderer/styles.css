@@ -25,7 +25,7 @@ button, input, select, textarea { font: inherit; }
 button { color: inherit; }
 
 .app-shell {
-  --chrome-height: 152px;
+  --chrome-height: 132px;
   --workspace-pane-width: 286px;
   --context-pane-width: 316px;
   position: relative;
@@ -41,7 +41,7 @@ button { color: inherit; }
   position: relative;
   z-index: 2;
   height: var(--chrome-height);
-  padding: 14px 24px 0 92px;
+  padding: 10px 24px 0 92px;
   -webkit-app-region: drag;
 }
 
@@ -49,7 +49,7 @@ button { color: inherit; }
   display: grid;
   grid-template-columns: 178px minmax(460px, 1fr);
   align-items: center;
-  min-height: 55px;
+  min-height: 50px;
   gap: 22px;
 }
 
@@ -215,12 +215,12 @@ button { color: inherit; }
 .tab-row {
   display: flex;
   align-items: end;
-  height: 82px;
+  height: 72px;
   margin-left: 32px;
   gap: 12px;
   -webkit-app-region: no-drag;
 }
-.tab-strip { display: flex; min-width: 0; max-width: calc(100% - 64px); gap: 12px; overflow-x: auto; padding: 16px 3px 0; scrollbar-width: none; }
+.tab-strip { display: flex; min-width: 0; max-width: calc(100% - 64px); gap: 10px; overflow-x: auto; padding: 10px 3px 0; scrollbar-width: none; }
 .tab-strip::-webkit-scrollbar { display: none; }
 .tab {
   position: relative;
@@ -228,14 +228,14 @@ button { color: inherit; }
   grid-template-columns: 18px minmax(70px, 1fr) 22px;
   align-items: center;
   gap: 8px;
-  flex: 0 1 250px;
-  min-width: 170px;
-  max-width: 280px;
-  height: 58px;
-  padding: 0 12px 0 16px;
+  flex: 0 1 230px;
+  min-width: 154px;
+  max-width: 260px;
+  height: 48px;
+  padding: 0 10px 0 13px;
   overflow: hidden;
   border: 1px solid rgba(226, 215, 202, .86);
-  border-radius: 16px 16px 4px 4px;
+  border-radius: 14px 14px 4px 4px;
   color: #625b53;
   background: rgba(255, 252, 247, .58);
   box-shadow: 0 4px 14px rgba(67, 45, 20, .035);
@@ -256,12 +256,12 @@ button { color: inherit; }
 .tab-active::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: var(--amber-strong); }
 .tab-icon { display: grid; place-items: center; width: 19px; height: 19px; color: #9b6b32; }
 .tab-icon img { display: block; width: 18px; height: 18px; border-radius: 4px; object-fit: contain; }
-.tab-title { overflow: hidden; font-size: 13px; font-weight: 570; text-overflow: ellipsis; white-space: nowrap; }
-.tab-close { display: grid; place-items: center; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 7px; color: inherit; background: transparent; opacity: .55; }
+.tab-title { overflow: hidden; font-size: 12px; font-weight: 570; text-overflow: ellipsis; white-space: nowrap; }
+.tab-close { display: grid; place-items: center; width: 20px; height: 20px; padding: 0; border: 0; border-radius: 7px; color: inherit; background: transparent; opacity: .55; }
 .tab-close:hover, .tab-close:focus-visible { background: rgba(88, 58, 30, .1); opacity: 1; outline: none; }
 .tab-loading { position: absolute; left: 15px; bottom: 0; width: 36%; height: 2px; border-radius: 999px; background: var(--amber); animation: tab-progress 1s ease-in-out infinite alternate; }
 @keyframes tab-progress { to { left: 58%; } }
-.new-tab-button { flex: 0 0 auto; width: 42px; height: 42px; margin-bottom: 8px; border: 1px solid rgba(228, 217, 204, .7); border-radius: 13px; background: rgba(255, 252, 247, .58); }
+.new-tab-button { flex: 0 0 auto; width: 38px; height: 38px; margin-bottom: 6px; border: 1px solid rgba(228, 217, 204, .7); border-radius: 12px; background: rgba(255, 252, 247, .58); }
 
 .browser-stage {
   position: absolute;
@@ -538,8 +538,8 @@ body.pane-is-resizing * { cursor: col-resize !important; user-select: none !impo
   .command-bar { grid-template-columns: 38px 80px 140px 98px minmax(180px, 1fr) 42px 25px; gap: 7px; }
 }
 
-.chrome-compact .browser-chrome { padding: 8px 20px 0 88px; }
-.chrome-compact .top-row { grid-template-columns: 158px minmax(420px, 1fr); min-height: 44px; gap: 16px; }
+.chrome-compact .browser-chrome { padding: 7px 20px 0 88px; }
+.chrome-compact .top-row { grid-template-columns: 158px minmax(420px, 1fr); min-height: 41px; gap: 16px; }
 .chrome-compact .brand { gap: 6px; }
 .chrome-compact .brand-orbit { margin-right: -4px; transform: scale(.86); transform-origin: left center; }
 .chrome-compact .brand-name { font-size: 15px; }
@@ -549,15 +549,15 @@ body.pane-is-resizing * { cursor: col-resize !important; user-select: none !impo
 .chrome-compact .address-form input { font-size: 13px; }
 .chrome-compact .address-error { top: 42px; font-size: 11px; }
 .chrome-compact .google-sign-in-help { top: 40px; min-height: 68px; padding-top: 8px; padding-bottom: 8px; }
-.chrome-compact .tab-row { height: 72px; margin-left: 22px; gap: 9px; }
-.chrome-compact .tab-strip { max-width: calc(100% - 54px); gap: 9px; padding-top: 10px; }
+.chrome-compact .tab-row { height: 64px; margin-left: 22px; gap: 8px; }
+.chrome-compact .tab-strip { max-width: calc(100% - 54px); gap: 8px; padding-top: 7px; }
 .chrome-compact .tab {
   grid-template-columns: 17px minmax(62px, 1fr) 20px;
   gap: 7px;
-  flex-basis: 220px;
-  min-width: 150px;
-  max-width: 240px;
-  height: 50px;
+  flex-basis: 205px;
+  min-width: 142px;
+  max-width: 230px;
+  height: 44px;
   padding: 0 9px 0 13px;
   border-radius: 14px 14px 4px 4px;
 }
@@ -569,8 +569,8 @@ body.pane-is-resizing * { cursor: col-resize !important; user-select: none !impo
 .chrome-compact .tab-active:hover { transform: translateY(-2px); }
 .chrome-compact .new-tab-button { width: 38px; height: 38px; margin-bottom: 7px; border-radius: 12px; }
 
-.chrome-dense .browser-chrome { padding: 7px 16px 0 80px; }
-.chrome-dense .top-row { grid-template-columns: 138px minmax(390px, 1fr); min-height: 40px; gap: 10px; }
+.chrome-dense .browser-chrome { padding: 6px 16px 0 80px; }
+.chrome-dense .top-row { grid-template-columns: 138px minmax(390px, 1fr); min-height: 37px; gap: 10px; }
 .chrome-dense .brand { gap: 3px; }
 .chrome-dense .brand-orbit { margin-right: -7px; transform: scale(.78); transform-origin: left center; }
 .chrome-dense .brand-name { font-size: 14px; }
@@ -584,15 +584,15 @@ body.pane-is-resizing * { cursor: col-resize !important; user-select: none !impo
 .chrome-dense .google-sign-in-help { top: 37px; grid-template-columns: 18px minmax(0, 1fr) auto 22px; width: min(560px, calc(100vw - 170px)); min-height: 60px; padding: 7px 8px 7px 10px; }
 .chrome-dense .google-sign-in-help p { font-size: 9px; line-height: 1.3; }
 .chrome-dense .google-sign-in-fallback { min-height: 28px; padding: 0 8px; font-size: 9px; }
-.chrome-dense .tab-row { height: 61px; margin-left: 14px; gap: 7px; }
-.chrome-dense .tab-strip { max-width: calc(100% - 46px); gap: 7px; padding-top: 7px; }
+.chrome-dense .tab-row { height: 55px; margin-left: 14px; gap: 7px; }
+.chrome-dense .tab-strip { max-width: calc(100% - 46px); gap: 7px; padding-top: 5px; }
 .chrome-dense .tab {
   grid-template-columns: 16px minmax(56px, 1fr) 18px;
   gap: 6px;
-  flex-basis: 190px;
-  min-width: 136px;
-  max-width: 210px;
-  height: 44px;
+  flex-basis: 182px;
+  min-width: 130px;
+  max-width: 202px;
+  height: 40px;
   padding: 0 8px 0 11px;
   border-radius: 12px 12px 3px 3px;
 }

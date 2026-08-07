@@ -12,6 +12,7 @@ const config: ForgeConfig = {
   packagerConfig: {
     asar: true,
     icon: './src/renderer/assets/poppin-app-icon',
+    protocols: [{ name: 'Poppin Browser', schemes: ['http', 'https'] }],
   },
   makers: [
     new MakerZIP({}, ['darwin']),

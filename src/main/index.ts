@@ -10,6 +10,7 @@ import {
 import { BrowserEngine } from './browser/browser-engine';
 import { handleInternalPages, registerInternalScheme } from './browser/internal-pages';
 import { BrowserStateStore } from './browser/state-store';
+import { isAllowedBrowsingPermission } from './browser/permissions';
 import { clampWindowState, DEFAULT_WINDOW_STATE } from './browser/window-state';
 import { WORKSPACE_CHANNELS, type WorkspaceCommand } from '../shared/workspace';
 import { WorkspaceEngine } from './workspace/workspace-engine';
@@ -27,6 +28,15 @@ let workspaceEngine: WorkspaceEngine | null = null;
 let workspaceStore: WorkspaceStore | null = null;
 let taskEngine: TaskEngine | null = null;
 let taskStore: TaskStore | null = null;
+const pendingExternalUrls: string[] = [];
+
+function openExternalUrl(url: string): void {
+  if (browserEngine) {
+    browserEngine.openExternalUrl(url);
+  } else {
+    pendingExternalUrls.push(url);
+  }
+}
 
 async function createWindow(): Promise<void> {
   const stateStore = new BrowserStateStore(app.getPath('userData'));
@@ -76,6 +86,7 @@ async function createWindow(): Promise<void> {
       ? { tabs: persisted.tabs, activeTabId: persisted.activeTabId }
       : null,
   );
+  for (const url of pendingExternalUrls.splice(0)) openExternalUrl(url);
 
   mainWindow.webContents.on('before-input-event', (event, input) => {
     if (browserEngine?.handleShortcut(input)) event.preventDefault();
@@ -144,13 +155,20 @@ app.whenReady().then(async () => {
   });
 
   const browsingSession = session.fromPartition('persist:poppin-browser');
-  browsingSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
-  browsingSession.setPermissionCheckHandler(() => false);
+  browsingSession.setPermissionRequestHandler((_contents, permission, callback) => {
+    callback(isAllowedBrowsingPermission(permission));
+  });
+  browsingSession.setPermissionCheckHandler((_contents, permission) => isAllowedBrowsingPermission(permission));
 
   await createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) void createWindow();
   });
+});
+
+app.on('open-url', (event, url) => {
+  event.preventDefault();
+  openExternalUrl(url);
 });
 
 app.on('before-quit', (event) => {

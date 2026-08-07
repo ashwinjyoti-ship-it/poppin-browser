@@ -6,9 +6,9 @@ export interface ChromeLayout {
 }
 
 const CHROME_LAYOUTS: Record<ChromeDensity, ChromeLayout> = {
-  roomy: { density: 'roomy', height: 152 },
-  compact: { density: 'compact', height: 124 },
-  dense: { density: 'dense', height: 108 },
+  roomy: { density: 'roomy', height: 132 },
+  compact: { density: 'compact', height: 112 },
+  dense: { density: 'dense', height: 98 },
 };
 
 export function getChromeLayout(viewportWidth: number, viewportHeight: number): ChromeLayout {

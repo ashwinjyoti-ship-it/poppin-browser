@@ -104,5 +104,6 @@ Launch the configured preview process, open its URL in the centre browser, show 
 - **2026-08-07:** Apple Passwords remains outside the credential boundary. Electron cannot load Apple's arbitrary browser extension, and direct Keychain password access is rejected. Signed, device-bound Touch ID WebAuthn is documented as a separate future browser capability.
 - **2026-08-07:** Hands-on testing adds persistent resizing for both workspace panes and a Google Accounts sign-in fallback. Poppin never imports authenticated sessions from other browsers or applications; it helps the user choose Google's alternate method and then preserves the successful login in its own browser session.
 - **2026-08-07:** Laptop testing makes browser chrome responsive to usable window dimensions. Roomy, compact, and dense modes keep the native page viewport aligned while reducing logo, toolbar, and tab height on constrained screens.
+- **2026-08-07:** Browser feedback adds website fullscreen support, compact tabs at every window size, and standard `http`/`https` registration so the user can choose Poppin as the macOS default browser.
 
 Future decisions should be added here only after an approved phase boundary or meaningful user feedback.

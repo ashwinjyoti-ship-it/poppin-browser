@@ -28,6 +28,11 @@ beforeEach(async () => {
       response.end("<!doctype html><title>Redirecting</title><script>location.replace('/second')</script>");
       return;
     }
+    if (route === '/fullscreen') {
+      response.end(`<!doctype html><title>Fullscreen fixture</title>
+        <button id="enter" onclick="document.documentElement.requestFullscreen()">Enter fullscreen</button>`);
+      return;
+    }
     response.setHeader('Set-Cookie', 'poppin-session=restored; Path=/; SameSite=Lax');
     response.end(`<!doctype html>
       <title>Local fixture</title>
@@ -112,6 +117,24 @@ describe('packaged browser workflow', () => {
       node: 'undefined',
       bridge: 'undefined',
     });
+
+    await address.fill(`${origin}/fullscreen`);
+    await address.press('Enter');
+    await expect.poll(() => exactPageInfo(application!, `${origin}/fullscreen`)).toMatchObject({ title: 'Fullscreen fixture' });
+    await application.evaluate(async ({ webContents }, targetUrl) => {
+      const contents = webContents.getAllWebContents().find((candidate) => candidate.getURL() === targetUrl);
+      await contents?.executeJavaScript("document.querySelector('#enter').click()");
+    }, `${origin}/fullscreen`);
+    await expect.poll(() => application!.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.isFullScreen())).toBe(true);
+    await expect.poll(async () => {
+      const bounds = await activeBrowserViewBounds(application!);
+      return bounds.x === 0 && bounds.y === 0;
+    }).toBe(true);
+    await application.evaluate(async ({ webContents }, targetUrl) => {
+      const contents = webContents.getAllWebContents().find((candidate) => candidate.getURL() === targetUrl);
+      await contents?.executeJavaScript('document.exitFullscreen()');
+    }, `${origin}/fullscreen`);
+    await expect.poll(() => application!.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.isFullScreen())).toBe(false);
 
     const workspace = shell.getByLabel('Workspace');
     await workspace.getByLabel('Workspace name').fill('Launch workspace');
