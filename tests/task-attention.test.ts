@@ -14,7 +14,7 @@ const TASK_SNAPSHOT: TaskSnapshot = {
 };
 
 const BROWSER_AGENT_SNAPSHOT: BrowserAgentSnapshot = {
-  state: 'idle', taskId: null, allowedTabIds: [], activeTabId: null, currentAction: null, pendingApproval: null, log: [],
+  state: 'idle', taskId: null, taskSpace: null, watching: false, allowedTabIds: [], activeTabId: null, currentAction: null, pendingApproval: null, log: [],
 };
 
 describe('task attention', () => {
@@ -39,5 +39,10 @@ describe('task attention', () => {
       state: 'needs-approval',
       pendingApproval: { actionId: 'action-7', title: 'Submit form', target: 'Send', scope: 'Selected tab', consequence: 'Sends data' },
     })).toBe('browser:action-7');
+    expect(browserApprovalAttentionKey({
+      ...BROWSER_AGENT_SNAPSHOT,
+      state: 'paused',
+      taskSpace: { id: 'space-1', taskId: 'task-1', name: 'Login', owner: 'user', status: 'user-controlling', tabIds: ['tab-1'], activeTabId: 'tab-1', createdAt: '2026-08-07T12:00:00Z', updatedAt: '2026-08-07T12:02:00Z', kept: false },
+    })).toBe('takeover:2026-08-07T12:02:00Z');
   });
 });

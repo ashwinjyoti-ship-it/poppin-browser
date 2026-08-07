@@ -67,7 +67,7 @@ export function normalizePersistedBrowserState(value: unknown): PersistedBrowser
   if (candidate.version === 1) {
     return {
       version: 2,
-      tabs: candidate.tabs.map((tab) => ({ ...(tab as PersistedTabState), pinned: false, groupId: null })),
+      tabs: candidate.tabs.map((tab) => ({ ...(tab as PersistedTabState), pinned: false, groupId: null, taskSpaceId: null })),
       groups: [],
       activeTabId: candidate.activeTabId,
       settings: { ...DEFAULT_BROWSER_SETTINGS },
@@ -84,7 +84,12 @@ export function normalizePersistedBrowserState(value: unknown): PersistedBrowser
     version: 2,
     tabs: candidate.tabs.map((value) => {
       const tab = value as PersistedTabState;
-      return { ...tab, pinned: tab.pinned === true, groupId: tab.groupId ?? null };
+      return {
+        ...tab,
+        pinned: tab.pinned === true,
+        groupId: tab.groupId ?? null,
+        ...(Object.hasOwn(tab, 'taskSpaceId') ? { taskSpaceId: tab.taskSpaceId ?? null } : {}),
+      };
     }),
     groups,
     activeTabId: candidate.activeTabId,
@@ -99,7 +104,8 @@ function isPersistedTab(value: unknown): value is PersistedTabState {
   return typeof tab.id === 'string'
     && typeof tab.url === 'string'
     && (tab.pinned === undefined || typeof tab.pinned === 'boolean')
-    && (tab.groupId === undefined || tab.groupId === null || typeof tab.groupId === 'string');
+    && (tab.groupId === undefined || tab.groupId === null || typeof tab.groupId === 'string')
+    && (tab.taskSpaceId === undefined || tab.taskSpaceId === null || typeof tab.taskSpaceId === 'string');
 }
 
 function isBrowserTabGroup(value: unknown): value is BrowserTabGroup {

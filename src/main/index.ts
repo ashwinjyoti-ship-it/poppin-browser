@@ -22,6 +22,7 @@ import { TASK_CHANNELS, type TaskCommand } from '../shared/task';
 import { TaskEngine } from './task/task-engine';
 import { TaskStore } from './task/task-store';
 import { BrowserAgentEngine } from './browser/browser-agent-engine';
+import { BrowserAgentStateStore } from './browser/browser-agent-state-store';
 import { BROWSER_AGENT_CHANNELS, type BrowserAgentCommand } from '../shared/browser-agent';
 import { PreviewEngine } from './project/preview-engine';
 import { showEditContextMenu } from './browser/context-menu';
@@ -93,7 +94,7 @@ async function createWindow(): Promise<void> {
   workspaceEngine = new WorkspaceEngine(mainWindow, workspaceStore, browserEngine, git);
   browserAgentEngine = new BrowserAgentEngine(mainWindow, browserEngine, (tabId, content) => {
     workspaceEngine?.updateTabContextFromAgent(tabId, content);
-  });
+  }, new BrowserAgentStateStore(app.getPath('userData')));
   if (!taskStore) throw new Error('Task storage is not ready.');
   const workDirectory = path.join(app.getPath('userData'), 'task-output');
   await mkdir(workDirectory, { recursive: true });
@@ -102,7 +103,10 @@ async function createWindow(): Promise<void> {
     onResultReady: () => {
       browserEngine?.openTaskResult();
     },
-    onTaskEnded: () => browserAgentEngine?.complete(),
+    onTaskEnded: (outcome) => {
+      if (outcome === 'completed') browserAgentEngine?.complete();
+      else void browserAgentEngine?.execute({ type: 'stop' });
+    },
     onOpenPreview: async (project) => {
       await previewEngine?.start(project.repositoryPath, project.devCommand);
       browserEngine?.openExternalUrl(project.previewUrl);
@@ -121,13 +125,14 @@ async function createWindow(): Promise<void> {
       return result.filePath;
     },
     getBrowserAgentSnapshot: () => browserAgentEngine?.getSnapshot() ?? {
-      state: 'idle', taskId: null, allowedTabIds: [], activeTabId: null, currentAction: null, pendingApproval: null, log: [],
+      state: 'idle', taskId: null, taskSpace: null, watching: false, allowedTabIds: [], activeTabId: null, currentAction: null, pendingApproval: null, log: [],
     },
     executeBrowserAgentCommand: async (command) => browserAgentEngine?.execute(command) ?? {
       ok: false, message: 'Controlled browser use is not ready.',
     },
   });
   browserEngine.restore(persisted);
+  await browserAgentEngine.restore();
   for (const url of pendingExternalUrls.splice(0)) openExternalUrl(url);
 
   mainWindow.webContents.on('before-input-event', (event, input) => {
@@ -215,13 +220,15 @@ app.whenReady().then(async () => {
   ipcMain.handle(BROWSER_AGENT_CHANNELS.getSnapshot, (event) => {
     if (!isTrustedShellSender(event.sender)) throw new Error('Untrusted browser-agent snapshot request.');
     return browserAgentEngine?.getSnapshot() ?? {
-      state: 'idle', taskId: null, allowedTabIds: [], activeTabId: null, currentAction: null, pendingApproval: null, log: [],
+      state: 'idle', taskId: null, taskSpace: null, watching: false, allowedTabIds: [], activeTabId: null, currentAction: null, pendingApproval: null, log: [],
     };
   });
   ipcMain.handle(BROWSER_AGENT_CHANNELS.command, async (event, command: BrowserAgentCommand) => {
     if (!isTrustedShellSender(event.sender)) throw new Error('Untrusted browser-agent command.');
     const result = await (browserAgentEngine?.execute(command) ?? Promise.resolve({ ok: false, message: 'Controlled browser use is not ready.' }));
-    taskEngine?.resolveBrowserToolApproval(command, result);
+    taskEngine?.resolveBrowserToolApproval(command, ['takeOver', 'pause', 'stop'].includes(command.type) && result.ok
+      ? { ok: false, message: 'Browser control changed before the pending action could run.' }
+      : result);
     return result;
   });
 
@@ -251,7 +258,7 @@ app.on('before-quit', (event) => {
   browserEngine = null;
   taskEngine = null;
   previewEngine = null;
-  void Promise.all([engine?.flush(), codex?.close(), preview?.stop()]).finally(() => app.quit());
+  void Promise.all([engine?.flush(), browserAgentEngine?.flush(), codex?.close(), preview?.stop()]).finally(() => app.quit());
 });
 
 app.on('quit', () => {

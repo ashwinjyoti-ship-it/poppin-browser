@@ -29,7 +29,7 @@ const EMPTY_SNAPSHOT: BrowserSnapshot = {
 };
 const EMPTY_WORKSPACE: WorkspaceSnapshot = { workspace: null, documents: [], tabContexts: [], project: null, visualSelection: null };
 const EMPTY_TASK: TaskSnapshot = { connection: { state: 'checking', message: 'Connecting to Codex…', accountLabel: null, models: [] }, task: null };
-const EMPTY_BROWSER_AGENT: BrowserAgentSnapshot = { state: 'idle', taskId: null, allowedTabIds: [], activeTabId: null, currentAction: null, pendingApproval: null, log: [] };
+const EMPTY_BROWSER_AGENT: BrowserAgentSnapshot = { state: 'idle', taskId: null, taskSpace: null, watching: false, allowedTabIds: [], activeTabId: null, currentAction: null, pendingApproval: null, log: [] };
 
 export function App() {
   const [snapshot, setSnapshot] = useState<BrowserSnapshot>(EMPTY_SNAPSHOT);
@@ -49,6 +49,7 @@ export function App() {
   const addressInputRef = useRef<HTMLInputElement>(null);
 
   const activeTab = snapshot.tabs.find((tab) => tab.id === snapshot.activeTabId) ?? null;
+  const visibleTabs = snapshot.tabs.filter((tab) => !tab.taskSpaceId || (browserAgentSnapshot.watching && tab.taskSpaceId === browserAgentSnapshot.taskSpace?.id));
   const address = isEditingAddress ? addressDraft : activeTab?.url ?? '';
   const addressError = visibleAddressIssue(addressIssue, activeTab);
   const chromeLayout = getChromeLayout(viewport.width, viewport.height);
@@ -217,7 +218,7 @@ export function App() {
           />
         </div>
         <TabStrip
-          tabs={snapshot.tabs}
+          tabs={visibleTabs}
           groups={snapshot.groups}
           activeTabId={snapshot.activeTabId}
           onActivate={(tabId) => void sendCommand({ type: 'activate', tabId })}
@@ -228,12 +229,15 @@ export function App() {
           onToggleGroup={(groupId) => void sendCommand({ type: 'toggleGroup', groupId })}
           onRenameGroup={(groupId, name) => void sendCommand({ type: 'renameGroup', groupId, name })}
           onShowGroupMenu={(groupId) => void sendCommand({ type: 'showGroupMenu', groupId })}
+          agentTaskSpace={browserAgentSnapshot.taskSpace}
+          watchingAgentTabs={browserAgentSnapshot.watching}
+          onWatchAgentTabs={() => { void sendBrowserAgentCommand({ type: 'watch' }); }}
         />
       </header>
       <WorkspacePane
         collapsed={workspaceCollapsed}
         snapshot={workspaceSnapshot}
-        tabs={snapshot.tabs}
+        tabs={snapshot.tabs.filter((tab) => !tab.taskSpaceId)}
         onCollapseChange={setWorkspaceCollapsed}
         onCreate={(name) => sendWorkspaceCommand({ type: 'createWorkspace', name })}
         onCommand={sendWorkspaceCommand}
@@ -274,7 +278,7 @@ export function App() {
         />
       ) : null}
       <div className={`browser-stage ${workspaceCollapsed ? 'workspace-collapsed' : ''} ${visibleContextCollapsed ? 'context-collapsed' : ''}`} aria-hidden="true" />
-      <CommandBar snapshot={taskSnapshot} workspace={workspaceSnapshot} collapsed={commandCollapsed} onCollapseChange={setCommandCollapsed} onCommand={sendTaskCommand} onBrowserAgentCommand={sendBrowserAgentCommand} />
+      <CommandBar snapshot={taskSnapshot} workspace={workspaceSnapshot} collapsed={commandCollapsed} onCollapseChange={setCommandCollapsed} onCommand={sendTaskCommand} />
     </main>
   );
 }

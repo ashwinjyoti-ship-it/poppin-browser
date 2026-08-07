@@ -9,5 +9,7 @@ export function taskAttentionKey(snapshot: TaskSnapshot): string | null {
 }
 
 export function browserApprovalAttentionKey(snapshot: BrowserAgentSnapshot): string | null {
-  return snapshot.pendingApproval ? `browser:${snapshot.pendingApproval.actionId}` : null;
+  if (snapshot.pendingApproval) return `browser:${snapshot.pendingApproval.actionId}`;
+  if (snapshot.taskSpace?.status === 'user-controlling') return `takeover:${snapshot.taskSpace.updatedAt}`;
+  return null;
 }
