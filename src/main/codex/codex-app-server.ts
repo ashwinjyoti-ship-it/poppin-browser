@@ -8,6 +8,7 @@ import {
   isRpcNotification,
   isRpcServerRequest,
   type CodexAccount,
+  type CodexDynamicToolSpec,
   type CodexModel,
   type CodexThread,
   type CodexTurn,
@@ -86,6 +87,7 @@ export class CodexAppServer extends EventEmitter<CodexAppServerEvents> {
     cwd: string;
     model: string;
     developerInstructions: string;
+    dynamicTools?: CodexDynamicToolSpec[];
   }): Promise<CodexThread> {
     const response = await this.request<{ thread: CodexThread }>('thread/start', {
       model: params.model,
@@ -96,6 +98,7 @@ export class CodexAppServer extends EventEmitter<CodexAppServerEvents> {
       sandbox: 'workspace-write',
       serviceName: 'poppin-browser',
       developerInstructions: params.developerInstructions,
+      dynamicTools: params.dynamicTools ?? null,
       ephemeral: false,
     }, 60_000);
     return response.thread;

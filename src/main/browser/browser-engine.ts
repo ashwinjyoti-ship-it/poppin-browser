@@ -158,6 +158,11 @@ export class BrowserEngine {
     return Boolean(tab && !tab.view.webContents.isDestroyed());
   }
 
+  describeTab(tabId: string): string {
+    const tab = this.tabs.get(tabId);
+    return tab ? `${tab.snapshot.title} — ${tab.snapshot.url}` : 'Selected browser tab';
+  }
+
   activateTabForAgent(tabId: string): boolean {
     return this.activateTab(tabId).ok;
   }
@@ -180,16 +185,12 @@ export class BrowserEngine {
       const text = (element.innerText || element.getAttribute('aria-label') || element.getAttribute('title') || '').trim().slice(0, 240);
       const href = element instanceof HTMLAnchorElement ? element.href : element.closest('a')?.href || '';
       const form = element.closest('form');
-      const isSubmit = (element instanceof HTMLButtonElement && (!element.type || element.type === 'submit'))
-        || (element instanceof HTMLInputElement && ['submit', 'image'].includes(element.type));
       const credential = /password|passkey|credential|one[-_ ]?time|otp|verification[-_ ]?code/i.test(descriptor)
         || input?.type === 'password';
       let consequential = null;
       const signal = [text, href, form?.action || '', descriptor].join(' ');
-      if (element.hasAttribute('download') || /\\b(download|upload|purchase|pay|buy|delete|remove|publish|send|submit|sign[- ]?in|log[- ]?in|merge|create (?:pull request|record))\\b/i.test(signal)) {
+      if (element.hasAttribute('download') || /\\b(download|upload|purchase|pay|buy|delete|trash|discard|publish|send|submit|sign[- ]?in|log[- ]?in|merge|create (?:pull request|record)|remove (?:account|message|draft|file|record|item))\\b/i.test(signal)) {
         consequential = 'This action may cause an external or irreversible effect.';
-      } else if (isSubmit || (actionType === 'click' && form)) {
-        consequential = 'This action may submit a form.';
       }
       return { credential, consequential, target: text || href || element.tagName.toLowerCase() };
     })()`.replace('actionType', JSON.stringify(action.type)), true);
@@ -228,8 +229,16 @@ export class BrowserEngine {
           if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLElement && element.isContentEditable)) return false;
           const descriptor = [element.id, element.getAttribute('name'), element.getAttribute('aria-label'), element.getAttribute('autocomplete'), element instanceof HTMLInputElement ? element.type : ''].filter(Boolean).join(' ');
           if (/password|passkey|credential|one[-_ ]?time|otp|verification[-_ ]?code/i.test(descriptor)) return 'credential';
-          if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) element.value = ${JSON.stringify(action.text)};
-          else element.textContent = ${JSON.stringify(action.text)};
+          element.focus();
+          if (element instanceof HTMLInputElement) {
+            const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+            setter?.call(element, ${JSON.stringify(action.text)});
+          } else if (element instanceof HTMLTextAreaElement) {
+            const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+            setter?.call(element, ${JSON.stringify(action.text)});
+          } else {
+            element.textContent = ${JSON.stringify(action.text)};
+          }
           element.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: ${JSON.stringify(action.text)} }));
           element.dispatchEvent(new Event('change', { bubbles: true }));
           return true;
@@ -241,6 +250,11 @@ export class BrowserEngine {
       case 'scroll':
         await contents.executeJavaScript(`window.scrollBy({ top: ${Math.max(-4000, Math.min(4000, Math.round(action.deltaY)))}, behavior: 'smooth' })`, true);
         return `Scrolled ${Math.round(action.deltaY)} pixels`;
+      case 'wait': {
+        const milliseconds = Math.max(100, Math.min(5_000, Math.round(action.milliseconds)));
+        await new Promise((resolve) => setTimeout(resolve, milliseconds));
+        return `Waited ${milliseconds} milliseconds`;
+      }
       case 'search':
         contents.findInPage(action.text, { findNext: false, forward: true });
         return `Searched the visible page for “${action.text}”`;
@@ -1018,6 +1032,7 @@ function agentActionTarget(action: BrowserAgentAction): string {
   if ('url' in action) return action.url;
   if ('text' in action) return action.text;
   if ('deltaY' in action) return `${action.deltaY}px`;
+  if ('milliseconds' in action) return `${action.milliseconds}ms`;
   return 'visible page';
 }
 
@@ -1025,7 +1040,32 @@ const READ_VISIBLE_PAGE_SCRIPT = `(() => {
   const clone = document.body?.cloneNode(true);
   if (!(clone instanceof HTMLElement)) return '';
   clone.querySelectorAll('input, textarea, select, option, [contenteditable], script, style, noscript').forEach((element) => element.remove());
-  return (clone.innerText || '').replace(/\\n{3,}/g, '\\n\\n').trim().slice(0, 60000);
+  const pageText = (clone.innerText || '').replace(/\\n{3,}/g, '\\n\\n').trim().slice(0, 50000);
+  document.querySelectorAll('[data-poppin-agent-id]').forEach((element) => element.removeAttribute('data-poppin-agent-id'));
+  const candidates = Array.from(document.querySelectorAll('a[href], button, input:not([type="hidden"]), textarea, select, [contenteditable="true"], [role="button"], [role="link"], [role="menuitem"], [role="option"], [tabindex]'));
+  const interactive = [];
+  for (const element of candidates) {
+    if (!(element instanceof HTMLElement) || interactive.length >= 240) continue;
+    const rect = element.getBoundingClientRect();
+    const style = getComputedStyle(element);
+    if (rect.width < 1 || rect.height < 1 || style.display === 'none' || style.visibility === 'hidden') continue;
+    if ('disabled' in element && element.disabled) continue;
+    const descriptor = [
+      element.id, element.getAttribute('name'), element.getAttribute('aria-label'), element.getAttribute('autocomplete'),
+      element instanceof HTMLInputElement ? element.type : '', element.getAttribute('role')
+    ].filter(Boolean).join(' ');
+    if (/password|passkey|credential|one[-_ ]?time|otp|verification[-_ ]?code/i.test(descriptor)) continue;
+    const label = (element.innerText || element.getAttribute('aria-label') || element.getAttribute('title') || element.getAttribute('placeholder') || element.getAttribute('name') || '').replace(/\\s+/g, ' ').trim().slice(0, 180);
+    const agentId = 'poppin-' + interactive.length;
+    element.setAttribute('data-poppin-agent-id', agentId);
+    interactive.push({
+      selector: '[data-poppin-agent-id="' + agentId + '"]',
+      label: label || element.tagName.toLowerCase(),
+      role: element.getAttribute('role') || element.tagName.toLowerCase(),
+      editable: element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element.isContentEditable
+    });
+  }
+  return JSON.stringify({ url: location.href, title: document.title, pageText, interactive });
 })()`;
 
 const CAPTURE_TRANSCRIPT_SCRIPT = `(async () => {

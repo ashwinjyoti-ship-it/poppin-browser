@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -247,6 +247,26 @@ describe('Codex controls', () => {
     expect(onCommand).toHaveBeenCalledWith({
       type: 'startTask', prompt: 'Make the button amber', model: 'gpt-test', reasoningEffort: 'high', kind: 'code',
     });
+  });
+
+  it('starts requested browser work directly and reserves approval for critical actions', async () => {
+    const user = userEvent.setup();
+    const onCommand = vi.fn().mockResolvedValue({ ok: true });
+    const onBrowserAgentCommand = vi.fn().mockResolvedValue({ ok: true, data: 'Visible mail page' });
+    const workspace: WorkspaceSnapshot = {
+      ...EMPTY_WORKSPACE,
+      workspace: { id: 'primary', name: 'Fixture', createdAt: '' },
+      tabContexts: [{ tabId: 'mail-tab', title: 'Inbox', url: 'https://mail.example.com', capturedText: 'A message', truncated: false, capturedAt: '' }],
+    };
+    render(<CommandBar snapshot={READY_TASK} workspace={workspace} collapsed={false} onCollapseChange={vi.fn()} onCommand={onCommand} onBrowserAgentCommand={onBrowserAgentCommand} />);
+    await user.type(screen.getByRole('textbox', { name: /prompt/i }), 'Use browser use and draft and save a reply');
+    await user.click(screen.getByRole('button', { name: /send to codex/i }));
+    await waitFor(() => expect(onCommand).toHaveBeenCalledWith({
+      type: 'startTask', prompt: 'Use browser use and draft and save a reply', model: 'gpt-test', reasoningEffort: 'high', kind: 'work',
+    }));
+    expect(screen.queryByRole('region', { name: /task preflight/i })).not.toBeInTheDocument();
+    expect(onBrowserAgentCommand).toHaveBeenNthCalledWith(1, { type: 'start', taskId: expect.stringMatching(/^preflight-/), tabIds: ['mail-tab'] });
+    expect(onBrowserAgentCommand).toHaveBeenNthCalledWith(2, { type: 'act', tabId: 'mail-tab', action: { type: 'read' } });
   });
 
   it('shows exactly what an approval will allow', async () => {

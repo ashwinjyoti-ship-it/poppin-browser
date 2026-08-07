@@ -38,6 +38,14 @@ beforeEach(async () => {
         <button id="enter" onclick="document.documentElement.requestFullscreen()">Enter fullscreen</button>`);
       return;
     }
+    if (route === '/agent') {
+      response.end(`<!doctype html><title>Browser agent fixture</title>
+        <h1>Draft a reply</h1>
+        <textarea id="draft" aria-label="Reply body"></textarea>
+        <button id="save" type="button" onclick="document.body.dataset.saved='true'">Save draft</button>
+        <button id="send" type="button" onclick="document.body.dataset.sent='true'">Send reply</button>`);
+      return;
+    }
     response.setHeader('Set-Cookie', 'poppin-session=restored; Path=/; SameSite=Lax');
     response.end(`<!doctype html>
       <link rel="icon" href="/favicon.svg">
@@ -199,6 +207,28 @@ describe('packaged browser workflow', () => {
     const context = shell.getByLabel('Context');
     await expect.poll(() => context.getByText('Local fixture', { exact: true }).count()).toBeGreaterThan(0);
     await expect.poll(() => context.locator('pre').first().textContent()).toContain('Open popup');
+
+    await address.fill(`${origin}/agent`);
+    await address.press('Enter');
+    await expect.poll(() => exactPageInfo(application!, `${origin}/agent`)).toMatchObject({ title: 'Browser agent fixture' });
+    const agentTabId = await shell.evaluate(async () => (await window.poppinBrowser.getSnapshot()).activeTabId);
+    expect(await shell.evaluate((tabId) => window.poppinBrowserAgent.command({ type: 'start', taskId: 'smoke-browser-task', tabIds: [tabId] }), agentTabId)).toMatchObject({ ok: true });
+    const readResult = await shell.evaluate((tabId) => window.poppinBrowserAgent.command({ type: 'act', tabId, action: { type: 'read' } }), agentTabId);
+    expect(readResult).toMatchObject({ ok: true, data: expect.stringContaining('[data-poppin-agent-id=') });
+    expect(await shell.evaluate((tabId) => window.poppinBrowserAgent.command({ type: 'act', tabId, action: { type: 'type', selector: '#draft', text: 'A saved reply' } }), agentTabId)).toMatchObject({ ok: true });
+    expect(await shell.evaluate((tabId) => window.poppinBrowserAgent.command({ type: 'act', tabId, action: { type: 'click', selector: '#save' } }), agentTabId)).toMatchObject({ ok: true });
+    await expect.poll(() => application!.evaluate(async ({ webContents }, targetUrl) => {
+      const contents = webContents.getAllWebContents().find((candidate) => candidate.getURL() === targetUrl);
+      return contents?.executeJavaScript(`({ draft: document.querySelector('#draft')?.value, saved: document.body.dataset.saved })`);
+    }, `${origin}/agent`)).toEqual({ draft: 'A saved reply', saved: 'true' });
+    expect(await shell.evaluate((tabId) => window.poppinBrowserAgent.command({ type: 'act', tabId, action: { type: 'click', selector: '#send' } }), agentTabId)).toEqual({ ok: false, message: 'Approval required.' });
+    await expect.poll(() => shell.getByLabel('Browser action approval required').isVisible()).toBe(true);
+    await shell.getByLabel('Browser action approval required').getByRole('button', { name: 'Reject' }).click();
+    await expect.poll(() => application!.evaluate(async ({ webContents }, targetUrl) => {
+      const contents = webContents.getAllWebContents().find((candidate) => candidate.getURL() === targetUrl);
+      return contents?.executeJavaScript('document.body.dataset.sent || null');
+    }, `${origin}/agent`)).toBeNull();
+    expect(await shell.evaluate(() => window.poppinBrowserAgent.command({ type: 'stop' }))).toMatchObject({ ok: true });
 
     await address.fill(`${origin}/client-redirect`);
     await address.press('Enter');

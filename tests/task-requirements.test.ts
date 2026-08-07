@@ -20,5 +20,8 @@ describe('task capability inference', () => {
 
   it('detects requests for visible browser use', () => {
     expect(inferTaskRequirements('Research this using the approved tabs and browse the sources.', false).browserUse).toBe(true);
+    expect(inferTaskRequirements('Draft an email reply and save the draft.', false)).toMatchObject({
+      kind: 'work', browserUse: true, consequentialActions: [],
+    });
   });
 });

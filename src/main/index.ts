@@ -120,6 +120,12 @@ async function createWindow(): Promise<void> {
       await writeFile(result.filePath, task.result, 'utf8');
       return result.filePath;
     },
+    getBrowserAgentSnapshot: () => browserAgentEngine?.getSnapshot() ?? {
+      state: 'idle', taskId: null, allowedTabIds: [], activeTabId: null, currentAction: null, pendingApproval: null, log: [],
+    },
+    executeBrowserAgentCommand: async (command) => browserAgentEngine?.execute(command) ?? {
+      ok: false, message: 'Controlled browser use is not ready.',
+    },
   });
   browserEngine.restore(persisted);
   for (const url of pendingExternalUrls.splice(0)) openExternalUrl(url);
@@ -212,9 +218,11 @@ app.whenReady().then(async () => {
       state: 'idle', taskId: null, allowedTabIds: [], activeTabId: null, currentAction: null, pendingApproval: null, log: [],
     };
   });
-  ipcMain.handle(BROWSER_AGENT_CHANNELS.command, (event, command: BrowserAgentCommand) => {
+  ipcMain.handle(BROWSER_AGENT_CHANNELS.command, async (event, command: BrowserAgentCommand) => {
     if (!isTrustedShellSender(event.sender)) throw new Error('Untrusted browser-agent command.');
-    return browserAgentEngine?.execute(command) ?? { ok: false, message: 'Controlled browser use is not ready.' };
+    const result = await (browserAgentEngine?.execute(command) ?? Promise.resolve({ ok: false, message: 'Controlled browser use is not ready.' }));
+    taskEngine?.resolveBrowserToolApproval(command, result);
+    return result;
   });
 
   const browsingSession = session.fromPartition('persist:poppin-browser');

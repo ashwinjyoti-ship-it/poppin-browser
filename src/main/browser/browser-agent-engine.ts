@@ -16,6 +16,7 @@ const AUTH_URL = /\b(sign[-_ ]?in|log[-_ ]?in|authenticate|oauth|passkey|passwor
 
 export interface BrowserAgentPageController {
   hasTab(tabId: string): boolean;
+  describeTab?(tabId: string): string;
   activateTabForAgent(tabId: string): boolean;
   inspectAction(tabId: string, action: BrowserAgentAction): Promise<{ credential: boolean; consequential: string | null; target: string }>;
   performAction(tabId: string, action: BrowserAgentAction): Promise<string>;
@@ -145,7 +146,7 @@ export class BrowserAgentEngine {
   private requestApproval(tabId: string, action: BrowserAgentAction, inspectedTarget: string, consequence: string): BrowserAgentCommandResult {
     const approval = {
       actionId: randomUUID(), title: `${label(action)} requires approval`, target: inspectedTarget,
-      scope: `Approved tab ${tabId}`, consequence,
+      scope: this.pages.describeTab?.(tabId) ?? `Approved tab ${tabId}`, consequence,
     };
     this.pendingAction = { tabId, action, approval };
     this.snapshot.state = 'needs-approval';
@@ -165,7 +166,7 @@ export class BrowserAgentEngine {
       this.snapshot.state = 'paused';
       this.append(pending.tabId, label(pending.action), pending.approval.target, 'rejected', 'Rejected by the user.');
       this.emit();
-      return { ok: true };
+      return { ok: false, message: 'Browser action rejected by the user.' };
     }
     this.snapshot.state = 'running';
     return await this.perform(pending.tabId, pending.action, pending.approval.target);
@@ -210,6 +211,7 @@ function target(action: BrowserAgentAction): string {
   if ('url' in action) return action.url;
   if ('text' in action) return action.text;
   if ('deltaY' in action) return String(action.deltaY);
+  if ('milliseconds' in action) return `${action.milliseconds}ms`;
   return 'visible page';
 }
 

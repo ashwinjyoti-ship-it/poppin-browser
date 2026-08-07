@@ -15,6 +15,7 @@ import { TaskEngine } from '../src/main/task/task-engine';
 import { TaskStore } from '../src/main/task/task-store';
 import { WorkspaceStore } from '../src/main/workspace/workspace-store';
 import type { GitHubEngine } from '../src/main/project/github-engine';
+import type { BrowserAgentCommand, BrowserAgentCommandResult, BrowserAgentSnapshot } from '../src/shared/browser-agent';
 
 const execFileAsync = promisify(execFile);
 
@@ -22,6 +23,7 @@ class FakeCodexServer extends EventEmitter {
   prompt = '';
   developerInstructions = '';
   cwd = '';
+  dynamicTools: unknown[] | null = null;
   responses: Array<{ id: number | string; result: unknown }> = [];
 
   async connect() {}
@@ -33,9 +35,10 @@ class FakeCodexServer extends EventEmitter {
       defaultReasoningEffort: 'high', isDefault: true,
     }];
   }
-  async startThread(params: { developerInstructions: string; cwd: string }) {
+  async startThread(params: { developerInstructions: string; cwd: string; dynamicTools?: unknown[] }) {
     this.developerInstructions = params.developerInstructions;
     this.cwd = params.cwd;
+    this.dynamicTools = params.dynamicTools ?? null;
     return { id: 'thread-1', sessionId: 'session-1', preview: '', ephemeral: false };
   }
   async resumeThread() { return { id: 'thread-1', sessionId: 'session-1', preview: '', ephemeral: false }; }
@@ -56,7 +59,7 @@ class FakeGitHub {
   mergePullRequest = vi.fn(async () => ({ number: 12, url: 'https://github.com/acme/poppin/pull/12', base: 'main', head: 'codex/delivery', state: 'MERGED', checks: '1/1 checks passing', review: 'APPROVED' }));
 }
 
-async function setup({ withProject = true }: { withProject?: boolean } = {}) {
+async function setup({ withProject = true, withBrowserAgent = false }: { withProject?: boolean; withBrowserAgent?: boolean } = {}) {
   const directory = await mkdtemp(path.join(tmpdir(), 'poppin-task-engine-'));
   const repositoryPath = path.join(directory, 'repo');
   await execFileAsync('git', ['init', '-b', 'main', repositoryPath]);
@@ -76,6 +79,12 @@ async function setup({ withProject = true }: { withProject?: boolean } = {}) {
   const onResultReady = vi.fn();
   const github = new FakeGitHub();
   const onOpenExternal = vi.fn();
+  const browserSnapshot: BrowserAgentSnapshot = withBrowserAgent ? {
+    state: 'running', taskId: 'preflight-1', allowedTabIds: ['tab-1'], activeTabId: 'tab-1', currentAction: null, pendingApproval: null, log: [],
+  } : {
+    state: 'idle', taskId: null, allowedTabIds: [], activeTabId: null, currentAction: null, pendingApproval: null, log: [],
+  };
+  const browserCommand = vi.fn<(command: BrowserAgentCommand) => Promise<BrowserAgentCommandResult>>(async () => ({ ok: true, data: 'Visible browser action completed.' }));
   const window = { isDestroyed: () => false, webContents: { isDestroyed: () => false, send } };
   const engine = new TaskEngine(
     window as unknown as Electron.BrowserWindow,
@@ -89,10 +98,12 @@ async function setup({ withProject = true }: { withProject?: boolean } = {}) {
       onResultReady,
       github: github as unknown as GitHubEngine,
       onOpenExternal,
+      getBrowserAgentSnapshot: () => browserSnapshot,
+      executeBrowserAgentCommand: browserCommand,
     },
   );
   await engine.initialize();
-  return { engine, fake, repositoryPath, taskStore, workspaceStore, onResultReady, directory, github, onOpenExternal };
+  return { engine, fake, repositoryPath, taskStore, workspaceStore, onResultReady, directory, github, onOpenExternal, browserSnapshot, browserCommand };
 }
 
 describe('task engine', () => {
@@ -146,6 +157,54 @@ describe('task engine', () => {
     expect(fake.cwd).toBe(directory);
     expect(fake.developerInstructions).toContain('Git project is not required');
     expect(fake.prompt).toContain('Reference');
+    await engine.close();
+    taskStore.close();
+    workspaceStore.close();
+  });
+
+  it('offers task-scoped browser actions to Codex and completes ordinary actions without approval', async () => {
+    const { engine, fake, browserCommand, taskStore, workspaceStore } = await setup({ withProject: false, withBrowserAgent: true });
+    await engine.execute({ type: 'startTask', prompt: 'Draft a reply and save the draft', model: 'gpt-test', reasoningEffort: 'high', kind: 'work' });
+    expect(fake.dynamicTools).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'poppin_browser_action' })]));
+    expect(fake.prompt).toContain('"tabId": "tab-1"');
+
+    fake.emit('request', {
+      id: 21,
+      method: 'item/tool/call',
+      params: { threadId: 'thread-1', turnId: 'turn-1', callId: 'call-1', tool: 'poppin_browser_action', arguments: { tabId: 'tab-1', action: { type: 'read' } } },
+    });
+    await vi.waitFor(() => expect(fake.responses).toContainEqual({
+      id: 21,
+      result: { success: true, contentItems: [{ type: 'inputText', text: 'Visible browser action completed.' }] },
+    }));
+    expect(browserCommand).toHaveBeenCalledWith({ type: 'act', tabId: 'tab-1', action: { type: 'read' } });
+    await engine.close();
+    taskStore.close();
+    workspaceStore.close();
+  });
+
+  it('keeps a critical browser tool call pending until the user approves or rejects that exact action', async () => {
+    const { engine, fake, browserSnapshot, browserCommand, taskStore, workspaceStore } = await setup({ withProject: false, withBrowserAgent: true });
+    await engine.execute({ type: 'startTask', prompt: 'Send the reply', model: 'gpt-test', reasoningEffort: 'high', kind: 'work' });
+    browserSnapshot.state = 'needs-approval';
+    browserSnapshot.pendingApproval = { actionId: 'critical-1', title: 'Click requires approval', target: 'Send', scope: 'Inbox', consequence: 'This action may send a message.' };
+    browserCommand.mockResolvedValueOnce({ ok: false, message: 'Approval required.' });
+
+    fake.emit('request', {
+      id: 22,
+      method: 'item/tool/call',
+      params: { threadId: 'thread-1', turnId: 'turn-1', callId: 'call-2', tool: 'poppin_browser_action', arguments: { tabId: 'tab-1', action: { type: 'click', selector: '[data-poppin-agent-id="poppin-3"]' } } },
+    });
+    await vi.waitFor(() => expect(engine.getSnapshot().task?.progress).toEqual(expect.arrayContaining([
+      expect.objectContaining({ title: 'Critical browser action needs approval', status: 'paused' }),
+    ])));
+    expect(fake.responses).not.toContainEqual(expect.objectContaining({ id: 22 }));
+
+    engine.resolveBrowserToolApproval({ type: 'respondApproval', decision: 'approve' }, { ok: true, data: 'Clicked Send' });
+    expect(fake.responses).toContainEqual({
+      id: 22,
+      result: { success: true, contentItems: [{ type: 'inputText', text: 'Clicked Send' }] },
+    });
     await engine.close();
     taskStore.close();
     workspaceStore.close();

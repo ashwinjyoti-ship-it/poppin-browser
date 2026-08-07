@@ -99,7 +99,7 @@ Poppin supports two internal task capability sets through the same prompt:
 
 These are capability sets, not hard-coded workflow templates. Requests such as summarizing a selected YouTube video, comparing two selected documents, researching with approved tabs, turning a transcript into notes, drafting a sourced report, and fixing a connected-project UI for a pull request are acceptance scenarios.
 
-Before execution, Poppin shows a concise preflight when useful: selected context, requested browser use, whether a local project will be modified, expected consequential actions, and required approvals. The user can adjust context or permissions before starting. Benign tasks remain simple and do not gain unnecessary confirmations.
+Before execution, Poppin shows a concise preflight only when useful, such as before a Code task that can modify a local project. Explicitly requested browser-use Work tasks start directly with their selected tabs; Poppin defers any approval until an exact critical action is attempted. Benign tasks remain simple and do not gain unnecessary confirmations.
 
 ### Visual selection
 
@@ -109,6 +109,8 @@ The user can select an element in a localhost application. Poppin captures its H
 
 Controlled browser use is visible task-scoped page operation, not unrestricted computer control.
 
+Selecting a tab as context and explicitly requesting browser use grants ordinary navigation, reading, clicking, typing, waiting, scrolling, searching, and reversible draft saving within that task. These actions do not each require another confirmation. Codex receives them through Poppin-owned dynamic tools, must use selectors returned by the current visible page read, and must verify page state before reporting completion.
+
 - Codex may navigate, click, type, scroll, search, and read rendered content only within the selected Poppin tab or additional user-approved tabs.
 - `BrowserAgentEngine` uses the existing `BrowserEngine` tab model. It must not create a hidden browser, second profile, second workspace, or parallel task.
 - The centre browser stays visible. Poppin shows the current action and an append-only action log.
@@ -116,7 +118,7 @@ Controlled browser use is visible task-scoped page operation, not unrestricted c
 - Tab access is revoked when the task ends. Poppin never silently switches to an unrelated tab.
 - Web content receives no privileged Electron, Node, or Poppin API access.
 
-Poppin pauses before sign-in/authentication, password/passkey/biometric/credential prompts, form submission, sending messages or email, publishing, downloads, uploads, purchases/payments, deletion, permission prompts, creating external records, pushing branches, creating or merging pull requests, or any other consequential external action. Login pages may be opened, but the user performs credential entry. Codex does not inspect credential fields, cookies, session tokens, Apple Passwords, or Keychain. Authentication stays inside Poppin's persistent browser partition.
+Poppin pauses before sign-in/authentication, password/passkey/biometric/credential prompts, final form submission, sending messages or email, publishing, downloads, uploads, purchases/payments, deletion, permission prompts, destructive external writes, pushing branches, creating or merging pull requests, or another critical or irreversible action. Creating and saving a reversible unsent draft is not gated. Login pages may be opened, but the user performs credential entry. Codex does not inspect credential fields, cookies, session tokens, Apple Passwords, or Keychain. Authentication stays inside Poppin's persistent browser partition.
 
 ### YouTube transcript-summary acceptance flow
 
@@ -148,7 +150,7 @@ Launch the configured local preview in the centre browser and show code diff and
 
 Whenever Codex needs approval, a decision, clarification, permission, or recovery action, Poppin automatically expands the right pane if collapsed, switches it to the relevant Task/Approval section, scrolls the pending card into view, identifies what is blocking progress, and shows the exact action, target, scope, consequence, and Approve/Reject/alternative controls. Badges and task status update immediately. The centre tab and page state are preserved, task state advances automatically after resolution, and the pane is not automatically collapsed afterward.
 
-This applies to browser-tab access, consequential browser actions, filesystem/network permission, artifact overwrite, push/PR/merge, blocking clarification, and task failure requiring recovery. The single active task exposes only its one currently required approval.
+This applies to critical browser actions, filesystem/network permission, artifact overwrite, push/PR/merge, blocking clarification, and task failure requiring recovery. The single active task exposes only its one currently required approval.
 
 ### GitHub pull-request delivery
 
@@ -211,6 +213,7 @@ The final Apple Silicon build uses Node 22 where required. Rebuild and `hdiutil`
 - **2026-08-07:** Phases 7–8 are implemented through reusable capability boundaries and release-verified. Verification covers typecheck, zero-warning lint, 66 passing unit/component/integration tests with one expected live-Codex skip, repeated packaged browser smoke checks, a Node 22 arm64 package/DMG build, and `hdiutil` validation of the single stable installer.
 - **2026-08-07:** Hands-on browser feedback approves Phase 9 fundamentals: a substantially smaller tab strip, stable favicon fallbacks, native copy/paste and page/tab context menus, reorderable pinned and grouped tabs, closed-tab recovery, and persistent top-bar browser settings. Link behavior defaults to respecting the website; close warnings remain opt-in.
 - **2026-08-07:** Codex integration feedback hardens Phase 8: trusted task-result URLs are accepted only when Poppin creates or restores a tab, while address-bar entry remains restricted to HTTP(S). Blocking task and browser approvals now derive the visible right-pane state directly, guaranteeing that the pane expands on Task without depending on subscription timing.
+- **2026-08-07:** Hands-on browser-use feedback narrows approval gates to exact critical actions. Selecting tabs and requesting browser use grants ordinary visible navigation/click/type and reversible draft saving; Work tasks no longer show a generic browser-use preflight. Codex browser actions are connected through task-scoped dynamic tools, critical prompts are sticky at the top of Task, and completion must be verified from page state.
 - **2026-08-07:** Hands-on grouping feedback replaces ambiguous and sometimes blank group pills with explicit named/countable controls, colored contiguous tab runs, discoverable renaming, persistent group colors, and ordering normalization that prevents tabs from splitting a group.
 
 Future decisions should be added here only after an approved phase boundary or meaningful user feedback.
