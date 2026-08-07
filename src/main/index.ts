@@ -21,6 +21,8 @@ import { GitEngine } from './project/git-engine';
 import { TASK_CHANNELS, type TaskCommand } from '../shared/task';
 import { TaskEngine } from './task/task-engine';
 import { TaskStore } from './task/task-store';
+import { BrowserAgentEngine } from './browser/browser-agent-engine';
+import { BROWSER_AGENT_CHANNELS, type BrowserAgentCommand } from '../shared/browser-agent';
 
 registerInternalScheme();
 
@@ -30,6 +32,7 @@ let workspaceEngine: WorkspaceEngine | null = null;
 let workspaceStore: WorkspaceStore | null = null;
 let taskEngine: TaskEngine | null = null;
 let taskStore: TaskStore | null = null;
+let browserAgentEngine: BrowserAgentEngine | null = null;
 const pendingExternalUrls: string[] = [];
 
 function openExternalUrl(url: string): void {
@@ -84,12 +87,18 @@ async function createWindow(): Promise<void> {
   if (!workspaceStore) throw new Error('Workspace storage is not ready.');
   const git = new GitEngine();
   workspaceEngine = new WorkspaceEngine(mainWindow, workspaceStore, browserEngine, git);
+  browserAgentEngine = new BrowserAgentEngine(mainWindow, browserEngine, (tabId, content) => {
+    workspaceEngine?.updateTabContextFromAgent(tabId, content);
+  });
   if (!taskStore) throw new Error('Task storage is not ready.');
   const workDirectory = path.join(app.getPath('userData'), 'task-output');
   await mkdir(workDirectory, { recursive: true });
   taskEngine = new TaskEngine(mainWindow, taskStore, workspaceStore, git, {
     workDirectory,
-    onResultReady: () => browserEngine?.openTaskResult(),
+    onResultReady: () => {
+      browserEngine?.openTaskResult();
+    },
+    onTaskEnded: () => browserAgentEngine?.complete(),
   });
   browserEngine.restore(
     persisted
@@ -113,6 +122,7 @@ async function createWindow(): Promise<void> {
     browserEngine = null;
     workspaceEngine = null;
     taskEngine = null;
+    browserAgentEngine = null;
     void closingTaskEngine?.close();
   });
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
@@ -162,6 +172,16 @@ app.whenReady().then(async () => {
   ipcMain.handle(TASK_CHANNELS.command, (event, command: TaskCommand) => {
     if (!isTrustedShellSender(event.sender)) throw new Error('Untrusted task command.');
     return taskEngine?.execute(command) ?? { ok: false, message: 'Codex is not ready.' };
+  });
+  ipcMain.handle(BROWSER_AGENT_CHANNELS.getSnapshot, (event) => {
+    if (!isTrustedShellSender(event.sender)) throw new Error('Untrusted browser-agent snapshot request.');
+    return browserAgentEngine?.getSnapshot() ?? {
+      state: 'idle', taskId: null, allowedTabIds: [], activeTabId: null, currentAction: null, pendingApproval: null, log: [],
+    };
+  });
+  ipcMain.handle(BROWSER_AGENT_CHANNELS.command, (event, command: BrowserAgentCommand) => {
+    if (!isTrustedShellSender(event.sender)) throw new Error('Untrusted browser-agent command.');
+    return browserAgentEngine?.execute(command) ?? { ok: false, message: 'Controlled browser use is not ready.' };
   });
 
   const browsingSession = session.fromPartition('persist:poppin-browser');

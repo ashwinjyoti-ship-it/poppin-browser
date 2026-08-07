@@ -18,6 +18,12 @@ import {
   type TaskCommand,
   type TaskSnapshot,
 } from '../shared/task';
+import {
+  BROWSER_AGENT_CHANNELS,
+  type BrowserAgentCommand,
+  type BrowserAgentSnapshot,
+  type PoppinBrowserAgentApi,
+} from '../shared/browser-agent';
 
 const api: PoppinBrowserApi = {
   getSnapshot: () => ipcRenderer.invoke(BROWSER_CHANNELS.getSnapshot) as Promise<BrowserSnapshot>,
@@ -59,3 +65,15 @@ const taskApi: PoppinTaskApi = {
 };
 
 contextBridge.exposeInMainWorld('poppinTask', taskApi);
+
+const browserAgentApi: PoppinBrowserAgentApi = {
+  getSnapshot: () => ipcRenderer.invoke(BROWSER_AGENT_CHANNELS.getSnapshot) as Promise<BrowserAgentSnapshot>,
+  command: (command: BrowserAgentCommand) => ipcRenderer.invoke(BROWSER_AGENT_CHANNELS.command, command),
+  subscribe: (listener) => {
+    const handler = (_event: Electron.IpcRendererEvent, snapshot: BrowserAgentSnapshot) => listener(snapshot);
+    ipcRenderer.on(BROWSER_AGENT_CHANNELS.snapshot, handler);
+    return () => ipcRenderer.removeListener(BROWSER_AGENT_CHANNELS.snapshot, handler);
+  },
+};
+
+contextBridge.exposeInMainWorld('poppinBrowserAgent', browserAgentApi);

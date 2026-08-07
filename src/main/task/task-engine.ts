@@ -30,6 +30,7 @@ interface TaskEngineOptions {
   createServer?: (launch: CodexLaunch) => CodexAppServer;
   workDirectory?: string;
   onResultReady?: (task: TaskRecordSnapshot) => void;
+  onTaskEnded?: () => void;
 }
 
 export class TaskEngine {
@@ -225,7 +226,7 @@ export class TaskEngine {
     this.persistAndEmit();
     const turn = await server.startTurn({
       threadId: task.threadId,
-      prompt: `Revise the current implementation according to this user feedback:\n\n${prompt}`,
+      prompt: buildTaskPrompt(`Revise the current ${task.kind === 'code' ? 'implementation' : 'result'} according to this user feedback:\n\n${prompt}`, workspaceSnapshot(this.workspaceStore)),
       cwd,
       model: task.model,
       effort: task.reasoningEffort,
@@ -254,6 +255,7 @@ export class TaskEngine {
       detail: decision === 'accept' ? 'Codex may continue with this operation.' : 'Codex was told not to perform that operation.', status: 'completed',
     });
     this.persistAndEmit();
+    if (decision === 'cancel') this.options.onTaskEnded?.();
     return { ok: true };
   }
 
@@ -267,6 +269,7 @@ export class TaskEngine {
     task.error = null;
     await this.captureDiff();
     this.persistAndEmit();
+    this.options.onTaskEnded?.();
     return { ok: true };
   }
 
@@ -411,6 +414,7 @@ export class TaskEngine {
         }
         await this.captureDiff();
         this.persistAndEmit();
+        this.options.onTaskEnded?.();
         if (status === 'completed') this.options.onResultReady?.(cloneTask(task));
         return;
       }
@@ -464,6 +468,7 @@ export class TaskEngine {
     this.task.pendingApproval = null;
     this.task.error = message;
     this.persistAndEmit();
+    this.options.onTaskEnded?.();
   }
 
   private appendProgress(progress: TaskProgressSnapshot): void {

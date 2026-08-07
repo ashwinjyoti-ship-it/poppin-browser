@@ -3,6 +3,7 @@ import { type CSSProperties, type FormEvent, useEffect, useRef, useState } from 
 import type { BrowserCommand, BrowserSnapshot } from '../../shared/browser';
 import type { WorkspaceCommand, WorkspaceSnapshot } from '../../shared/workspace';
 import type { TaskCommand, TaskCommandResult, TaskSnapshot } from '../../shared/task';
+import type { BrowserAgentCommand, BrowserAgentCommandResult, BrowserAgentSnapshot } from '../../shared/browser-agent';
 import { isGoogleAccountsUrl } from '../../shared/google-auth';
 import { Brand } from './Brand';
 import { BrowserToolbar } from './BrowserToolbar';
@@ -25,6 +26,7 @@ import {
 const EMPTY_SNAPSHOT: BrowserSnapshot = { tabs: [], activeTabId: '', isFullScreen: false };
 const EMPTY_WORKSPACE: WorkspaceSnapshot = { workspace: null, documents: [], tabContexts: [], project: null };
 const EMPTY_TASK: TaskSnapshot = { connection: { state: 'checking', message: 'Connecting to Codex…', accountLabel: null, models: [] }, task: null };
+const EMPTY_BROWSER_AGENT: BrowserAgentSnapshot = { state: 'idle', taskId: null, allowedTabIds: [], activeTabId: null, currentAction: null, pendingApproval: null, log: [] };
 
 export function App() {
   const [snapshot, setSnapshot] = useState<BrowserSnapshot>(EMPTY_SNAPSHOT);
@@ -36,6 +38,7 @@ export function App() {
   const [contextCollapsed, setContextCollapsed] = useState(false);
   const [contextSection, setContextSection] = useState<PaneSection>('context');
   const [taskSnapshot, setTaskSnapshot] = useState<TaskSnapshot>(EMPTY_TASK);
+  const [browserAgentSnapshot, setBrowserAgentSnapshot] = useState<BrowserAgentSnapshot>(EMPTY_BROWSER_AGENT);
   const [commandCollapsed, setCommandCollapsed] = useState(false);
   const [preferredPaneWidths, setPreferredPaneWidths] = useState(() => loadPaneWidths(window.localStorage));
   const [viewport, setViewport] = useState(() => ({ width: window.innerWidth, height: window.innerHeight }));
@@ -75,6 +78,16 @@ export function App() {
       receiveTaskSnapshot(initialSnapshot);
     });
     const unsubscribeTask = window.poppinTask.subscribe(receiveTaskSnapshot);
+    const receiveBrowserAgentSnapshot = (nextSnapshot: BrowserAgentSnapshot) => {
+      if (!mounted) return;
+      setBrowserAgentSnapshot(nextSnapshot);
+      if (nextSnapshot.pendingApproval) {
+        setContextCollapsed(false);
+        setContextSection('task');
+      }
+    };
+    void window.poppinBrowserAgent.getSnapshot().then(receiveBrowserAgentSnapshot);
+    const unsubscribeBrowserAgent = window.poppinBrowserAgent.subscribe(receiveBrowserAgentSnapshot);
     const unsubscribeFocus = window.poppinBrowser.onFocusAddress(() => {
       addressInputRef.current?.focus();
       addressInputRef.current?.select();
@@ -84,6 +97,7 @@ export function App() {
       unsubscribeSnapshot();
       unsubscribeWorkspace();
       unsubscribeTask();
+      unsubscribeBrowserAgent();
       unsubscribeFocus();
     };
   }, []);
@@ -156,6 +170,14 @@ export function App() {
     }
   };
 
+  const sendBrowserAgentCommand = async (command: BrowserAgentCommand): Promise<BrowserAgentCommandResult> => {
+    try {
+      return await window.poppinBrowserAgent.command(command);
+    } catch {
+      return { ok: false, message: 'Poppin could not control the selected tab.' };
+    }
+  };
+
   return (
     <main className={`app-shell chrome-${chromeLayout.density} ${snapshot.isFullScreen ? 'window-fullscreen' : 'window-windowed'} ${commandCollapsed ? 'command-is-collapsed' : ''}`} style={paneStyle}>
       <header className="browser-chrome">
@@ -211,6 +233,8 @@ export function App() {
         onRefreshTab={(tabId) => { void sendWorkspaceCommand({ type: 'refreshTabContext', tabId }); }}
         onTaskCommand={sendTaskCommand}
         onOpenResult={() => { void sendCommand({ type: 'openTaskResult' }); }}
+        browserAgentSnapshot={browserAgentSnapshot}
+        onBrowserAgentCommand={sendBrowserAgentCommand}
         section={contextSection}
         onSectionChange={setContextSection}
       />
@@ -231,7 +255,7 @@ export function App() {
         />
       ) : null}
       <div className={`browser-stage ${workspaceCollapsed ? 'workspace-collapsed' : ''} ${contextCollapsed ? 'context-collapsed' : ''}`} aria-hidden="true" />
-      <CommandBar snapshot={taskSnapshot} workspace={workspaceSnapshot} collapsed={commandCollapsed} onCollapseChange={setCommandCollapsed} onCommand={sendTaskCommand} />
+      <CommandBar snapshot={taskSnapshot} workspace={workspaceSnapshot} collapsed={commandCollapsed} onCollapseChange={setCommandCollapsed} onCommand={sendTaskCommand} onBrowserAgentCommand={sendBrowserAgentCommand} />
     </main>
   );
 }

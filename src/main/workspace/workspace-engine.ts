@@ -36,6 +36,20 @@ export class WorkspaceEngine {
     };
   }
 
+  updateTabContextFromAgent(tabId: string, capturedText: string): boolean {
+    const existing = this.store.listTabContexts().find((context) => context.tabId === tabId);
+    if (!existing) return false;
+    const normalized = capturedText.replace(/\r\n/g, '\n').trim();
+    this.store.upsertTabContext({
+      ...existing,
+      capturedText: normalized.slice(0, MAX_DOCUMENT_BYTES),
+      truncated: normalized.length > MAX_DOCUMENT_BYTES,
+      capturedAt: new Date().toISOString(),
+    });
+    this.emitSnapshot();
+    return true;
+  }
+
   async execute(command: WorkspaceCommand): Promise<WorkspaceCommandResult> {
     if (command.type === 'createWorkspace' || command.type === 'renameWorkspace') {
       return this.changeWorkspaceName(command.type, command.name);

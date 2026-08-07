@@ -24,6 +24,7 @@ import { displayUrl, NEW_TAB_URL, normalizeAddressInput } from './url-input';
 import type { CapturedTabContext } from '../../shared/workspace';
 import { GOOGLE_SIGN_IN_FALLBACK_SCRIPT, isGoogleAccountsUrl } from '../../shared/google-auth';
 import { HtmlFullscreenCoordinator, type HtmlFullscreenTransition } from './html-fullscreen';
+import type { BrowserAgentAction } from '../../shared/browser-agent';
 
 const PAGE_MARGIN = 12;
 const DEFAULT_CHROME_HEIGHT = 152;
@@ -111,6 +112,100 @@ export class BrowserEngine {
       return;
     }
     this.createTab(TASK_RESULT_URL, randomUUID(), false);
+  }
+
+  hasTab(tabId: string): boolean {
+    const tab = this.tabs.get(tabId);
+    return Boolean(tab && !tab.view.webContents.isDestroyed());
+  }
+
+  activateTabForAgent(tabId: string): boolean {
+    return this.activateTab(tabId).ok;
+  }
+
+  async inspectAction(tabId: string, action: BrowserAgentAction): Promise<{ credential: boolean; consequential: string | null; target: string }> {
+    const tab = this.tabs.get(tabId);
+    if (!tab || tab.view.webContents.isDestroyed()) throw new Error('That tab is no longer available.');
+    if (action.type !== 'click' && action.type !== 'type') {
+      return { credential: false, consequential: null, target: agentActionTarget(action) };
+    }
+    const selector = JSON.stringify(action.selector);
+    const inspected = await tab.view.webContents.executeJavaScript(`(() => {
+      const element = document.querySelector(${selector});
+      if (!(element instanceof HTMLElement)) return null;
+      const input = element instanceof HTMLInputElement ? element : element.querySelector('input');
+      const descriptor = [
+        element.id, element.getAttribute('name'), element.getAttribute('aria-label'),
+        element.getAttribute('autocomplete'), input?.type, input?.name, input?.autocomplete
+      ].filter(Boolean).join(' ');
+      const text = (element.innerText || element.getAttribute('aria-label') || element.getAttribute('title') || '').trim().slice(0, 240);
+      const href = element instanceof HTMLAnchorElement ? element.href : element.closest('a')?.href || '';
+      const form = element.closest('form');
+      const isSubmit = (element instanceof HTMLButtonElement && (!element.type || element.type === 'submit'))
+        || (element instanceof HTMLInputElement && ['submit', 'image'].includes(element.type));
+      const credential = /password|passkey|credential|one[-_ ]?time|otp|verification[-_ ]?code/i.test(descriptor)
+        || input?.type === 'password';
+      let consequential = null;
+      const signal = [text, href, form?.action || '', descriptor].join(' ');
+      if (element.hasAttribute('download') || /\\b(download|upload|purchase|pay|buy|delete|remove|publish|send|submit|sign[- ]?in|log[- ]?in|merge|create (?:pull request|record))\\b/i.test(signal)) {
+        consequential = 'This action may cause an external or irreversible effect.';
+      } else if (isSubmit || (actionType === 'click' && form)) {
+        consequential = 'This action may submit a form.';
+      }
+      return { credential, consequential, target: text || href || element.tagName.toLowerCase() };
+    })()`.replace('actionType', JSON.stringify(action.type)), true);
+    if (!inspected || typeof inspected !== 'object') throw new Error('The target element is no longer available.');
+    const value = inspected as { credential?: unknown; consequential?: unknown; target?: unknown };
+    return {
+      credential: value.credential === true,
+      consequential: typeof value.consequential === 'string' ? value.consequential : null,
+      target: typeof value.target === 'string' ? value.target : action.selector,
+    };
+  }
+
+  async performAction(tabId: string, action: BrowserAgentAction): Promise<string> {
+    const tab = this.tabs.get(tabId);
+    if (!tab || tab.view.webContents.isDestroyed()) throw new Error('That tab is no longer available.');
+    const contents = tab.view.webContents;
+    switch (action.type) {
+      case 'navigate': {
+        const parsed = new URL(action.url);
+        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error('Controlled navigation only supports HTTP and HTTPS.');
+        await contents.loadURL(parsed.toString());
+        return parsed.toString();
+      }
+      case 'read':
+        return String(await contents.executeJavaScript(READ_VISIBLE_PAGE_SCRIPT, true));
+      case 'captureTranscript':
+        return String(await contents.executeJavaScript(CAPTURE_TRANSCRIPT_SCRIPT, true));
+      case 'click': {
+        const clicked = await contents.executeJavaScript(`(() => { const element = document.querySelector(${JSON.stringify(action.selector)}); if (!(element instanceof HTMLElement)) return false; element.click(); return true; })()`, true);
+        if (clicked !== true) throw new Error('The target element is no longer available.');
+        return `Clicked ${action.selector}`;
+      }
+      case 'type': {
+        const typed = await contents.executeJavaScript(`(() => {
+          const element = document.querySelector(${JSON.stringify(action.selector)});
+          if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLElement && element.isContentEditable)) return false;
+          const descriptor = [element.id, element.getAttribute('name'), element.getAttribute('aria-label'), element.getAttribute('autocomplete'), element instanceof HTMLInputElement ? element.type : ''].filter(Boolean).join(' ');
+          if (/password|passkey|credential|one[-_ ]?time|otp|verification[-_ ]?code/i.test(descriptor)) return 'credential';
+          if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) element.value = ${JSON.stringify(action.text)};
+          else element.textContent = ${JSON.stringify(action.text)};
+          element.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: ${JSON.stringify(action.text)} }));
+          element.dispatchEvent(new Event('change', { bubbles: true }));
+          return true;
+        })()`, true);
+        if (typed === 'credential') throw new Error('Poppin never types into credential fields.');
+        if (typed !== true) throw new Error('The editable target is no longer available.');
+        return `Typed ${action.text.length} character(s)`;
+      }
+      case 'scroll':
+        await contents.executeJavaScript(`window.scrollBy({ top: ${Math.max(-4000, Math.min(4000, Math.round(action.deltaY)))}, behavior: 'smooth' })`, true);
+        return `Scrolled ${Math.round(action.deltaY)} pixels`;
+      case 'search':
+        contents.findInPage(action.text, { findNext: false, forward: true });
+        return `Searched the visible page for “${action.text}”`;
+    }
   }
 
   async captureTabContext(tabId: string): Promise<CapturedTabContext | null> {
@@ -484,3 +579,35 @@ function safeProtocol(value: string): string {
     return '';
   }
 }
+
+function agentActionTarget(action: BrowserAgentAction): string {
+  if ('selector' in action) return action.selector;
+  if ('url' in action) return action.url;
+  if ('text' in action) return action.text;
+  if ('deltaY' in action) return `${action.deltaY}px`;
+  return 'visible page';
+}
+
+const READ_VISIBLE_PAGE_SCRIPT = `(() => {
+  const clone = document.body?.cloneNode(true);
+  if (!(clone instanceof HTMLElement)) return '';
+  clone.querySelectorAll('input, textarea, select, option, [contenteditable], script, style, noscript').forEach((element) => element.remove());
+  return (clone.innerText || '').replace(/\\n{3,}/g, '\\n\\n').trim().slice(0, 60000);
+})()`;
+
+const CAPTURE_TRANSCRIPT_SCRIPT = `(async () => {
+  const textOf = (element) => (element?.innerText || element?.textContent || '').trim();
+  const transcriptButton = Array.from(document.querySelectorAll('button, ytd-button-renderer, tp-yt-paper-button'))
+    .find((element) => /show transcript|open transcript/i.test(textOf(element)));
+  if (transcriptButton instanceof HTMLElement) {
+    transcriptButton.scrollIntoView({ block: 'center' });
+    transcriptButton.click();
+    await new Promise((resolve) => setTimeout(resolve, 650));
+  }
+  const segments = Array.from(document.querySelectorAll('ytd-transcript-segment-renderer, [class*="transcript-segment"]'))
+    .map((element) => textOf(element)).filter(Boolean);
+  if (segments.length > 0) return segments.join('\\n').slice(0, 60000);
+  const captions = Array.from(document.querySelectorAll('[class*="caption"], [aria-label*="transcript" i]'))
+    .map((element) => textOf(element)).filter(Boolean);
+  return captions.join('\\n').slice(0, 60000);
+})()`;

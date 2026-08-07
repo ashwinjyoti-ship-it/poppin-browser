@@ -3,6 +3,7 @@ import { Check, ChevronLeft, ChevronRight, Copy, ExternalLink, FileText, Globe2,
 
 import type { TaskCommand, TaskCommandResult, TaskSnapshot } from '../../shared/task';
 import type { WorkspaceSnapshot } from '../../shared/workspace';
+import type { BrowserAgentCommand, BrowserAgentCommandResult, BrowserAgentSnapshot } from '../../shared/browser-agent';
 
 interface ContextPaneProps {
   collapsed: boolean;
@@ -14,11 +15,13 @@ interface ContextPaneProps {
   onOpenResult: () => void;
   section?: PaneSection;
   onSectionChange?: (section: PaneSection) => void;
+  browserAgentSnapshot?: BrowserAgentSnapshot;
+  onBrowserAgentCommand?: (command: BrowserAgentCommand) => Promise<BrowserAgentCommandResult>;
 }
 
 export type PaneSection = 'context' | 'task' | 'result';
 
-export function ContextPane({ collapsed, snapshot, taskSnapshot, onCollapseChange, onRefreshTab, onTaskCommand, onOpenResult, section, onSectionChange }: ContextPaneProps) {
+export function ContextPane({ collapsed, snapshot, taskSnapshot, onCollapseChange, onRefreshTab, onTaskCommand, onOpenResult, section, onSectionChange, browserAgentSnapshot, onBrowserAgentCommand }: ContextPaneProps) {
   const [internalSection, setInternalSection] = useState<PaneSection>('context');
   const activeSection = section ?? internalSection;
   const selectedDocuments = snapshot.documents.filter((document) => document.selected);
@@ -49,7 +52,7 @@ export function ContextPane({ collapsed, snapshot, taskSnapshot, onCollapseChang
         <button type="button" className="pane-toggle" onClick={() => onCollapseChange(true)} aria-label="Collapse right pane"><ChevronRight size={17} /></button>
       </div>
       {activeSection === 'context' ? <ContextView snapshot={snapshot} onRefreshTab={onRefreshTab} /> : null}
-      {activeSection === 'task' ? <TaskView snapshot={taskSnapshot} onCommand={onTaskCommand} /> : null}
+      {activeSection === 'task' ? <TaskView snapshot={taskSnapshot} workspace={snapshot} browserAgent={browserAgentSnapshot} onCommand={onTaskCommand} onBrowserAgentCommand={onBrowserAgentCommand} /> : null}
       {activeSection === 'result' ? <ResultView snapshot={taskSnapshot} onCommand={onTaskCommand} onOpenResult={onOpenResult} /> : null}
     </aside>
   );
@@ -85,7 +88,13 @@ function ContextView({ snapshot, onRefreshTab }: { snapshot: WorkspaceSnapshot; 
   );
 }
 
-function TaskView({ snapshot, onCommand }: { snapshot: TaskSnapshot; onCommand: (command: TaskCommand) => Promise<TaskCommandResult> }) {
+function TaskView({ snapshot, workspace, browserAgent, onCommand, onBrowserAgentCommand }: {
+  snapshot: TaskSnapshot;
+  workspace: WorkspaceSnapshot;
+  browserAgent?: BrowserAgentSnapshot;
+  onCommand: (command: TaskCommand) => Promise<TaskCommandResult>;
+  onBrowserAgentCommand?: (command: BrowserAgentCommand) => Promise<BrowserAgentCommandResult>;
+}) {
   const task = snapshot.task;
   const approvalRef = useRef<HTMLElement>(null);
   useEffect(() => {
@@ -108,6 +117,17 @@ function TaskView({ snapshot, onCommand }: { snapshot: TaskSnapshot; onCommand: 
           </div>
         </section>
       ) : null}
+      {browserAgent?.pendingApproval && onBrowserAgentCommand ? (
+        <section ref={approvalRef} className="approval-card" aria-label="Browser action approval required">
+          <span className="eyebrow">Browser approval required</span>
+          <h3>{browserAgent.pendingApproval.title}</h3>
+          <p><strong>Target:</strong> {browserAgent.pendingApproval.target}</p>
+          <p><strong>Scope:</strong> {browserAgent.pendingApproval.scope}</p>
+          <p><strong>Consequence:</strong> {browserAgent.pendingApproval.consequence}</p>
+          <div className="approval-actions"><button type="button" className="primary-button" onClick={() => { void onBrowserAgentCommand({ type: 'respondApproval', decision: 'approve' }); }}><Check size={14} /> Approve</button><button type="button" className="secondary-button" onClick={() => { void onBrowserAgentCommand({ type: 'respondApproval', decision: 'reject' }); }}><X size={14} /> Reject</button></div>
+        </section>
+      ) : null}
+      {task && onBrowserAgentCommand ? <BrowserUseView taskId={task.threadId || task.createdAt} workspace={workspace} snapshot={browserAgent} onCommand={onBrowserAgentCommand} /> : null}
       {task ? (
         <div className="task-progress-list">
           {task.progress.map((item) => (
@@ -118,6 +138,21 @@ function TaskView({ snapshot, onCommand }: { snapshot: TaskSnapshot; onCommand: 
       {task?.state === 'Running' || task?.pendingApproval ? <button type="button" className="task-cancel" onClick={() => { void onCommand({ type: 'cancelTask' }); }}>Cancel task</button> : null}
       {task?.error ? <p className="task-error">{task.error}</p> : null}
     </div>
+  );
+}
+
+function BrowserUseView({ taskId, workspace, snapshot, onCommand }: { taskId: string; workspace: WorkspaceSnapshot; snapshot?: BrowserAgentSnapshot; onCommand: (command: BrowserAgentCommand) => Promise<BrowserAgentCommandResult> }) {
+  const selectedTabs = workspace.tabContexts;
+  const canStart = !snapshot || ['idle', 'stopped', 'completed'].includes(snapshot.state);
+  return (
+    <section className="browser-use-card" aria-label="Controlled browser use">
+      <div className="browser-use-heading"><div><span className="eyebrow">Visible browser use</span><h3>{snapshot?.currentAction ?? titleCase(snapshot?.state ?? 'idle')}</h3></div><span className={`task-state browser-state-${snapshot?.state ?? 'idle'}`}>{snapshot?.state ?? 'idle'}</span></div>
+      {canStart ? <button type="button" className="secondary-button" disabled={selectedTabs.length === 0} onClick={() => { void onCommand({ type: 'start', taskId, tabIds: selectedTabs.map((item) => item.tabId) }); }}>Start with {selectedTabs.length} selected tab{selectedTabs.length === 1 ? '' : 's'}</button> : null}
+      {snapshot?.state === 'running' ? <div className="browser-controls"><button type="button" onClick={() => { void onCommand({ type: 'pause' }); }}>Pause</button><button type="button" onClick={() => { void onCommand({ type: 'takeOver' }); }}>Take Over</button><button type="button" onClick={() => { void onCommand({ type: 'stop' }); }}>Stop</button></div> : null}
+      {snapshot?.state === 'paused' ? <div className="browser-controls"><button type="button" onClick={() => { void onCommand({ type: 'resume' }); }}>Resume</button><button type="button" onClick={() => { void onCommand({ type: 'stop' }); }}>Stop</button></div> : null}
+      {snapshot?.state === 'running' ? selectedTabs.map((tab) => <div className="browser-tab-action" key={tab.tabId}><span>{tab.title}</span><button type="button" onClick={() => { void onCommand({ type: 'act', tabId: tab.tabId, action: /(?:youtube\.com|youtu\.be)/i.test(tab.url) ? { type: 'captureTranscript' } : { type: 'read' } }); }}>{/(?:youtube\.com|youtu\.be)/i.test(tab.url) ? 'Read transcript' : 'Read page'}</button></div>) : null}
+      {snapshot?.log.length ? <ol className="browser-action-log">{snapshot.log.slice(-12).map((entry) => <li key={entry.id}><span>{entry.action}</span><small>{entry.outcome} · {entry.detail}</small></li>)}</ol> : null}
+    </section>
   );
 }
 
