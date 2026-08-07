@@ -97,7 +97,7 @@ export class CodexAppServer extends EventEmitter<CodexAppServerEvents> {
       serviceName: 'poppin-browser',
       developerInstructions: params.developerInstructions,
       ephemeral: false,
-    });
+    }, 60_000);
     return response.thread;
   }
 
@@ -109,7 +109,7 @@ export class CodexAppServer extends EventEmitter<CodexAppServerEvents> {
       approvalPolicy: 'on-request',
       approvalsReviewer: 'user',
       sandbox: 'workspace-write',
-    });
+    }, 60_000);
     return response.thread;
   }
 
@@ -129,7 +129,7 @@ export class CodexAppServer extends EventEmitter<CodexAppServerEvents> {
       model: params.model,
       effort: params.effort,
       summary: 'concise',
-    });
+    }, 60_000);
     return response.turn;
   }
 
@@ -141,14 +141,18 @@ export class CodexAppServer extends EventEmitter<CodexAppServerEvents> {
     this.write({ jsonrpc: '2.0', id: requestId, result });
   }
 
-  async request<T = unknown>(method: string, params: JsonObject): Promise<T> {
+  rejectRequest(requestId: number | string, message: string): void {
+    this.write({ jsonrpc: '2.0', id: requestId, error: { code: -32601, message } });
+  }
+
+  async request<T = unknown>(method: string, params: JsonObject, timeoutMs = REQUEST_TIMEOUT_MS): Promise<T> {
     if (!this.child?.stdin.writable) throw new Error('Codex is not connected.');
     const id = this.nextRequestId++;
     return new Promise<T>((resolve, reject) => {
       const timeout = setTimeout(() => {
         this.pending.delete(id);
         reject(new Error(`Codex did not respond to ${method}.`));
-      }, REQUEST_TIMEOUT_MS);
+      }, timeoutMs);
       this.pending.set(id, {
         resolve: (value) => resolve(value as T),
         reject,
@@ -218,7 +222,7 @@ export class CodexAppServer extends EventEmitter<CodexAppServerEvents> {
   }
 
   private handleExit(error: Error | null): void {
-    if (!this.child && this.closing) return;
+    if (!this.child) return;
     this.child = null;
     this.rejectPending(error ?? new Error('Codex connection closed.'));
     this.emit('exit', error);

@@ -15,6 +15,9 @@ import { WORKSPACE_CHANNELS, type WorkspaceCommand } from '../shared/workspace';
 import { WorkspaceEngine } from './workspace/workspace-engine';
 import { WorkspaceStore } from './workspace/workspace-store';
 import { GitEngine } from './project/git-engine';
+import { TASK_CHANNELS, type TaskCommand } from '../shared/task';
+import { TaskEngine } from './task/task-engine';
+import { TaskStore } from './task/task-store';
 
 registerInternalScheme();
 
@@ -22,6 +25,8 @@ let mainWindow: BrowserWindow | null = null;
 let browserEngine: BrowserEngine | null = null;
 let workspaceEngine: WorkspaceEngine | null = null;
 let workspaceStore: WorkspaceStore | null = null;
+let taskEngine: TaskEngine | null = null;
+let taskStore: TaskStore | null = null;
 
 async function createWindow(): Promise<void> {
   const stateStore = new BrowserStateStore(app.getPath('userData'));
@@ -62,7 +67,10 @@ async function createWindow(): Promise<void> {
 
   browserEngine = new BrowserEngine(mainWindow, browserSession, stateStore, getWindowState);
   if (!workspaceStore) throw new Error('Workspace storage is not ready.');
-  workspaceEngine = new WorkspaceEngine(mainWindow, workspaceStore, browserEngine, new GitEngine());
+  const git = new GitEngine();
+  workspaceEngine = new WorkspaceEngine(mainWindow, workspaceStore, browserEngine, git);
+  if (!taskStore) throw new Error('Task storage is not ready.');
+  taskEngine = new TaskEngine(mainWindow, taskStore, workspaceStore, git);
   browserEngine.restore(
     persisted
       ? { tabs: persisted.tabs, activeTabId: persisted.activeTabId }
@@ -79,9 +87,12 @@ async function createWindow(): Promise<void> {
   mainWindow.on('enter-full-screen', () => browserEngine?.scheduleSave());
   mainWindow.on('leave-full-screen', () => browserEngine?.scheduleSave());
   mainWindow.on('closed', () => {
+    const closingTaskEngine = taskEngine;
     mainWindow = null;
     browserEngine = null;
     workspaceEngine = null;
+    taskEngine = null;
+    void closingTaskEngine?.close();
   });
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   mainWindow.webContents.on('will-navigate', (event) => event.preventDefault());
@@ -93,6 +104,7 @@ async function createWindow(): Promise<void> {
   });
 
   await mainWindow.loadURL(MAIN_WINDOW_WEBPACK_ENTRY);
+  void taskEngine?.initialize();
 }
 
 function isTrustedShellSender(sender: Electron.WebContents): boolean {
@@ -102,6 +114,7 @@ function isTrustedShellSender(sender: Electron.WebContents): boolean {
 app.whenReady().then(async () => {
   Menu.setApplicationMenu(null);
   workspaceStore = new WorkspaceStore(path.join(app.getPath('userData'), 'poppin.sqlite'));
+  taskStore = new TaskStore(path.join(app.getPath('userData'), 'poppin.sqlite'));
   ipcMain.handle(BROWSER_CHANNELS.getSnapshot, (event) => {
     if (!isTrustedShellSender(event.sender)) throw new Error('Untrusted browser snapshot request.');
     return browserEngine?.getSnapshot();
@@ -118,6 +131,17 @@ app.whenReady().then(async () => {
     if (!isTrustedShellSender(event.sender)) throw new Error('Untrusted workspace command.');
     return workspaceEngine?.execute(command) ?? { ok: false, message: 'Workspace is not ready.' };
   });
+  ipcMain.handle(TASK_CHANNELS.getSnapshot, (event) => {
+    if (!isTrustedShellSender(event.sender)) throw new Error('Untrusted task snapshot request.');
+    return taskEngine?.getSnapshot() ?? {
+      connection: { state: 'checking', message: 'Codex is starting…', accountLabel: null, models: [] },
+      task: null,
+    };
+  });
+  ipcMain.handle(TASK_CHANNELS.command, (event, command: TaskCommand) => {
+    if (!isTrustedShellSender(event.sender)) throw new Error('Untrusted task command.');
+    return taskEngine?.execute(command) ?? { ok: false, message: 'Codex is not ready.' };
+  });
 
   const browsingSession = session.fromPartition('persist:poppin-browser');
   browsingSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
@@ -130,16 +154,20 @@ app.whenReady().then(async () => {
 });
 
 app.on('before-quit', (event) => {
-  if (!browserEngine) return;
+  if (!browserEngine && !taskEngine) return;
   event.preventDefault();
   const engine = browserEngine;
+  const codex = taskEngine;
   browserEngine = null;
-  void engine.flush().finally(() => app.quit());
+  taskEngine = null;
+  void Promise.all([engine?.flush(), codex?.close()]).finally(() => app.quit());
 });
 
 app.on('quit', () => {
   workspaceStore?.close();
   workspaceStore = null;
+  taskStore?.close();
+  taskStore = null;
 });
 
 app.on('window-all-closed', () => {

@@ -12,6 +12,12 @@ import {
   type WorkspaceCommand,
   type WorkspaceSnapshot,
 } from '../shared/workspace';
+import {
+  TASK_CHANNELS,
+  type PoppinTaskApi,
+  type TaskCommand,
+  type TaskSnapshot,
+} from '../shared/task';
 
 const api: PoppinBrowserApi = {
   getSnapshot: () => ipcRenderer.invoke(BROWSER_CHANNELS.getSnapshot) as Promise<BrowserSnapshot>,
@@ -41,3 +47,15 @@ const workspaceApi: PoppinWorkspaceApi = {
 };
 
 contextBridge.exposeInMainWorld('poppinWorkspace', workspaceApi);
+
+const taskApi: PoppinTaskApi = {
+  getSnapshot: () => ipcRenderer.invoke(TASK_CHANNELS.getSnapshot) as Promise<TaskSnapshot>,
+  command: (command: TaskCommand) => ipcRenderer.invoke(TASK_CHANNELS.command, command),
+  subscribe: (listener) => {
+    const handler = (_event: Electron.IpcRendererEvent, snapshot: TaskSnapshot) => listener(snapshot);
+    ipcRenderer.on(TASK_CHANNELS.snapshot, handler);
+    return () => ipcRenderer.removeListener(TASK_CHANNELS.snapshot, handler);
+  },
+};
+
+contextBridge.exposeInMainWorld('poppinTask', taskApi);
