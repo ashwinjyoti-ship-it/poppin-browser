@@ -15,6 +15,19 @@ export interface WorkspaceSnapshot {
   documents: WorkspaceDocumentSnapshot[];
   tabContexts: TabContextSnapshot[];
   project: WorkspaceProjectSnapshot | null;
+  visualSelection: VisualSelectionSnapshot | null;
+}
+
+export interface VisualSelectionSnapshot {
+  tabId: string;
+  url: string;
+  selector: string;
+  html: string;
+  css: Record<string, string>;
+  domContext: string;
+  boundingBox: { x: number; y: number; width: number; height: number };
+  screenshotDataUrl: string;
+  capturedAt: string;
 }
 
 export interface WorkspaceProjectSnapshot {
@@ -60,6 +73,8 @@ export type WorkspaceCommand =
   | { type: 'setDocumentSelected'; documentId: string; selected: boolean }
   | { type: 'setTabSelected'; tabId: string; selected: boolean }
   | { type: 'refreshTabContext'; tabId: string }
+  | { type: 'captureVisualSelection'; tabId: string }
+  | { type: 'clearVisualSelection' }
   | { type: 'connectExistingProject' }
   | { type: 'cloneRepository'; remote: string }
   | { type: 'createNewProject' }

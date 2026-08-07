@@ -12,10 +12,14 @@ const config: ForgeConfig = {
   packagerConfig: {
     asar: true,
     icon: './src/renderer/assets/poppin-app-icon',
+    protocols: [{ name: 'Poppin Browser', schemes: ['http', 'https'] }],
   },
   makers: [
     new MakerZIP({}, ['darwin']),
-    new MakerDMG({ format: 'ULFO' }),
+    new MakerDMG({
+      format: 'ULFO',
+      icon: './src/renderer/assets/poppin-app-icon.icns',
+    }),
   ],
   plugins: [
     new WebpackPlugin({

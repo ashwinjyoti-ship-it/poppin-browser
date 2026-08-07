@@ -5,6 +5,7 @@ export const TASK_CHANNELS = {
 } as const;
 
 export type TaskState = 'Running' | 'Needs Approval' | 'Completed' | 'Failed' | 'Cancelled' | 'Discarded';
+export type TaskKind = 'work' | 'code';
 export type CodexConnectionState = 'checking' | 'ready' | 'notInstalled' | 'signedOut' | 'error';
 
 export interface CodexModelSnapshot {
@@ -26,13 +27,23 @@ export interface TaskProgressSnapshot {
 
 export interface TaskApprovalSnapshot {
   requestId: number | string;
-  kind: 'command' | 'files' | 'permissions';
+  kind: 'command' | 'files' | 'permissions' | 'git' | 'github' | 'question';
   title: string;
   detail: string;
   reason: string | null;
 }
 
+export interface TaskDeliverySnapshot {
+  branch: string;
+  commit: string;
+  remote: string | null;
+  pushed: boolean;
+  pullRequest: { number: number; url: string; base: string; head: string; state: string; checks: string; review: string } | null;
+  message: string;
+}
+
 export interface TaskRecordSnapshot {
+  kind: TaskKind;
   state: TaskState;
   prompt: string;
   model: string;
@@ -45,6 +56,7 @@ export interface TaskRecordSnapshot {
   result: string;
   diff: string;
   error: string | null;
+  delivery?: TaskDeliverySnapshot;
   createdAt: string;
   updatedAt: string;
 }
@@ -61,11 +73,19 @@ export interface TaskSnapshot {
 
 export type TaskCommand =
   | { type: 'refreshConnection' }
-  | { type: 'startTask'; prompt: string; model: string; reasoningEffort: string }
+  | { type: 'startTask'; prompt: string; model: string; reasoningEffort: string; kind: TaskKind }
   | { type: 'respondApproval'; decision: 'accept' | 'decline' | 'cancel' }
+  | { type: 'respondQuestion'; answer: string }
   | { type: 'cancelTask' }
   | { type: 'reviseTask'; prompt: string }
-  | { type: 'approveResult' };
+  | { type: 'approveResult' }
+  | { type: 'openPreview' }
+  | { type: 'prepareCommit'; branch: string; message: string }
+  | { type: 'requestPush' }
+  | { type: 'requestPullRequest'; base: string; title: string; body: string }
+  | { type: 'refreshPullRequest' }
+  | { type: 'requestMerge'; strategy: 'merge' | 'squash' | 'rebase' }
+  | { type: 'exportResult'; format: 'markdown' | 'text' };
 
 export interface TaskCommandResult {
   ok: boolean;

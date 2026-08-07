@@ -33,7 +33,22 @@ export class WorkspaceEngine {
       documents: this.store.listDocuments(),
       tabContexts: this.store.listTabContexts(),
       project: this.store.getProject(),
+      visualSelection: this.store.getVisualSelection(),
     };
+  }
+
+  updateTabContextFromAgent(tabId: string, capturedText: string): boolean {
+    const existing = this.store.listTabContexts().find((context) => context.tabId === tabId);
+    if (!existing) return false;
+    const normalized = capturedText.replace(/\r\n/g, '\n').trim();
+    this.store.upsertTabContext({
+      ...existing,
+      capturedText: normalized.slice(0, MAX_DOCUMENT_BYTES),
+      truncated: normalized.length > MAX_DOCUMENT_BYTES,
+      capturedAt: new Date().toISOString(),
+    });
+    this.emitSnapshot();
+    return true;
   }
 
   async execute(command: WorkspaceCommand): Promise<WorkspaceCommandResult> {
@@ -56,6 +71,11 @@ export class WorkspaceEngine {
         break;
       case 'refreshTabContext':
         return this.captureTab(command.tabId);
+      case 'captureVisualSelection':
+        return this.captureVisualSelection(command.tabId);
+      case 'clearVisualSelection':
+        this.store.clearVisualSelection();
+        break;
       case 'connectExistingProject':
         return this.connectExistingProject();
       case 'cloneRepository':
@@ -133,6 +153,18 @@ export class WorkspaceEngine {
     });
     this.emitSnapshot();
     return { ok: true };
+  }
+
+  private async captureVisualSelection(tabId: string): Promise<WorkspaceCommandResult> {
+    try {
+      const selection = await this.browser.captureVisualSelection(tabId);
+      if (!selection) return { ok: false, message: 'Visual selection was cancelled or timed out.' };
+      this.store.saveVisualSelection(selection);
+      this.emitSnapshot();
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, message: error instanceof Error ? error.message : 'Poppin could not capture that element.' };
+    }
   }
 
   private async connectExistingProject(): Promise<WorkspaceCommandResult> {

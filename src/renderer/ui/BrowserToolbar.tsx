@@ -1,5 +1,5 @@
-import { ArrowLeft, ArrowRight, LockKeyhole, RefreshCw, Search } from 'lucide-react';
-import { type FormEvent, type RefObject } from 'react';
+import { ArrowLeft, ArrowRight, KeyRound, LockKeyhole, RefreshCw, Search, X } from 'lucide-react';
+import { Fragment, type FormEvent, type RefObject, useState } from 'react';
 
 import type { BrowserTabSnapshot } from '../../shared/browser';
 
@@ -7,6 +7,7 @@ interface BrowserToolbarProps {
   activeTab: BrowserTabSnapshot | null;
   address: string;
   addressError: string;
+  googleSignInHelp: boolean;
   addressInputRef: RefObject<HTMLInputElement | null>;
   onAddressChange: (value: string) => void;
   onAddressFocus: () => void;
@@ -14,6 +15,7 @@ interface BrowserToolbarProps {
   onBack: () => void;
   onForward: () => void;
   onReload: () => void;
+  onShowGoogleSignInAlternatives: () => void;
   onSubmit: (event: FormEvent) => void;
 }
 
@@ -21,6 +23,7 @@ export function BrowserToolbar({
   activeTab,
   address,
   addressError,
+  googleSignInHelp,
   addressInputRef,
   onAddressChange,
   onAddressFocus,
@@ -28,6 +31,7 @@ export function BrowserToolbar({
   onBack,
   onForward,
   onReload,
+  onShowGoogleSignInAlternatives,
   onSubmit,
 }: BrowserToolbarProps) {
   return (
@@ -65,8 +69,53 @@ export function BrowserToolbar({
         {addressError ? <span className="address-error" role="alert">{addressError}</span> : null}
       </form>
 
-      <div className="toolbar-spacer" aria-hidden="true" />
+      {googleSignInHelp ? (
+        <GoogleSignInAssistance onShowAlternatives={onShowGoogleSignInAlternatives} />
+      ) : <div className="toolbar-actions" />}
     </div>
   );
 }
 
+function GoogleSignInAssistance({ onShowAlternatives }: { onShowAlternatives: () => void }) {
+  const [open, setOpen] = useState(true);
+
+  return (
+    <Fragment>
+      <div className="toolbar-actions">
+        <button
+          type="button"
+          className="sign-in-help-button"
+          aria-label="Google sign-in help"
+          aria-expanded={open}
+          onClick={() => setOpen((current) => !current)}
+        >
+          <KeyRound size={17} />
+          <span>Sign-in help</span>
+        </button>
+      </div>
+
+      {open ? (
+        <aside className="google-sign-in-help" aria-label="Google sign-in guidance">
+          <KeyRound size={17} aria-hidden="true" />
+          <div>
+            <strong>Finish signing in to Google</strong>
+            <p>Poppin has a separate secure browser session. Show Google’s other methods, then use a phone prompt, security key, or password. Poppin remembers the login after it succeeds.</p>
+          </div>
+          <button
+            type="button"
+            className="google-sign-in-fallback"
+            onClick={() => {
+              onShowAlternatives();
+              setOpen(false);
+            }}
+          >
+            Show other methods
+          </button>
+          <button type="button" className="google-sign-in-close" aria-label="Dismiss Google sign-in help" onClick={() => setOpen(false)}>
+            <X size={14} />
+          </button>
+        </aside>
+      ) : null}
+    </Fragment>
+  );
+}

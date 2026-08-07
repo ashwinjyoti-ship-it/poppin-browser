@@ -18,13 +18,17 @@ import {
   type PersistedBrowserStateV1,
   type WindowState,
 } from '../../shared/browser';
-import { errorPageUrl } from './internal-pages';
+import { errorPageUrl, TASK_RESULT_URL } from './internal-pages';
 import { BrowserStateStore } from './state-store';
 import { displayUrl, NEW_TAB_URL, normalizeAddressInput } from './url-input';
 import type { CapturedTabContext } from '../../shared/workspace';
+import type { VisualSelectionSnapshot } from '../../shared/workspace';
+import { GOOGLE_SIGN_IN_FALLBACK_SCRIPT, isGoogleAccountsUrl } from '../../shared/google-auth';
+import { HtmlFullscreenCoordinator, type HtmlFullscreenTransition } from './html-fullscreen';
+import type { BrowserAgentAction } from '../../shared/browser-agent';
 
 const PAGE_MARGIN = 12;
-const CHROME_HEIGHT = 152;
+const DEFAULT_CHROME_HEIGHT = 152;
 const SAVE_DELAY_MS = 250;
 const MAX_LAYOUT_INSET = 520;
 const MAX_TAB_CONTEXT_CHARACTERS = 60_000;
@@ -45,7 +49,8 @@ export class BrowserEngine {
   private activeTabId = '';
   private saveTimer: NodeJS.Timeout | null = null;
   private isClosing = false;
-  private viewInsets = { left: 0, right: 0, bottom: 0 };
+  private readonly htmlFullscreen = new HtmlFullscreenCoordinator();
+  private viewInsets = { top: DEFAULT_CHROME_HEIGHT, left: 0, right: 0, bottom: 0 };
 
   constructor(
     private readonly window: BrowserWindow,
@@ -54,6 +59,18 @@ export class BrowserEngine {
     private readonly getWindowState: () => WindowState,
   ) {
     this.window.on('resize', () => this.layoutViews());
+    this.window.on('enter-full-screen', () => {
+      this.applyFullscreenTransition(this.htmlFullscreen.windowDidEnter());
+      this.layoutViews();
+    });
+    this.window.on('leave-full-screen', () => {
+      const tabId = this.htmlFullscreen.windowDidLeave();
+      const tab = tabId ? this.tabs.get(tabId) : null;
+      if (tab && !tab.view.webContents.isDestroyed()) {
+        void tab.view.webContents.executeJavaScript('if (document.fullscreenElement) void document.exitFullscreen()').catch(() => undefined);
+      }
+      this.layoutViews();
+    });
     this.window.on('closed', () => {
       this.isClosing = true;
       if (this.saveTimer) clearTimeout(this.saveTimer);
@@ -76,7 +93,118 @@ export class BrowserEngine {
     return {
       tabs: Array.from(this.tabs.values(), ({ snapshot }) => ({ ...snapshot })),
       activeTabId: this.activeTabId,
+      isFullScreen: this.window.isFullScreen(),
     };
+  }
+
+  openExternalUrl(url: string): void {
+    const normalized = normalizeAddressInput(url);
+    if (normalized.kind !== 'url') return;
+    this.createTab(normalized.url, randomUUID(), false);
+  }
+
+  openTaskResult(): void {
+    const existing = Array.from(this.tabs.values()).find((tab) => tab.lastExternalUrl === TASK_RESULT_URL);
+    if (existing) {
+      this.activateTab(existing.snapshot.id);
+      existing.view.webContents.reloadIgnoringCache();
+      return;
+    }
+    this.createTab(TASK_RESULT_URL, randomUUID(), false);
+  }
+
+  hasTab(tabId: string): boolean {
+    const tab = this.tabs.get(tabId);
+    return Boolean(tab && !tab.view.webContents.isDestroyed());
+  }
+
+  activateTabForAgent(tabId: string): boolean {
+    return this.activateTab(tabId).ok;
+  }
+
+  async inspectAction(tabId: string, action: BrowserAgentAction): Promise<{ credential: boolean; consequential: string | null; target: string }> {
+    const tab = this.tabs.get(tabId);
+    if (!tab || tab.view.webContents.isDestroyed()) throw new Error('That tab is no longer available.');
+    if (action.type !== 'click' && action.type !== 'type') {
+      return { credential: false, consequential: null, target: agentActionTarget(action) };
+    }
+    const selector = JSON.stringify(action.selector);
+    const inspected = await tab.view.webContents.executeJavaScript(`(() => {
+      const element = document.querySelector(${selector});
+      if (!(element instanceof HTMLElement)) return null;
+      const input = element instanceof HTMLInputElement ? element : element.querySelector('input');
+      const descriptor = [
+        element.id, element.getAttribute('name'), element.getAttribute('aria-label'),
+        element.getAttribute('autocomplete'), input?.type, input?.name, input?.autocomplete
+      ].filter(Boolean).join(' ');
+      const text = (element.innerText || element.getAttribute('aria-label') || element.getAttribute('title') || '').trim().slice(0, 240);
+      const href = element instanceof HTMLAnchorElement ? element.href : element.closest('a')?.href || '';
+      const form = element.closest('form');
+      const isSubmit = (element instanceof HTMLButtonElement && (!element.type || element.type === 'submit'))
+        || (element instanceof HTMLInputElement && ['submit', 'image'].includes(element.type));
+      const credential = /password|passkey|credential|one[-_ ]?time|otp|verification[-_ ]?code/i.test(descriptor)
+        || input?.type === 'password';
+      let consequential = null;
+      const signal = [text, href, form?.action || '', descriptor].join(' ');
+      if (element.hasAttribute('download') || /\\b(download|upload|purchase|pay|buy|delete|remove|publish|send|submit|sign[- ]?in|log[- ]?in|merge|create (?:pull request|record))\\b/i.test(signal)) {
+        consequential = 'This action may cause an external or irreversible effect.';
+      } else if (isSubmit || (actionType === 'click' && form)) {
+        consequential = 'This action may submit a form.';
+      }
+      return { credential, consequential, target: text || href || element.tagName.toLowerCase() };
+    })()`.replace('actionType', JSON.stringify(action.type)), true);
+    if (!inspected || typeof inspected !== 'object') throw new Error('The target element is no longer available.');
+    const value = inspected as { credential?: unknown; consequential?: unknown; target?: unknown };
+    return {
+      credential: value.credential === true,
+      consequential: typeof value.consequential === 'string' ? value.consequential : null,
+      target: typeof value.target === 'string' ? value.target : action.selector,
+    };
+  }
+
+  async performAction(tabId: string, action: BrowserAgentAction): Promise<string> {
+    const tab = this.tabs.get(tabId);
+    if (!tab || tab.view.webContents.isDestroyed()) throw new Error('That tab is no longer available.');
+    const contents = tab.view.webContents;
+    switch (action.type) {
+      case 'navigate': {
+        const parsed = new URL(action.url);
+        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error('Controlled navigation only supports HTTP and HTTPS.');
+        await contents.loadURL(parsed.toString());
+        return parsed.toString();
+      }
+      case 'read':
+        return String(await contents.executeJavaScript(READ_VISIBLE_PAGE_SCRIPT, true));
+      case 'captureTranscript':
+        return String(await contents.executeJavaScript(CAPTURE_TRANSCRIPT_SCRIPT, true));
+      case 'click': {
+        const clicked = await contents.executeJavaScript(`(() => { const element = document.querySelector(${JSON.stringify(action.selector)}); if (!(element instanceof HTMLElement)) return false; element.click(); return true; })()`, true);
+        if (clicked !== true) throw new Error('The target element is no longer available.');
+        return `Clicked ${action.selector}`;
+      }
+      case 'type': {
+        const typed = await contents.executeJavaScript(`(() => {
+          const element = document.querySelector(${JSON.stringify(action.selector)});
+          if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLElement && element.isContentEditable)) return false;
+          const descriptor = [element.id, element.getAttribute('name'), element.getAttribute('aria-label'), element.getAttribute('autocomplete'), element instanceof HTMLInputElement ? element.type : ''].filter(Boolean).join(' ');
+          if (/password|passkey|credential|one[-_ ]?time|otp|verification[-_ ]?code/i.test(descriptor)) return 'credential';
+          if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) element.value = ${JSON.stringify(action.text)};
+          else element.textContent = ${JSON.stringify(action.text)};
+          element.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: ${JSON.stringify(action.text)} }));
+          element.dispatchEvent(new Event('change', { bubbles: true }));
+          return true;
+        })()`, true);
+        if (typed === 'credential') throw new Error('Poppin never types into credential fields.');
+        if (typed !== true) throw new Error('The editable target is no longer available.');
+        return `Typed ${action.text.length} character(s)`;
+      }
+      case 'scroll':
+        await contents.executeJavaScript(`window.scrollBy({ top: ${Math.max(-4000, Math.min(4000, Math.round(action.deltaY)))}, behavior: 'smooth' })`, true);
+        return `Scrolled ${Math.round(action.deltaY)} pixels`;
+      case 'search':
+        contents.findInPage(action.text, { findNext: false, forward: true });
+        return `Searched the visible page for “${action.text}”`;
+    }
   }
 
   async captureTabContext(tabId: string): Promise<CapturedTabContext | null> {
@@ -106,6 +234,37 @@ export class BrowserEngine {
     }
   }
 
+  async captureVisualSelection(tabId: string): Promise<VisualSelectionSnapshot | null> {
+    const tab = this.tabs.get(tabId);
+    if (!tab || tab.view.webContents.isDestroyed()) return null;
+    const currentUrl = tab.view.webContents.getURL();
+    if (!isLocalhostUrl(currentUrl)) throw new Error('Visual selection is limited to localhost previews.');
+    this.activateTab(tabId);
+    const captured = await tab.view.webContents.executeJavaScript(VISUAL_SELECTION_SCRIPT, true) as unknown;
+    if (!isVisualSelectionCapture(captured)) return null;
+    const viewBounds = tab.view.getBounds();
+    const x = Math.max(0, Math.min(viewBounds.width - 1, Math.floor(captured.boundingBox.x)));
+    const y = Math.max(0, Math.min(viewBounds.height - 1, Math.floor(captured.boundingBox.y)));
+    const box = {
+      x,
+      y,
+      width: Math.max(1, Math.min(viewBounds.width - x, Math.ceil(captured.boundingBox.width))),
+      height: Math.max(1, Math.min(viewBounds.height - y, Math.ceil(captured.boundingBox.height))),
+    };
+    const screenshot = await tab.view.webContents.capturePage(box);
+    return {
+      tabId,
+      url: currentUrl,
+      selector: captured.selector.slice(0, 500),
+      html: captured.html.slice(0, 20_000),
+      css: Object.fromEntries(Object.entries(captured.css).slice(0, 80).map(([key, value]) => [key.slice(0, 100), value.slice(0, 500)])),
+      domContext: captured.domContext.slice(0, 30_000),
+      boundingBox: captured.boundingBox,
+      screenshotDataUrl: screenshot.toDataURL(),
+      capturedAt: new Date().toISOString(),
+    };
+  }
+
   async execute(command: BrowserCommand): Promise<BrowserCommandResult> {
     switch (command.type) {
       case 'create':
@@ -123,8 +282,14 @@ export class BrowserEngine {
         return this.goForward(command.tabId);
       case 'reload':
         return this.reload(command.tabId);
+      case 'showGoogleSignInAlternatives':
+        return this.showGoogleSignInAlternatives(command.tabId);
+      case 'openTaskResult':
+        this.openTaskResult();
+        return { ok: true };
       case 'setLayout':
         this.viewInsets = {
+          top: clampInset(command.topInset),
           left: clampInset(command.leftInset),
           right: clampInset(command.rightInset),
           bottom: clampInset(command.bottomInset),
@@ -236,6 +401,14 @@ export class BrowserEngine {
     });
     contents.on('before-input-event', (event, input) => {
       if (this.handleShortcut(input)) event.preventDefault();
+    });
+    contents.on('enter-html-full-screen', () => {
+      this.applyFullscreenTransition(this.htmlFullscreen.enter(tab.snapshot.id, this.window.isFullScreen()));
+      this.layoutViews();
+    });
+    contents.on('leave-html-full-screen', () => {
+      this.applyFullscreenTransition(this.htmlFullscreen.leave(tab.snapshot.id));
+      this.layoutViews();
     });
     contents.on('did-start-loading', () => this.updateTab(tab, { isLoading: true, failure: null }));
     contents.on('did-stop-loading', () => {
@@ -361,6 +534,25 @@ export class BrowserEngine {
     return { ok: true };
   }
 
+  private async showGoogleSignInAlternatives(tabId: string): Promise<BrowserCommandResult> {
+    const tab = this.tabs.get(tabId);
+    if (!tab || tab.view.webContents.isDestroyed()) {
+      return { ok: false, message: 'That tab is no longer available.' };
+    }
+    if (!isGoogleAccountsUrl(tab.view.webContents.getURL())) {
+      return { ok: false, message: 'Sign-in assistance is only available on Google Accounts.' };
+    }
+
+    try {
+      const activated = await tab.view.webContents.executeJavaScript(GOOGLE_SIGN_IN_FALLBACK_SCRIPT, true);
+      return activated === true
+        ? { ok: true }
+        : { ok: false, message: 'Choose “Try another way” directly on Google’s page.' };
+    } catch {
+      return { ok: false, message: 'Choose “Try another way” directly on Google’s page.' };
+    }
+  }
+
   private updateTab(tab: BrowserTabRecord, updates: Partial<BrowserTabSnapshot>): void {
     Object.assign(tab.snapshot, updates);
     this.syncNavigationState(tab);
@@ -382,13 +574,21 @@ export class BrowserEngine {
   private layoutViews(): void {
     if (this.window.isDestroyed()) return;
     const [width = 1, height = 1] = this.window.getContentSize();
+    const isHtmlFullscreen = this.htmlFullscreen.isActiveFor(this.activeTabId);
     const bounds: Rectangle = {
-      x: PAGE_MARGIN + this.viewInsets.left,
-      y: CHROME_HEIGHT,
-      width: Math.max(1, width - PAGE_MARGIN * 2 - this.viewInsets.left - this.viewInsets.right),
-      height: Math.max(1, height - CHROME_HEIGHT - PAGE_MARGIN - this.viewInsets.bottom),
+      x: isHtmlFullscreen ? 0 : PAGE_MARGIN + this.viewInsets.left,
+      y: isHtmlFullscreen ? 0 : this.viewInsets.top,
+      width: isHtmlFullscreen ? width : Math.max(1, width - PAGE_MARGIN * 2 - this.viewInsets.left - this.viewInsets.right),
+      height: isHtmlFullscreen ? height : Math.max(1, height - this.viewInsets.top - PAGE_MARGIN - this.viewInsets.bottom),
     };
-    for (const tab of this.tabs.values()) tab.view.setBounds(bounds);
+    for (const tab of this.tabs.values()) {
+      tab.view.setBounds(bounds);
+      tab.view.setBorderRadius(isHtmlFullscreen && tab.snapshot.id === this.activeTabId ? 0 : 18);
+    }
+  }
+
+  private applyFullscreenTransition(transition: HtmlFullscreenTransition): void {
+    if (transition.windowFullscreen !== null) this.window.setFullScreen(transition.windowFullscreen);
   }
 }
 
@@ -409,3 +609,100 @@ function safeProtocol(value: string): string {
     return '';
   }
 }
+
+export function isLocalhostUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return (url.protocol === 'http:' || url.protocol === 'https:')
+      && (url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '::1' || url.hostname === '[::1]');
+  } catch {
+    return false;
+  }
+}
+
+function isVisualSelectionCapture(value: unknown): value is {
+  selector: string; html: string; css: Record<string, string>; domContext: string;
+  boundingBox: { x: number; y: number; width: number; height: number };
+} {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as Record<string, unknown>;
+  const box = candidate.boundingBox as Record<string, unknown> | undefined;
+  return typeof candidate.selector === 'string' && typeof candidate.html === 'string'
+    && Boolean(candidate.css && typeof candidate.css === 'object') && typeof candidate.domContext === 'string'
+    && Boolean(box && ['x', 'y', 'width', 'height'].every((key) => typeof box[key] === 'number'));
+}
+
+function agentActionTarget(action: BrowserAgentAction): string {
+  if ('selector' in action) return action.selector;
+  if ('url' in action) return action.url;
+  if ('text' in action) return action.text;
+  if ('deltaY' in action) return `${action.deltaY}px`;
+  return 'visible page';
+}
+
+const READ_VISIBLE_PAGE_SCRIPT = `(() => {
+  const clone = document.body?.cloneNode(true);
+  if (!(clone instanceof HTMLElement)) return '';
+  clone.querySelectorAll('input, textarea, select, option, [contenteditable], script, style, noscript').forEach((element) => element.remove());
+  return (clone.innerText || '').replace(/\\n{3,}/g, '\\n\\n').trim().slice(0, 60000);
+})()`;
+
+const CAPTURE_TRANSCRIPT_SCRIPT = `(async () => {
+  const textOf = (element) => (element?.innerText || element?.textContent || '').trim();
+  const transcriptButton = Array.from(document.querySelectorAll('button, ytd-button-renderer, tp-yt-paper-button'))
+    .find((element) => /show transcript|open transcript/i.test(textOf(element)));
+  if (transcriptButton instanceof HTMLElement) {
+    transcriptButton.scrollIntoView({ block: 'center' });
+    transcriptButton.click();
+    await new Promise((resolve) => setTimeout(resolve, 650));
+  }
+  const segments = Array.from(document.querySelectorAll('ytd-transcript-segment-renderer, [class*="transcript-segment"]'))
+    .map((element) => textOf(element)).filter(Boolean);
+  if (segments.length > 0) return segments.join('\\n').slice(0, 60000);
+  const captions = Array.from(document.querySelectorAll('[class*="caption"], [aria-label*="transcript" i]'))
+    .map((element) => textOf(element)).filter(Boolean);
+  return captions.join('\\n').slice(0, 60000);
+})()`;
+
+const VISUAL_SELECTION_SCRIPT = `new Promise((resolve) => {
+  const marker = document.createElement('div');
+  marker.setAttribute('data-poppin-selector', 'true');
+  Object.assign(marker.style, { position: 'fixed', zIndex: '2147483647', pointerEvents: 'none', border: '2px solid #e8820b', borderRadius: '4px', background: 'rgba(232,130,11,.08)', boxShadow: '0 0 0 9999px rgba(24,18,12,.14)' });
+  document.documentElement.appendChild(marker);
+  const move = (event) => {
+    const target = event.target;
+    if (!(target instanceof Element) || target === marker) return;
+    const rect = target.getBoundingClientRect();
+    Object.assign(marker.style, { left: rect.left + 'px', top: rect.top + 'px', width: rect.width + 'px', height: rect.height + 'px' });
+  };
+  let timeout;
+  const cleanup = () => { clearTimeout(timeout); marker.remove(); document.removeEventListener('mousemove', move, true); document.removeEventListener('click', pick, true); document.removeEventListener('keydown', cancel, true); };
+  const selectorFor = (element) => {
+    if (element.id) return '#' + CSS.escape(element.id);
+    const testId = element.getAttribute('data-testid');
+    if (testId) return '[data-testid="' + CSS.escape(testId) + '"]';
+    const parts = [];
+    let current = element;
+    while (current && current !== document.body && parts.length < 5) {
+      const siblings = current.parentElement ? Array.from(current.parentElement.children).filter((child) => child.tagName === current.tagName) : [];
+      const position = siblings.length > 1 ? ':nth-of-type(' + (siblings.indexOf(current) + 1) + ')' : '';
+      parts.unshift(current.tagName.toLowerCase() + position);
+      current = current.parentElement;
+    }
+    return parts.join(' > ');
+  };
+  const pick = (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement) || target === marker) return;
+    event.preventDefault(); event.stopPropagation();
+    const rect = target.getBoundingClientRect();
+    const computed = getComputedStyle(target);
+    const properties = ['display','position','box-sizing','width','height','margin','padding','border','border-radius','background','color','font','font-size','font-weight','line-height','letter-spacing','text-align','opacity','box-shadow','flex','flex-direction','align-items','justify-content','gap','grid-template-columns','overflow','z-index','transform'];
+    const css = Object.fromEntries(properties.map((name) => [name, computed.getPropertyValue(name)]).filter((entry) => entry[1]));
+    const result = { selector: selectorFor(target), html: target.outerHTML, css, domContext: target.parentElement?.outerHTML || target.outerHTML, boundingBox: { x: rect.x, y: rect.y, width: rect.width, height: rect.height } };
+    cleanup(); resolve(result);
+  };
+  const cancel = (event) => { if (event.key === 'Escape') { cleanup(); resolve(null); } };
+  document.addEventListener('mousemove', move, true); document.addEventListener('click', pick, true); document.addEventListener('keydown', cancel, true);
+  timeout = setTimeout(() => { cleanup(); resolve(null); }, 120000);
+})`;

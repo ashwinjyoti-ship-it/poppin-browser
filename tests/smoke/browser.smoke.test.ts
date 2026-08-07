@@ -28,6 +28,11 @@ beforeEach(async () => {
       response.end("<!doctype html><title>Redirecting</title><script>location.replace('/second')</script>");
       return;
     }
+    if (route === '/fullscreen') {
+      response.end(`<!doctype html><title>Fullscreen fixture</title>
+        <button id="enter" onclick="document.documentElement.requestFullscreen()">Enter fullscreen</button>`);
+      return;
+    }
     response.setHeader('Set-Cookie', 'poppin-session=restored; Path=/; SameSite=Lax');
     response.end(`<!doctype html>
       <title>Local fixture</title>
@@ -95,6 +100,16 @@ describe('packaged browser workflow', () => {
     await expect.poll(() => newTabPage!.getByRole('heading', { name: /where would you like to go/i }).isVisible()).toBe(true);
 
     const address = shell.getByLabel('Address and search');
+    const workspaceDivider = shell.getByRole('separator', { name: 'Resize workspace pane' });
+    const initialWorkspaceWidth = Number(await workspaceDivider.getAttribute('aria-valuenow'));
+    const chromeHeight = await shell.locator('.app-shell').evaluate((element) => Number.parseInt(getComputedStyle(element).getPropertyValue('--chrome-height'), 10));
+    const initialBrowserBounds = await activeBrowserViewBounds(application);
+    expect(initialBrowserBounds.y).toBe(chromeHeight);
+    await workspaceDivider.press('Shift+ArrowRight');
+    const resizedWorkspaceWidth = initialWorkspaceWidth + 24;
+    await expect.poll(() => workspaceDivider.getAttribute('aria-valuenow')).toBe(String(resizedWorkspaceWidth));
+    await expect.poll(async () => (await activeBrowserViewBounds(application!)).x).toBe(initialBrowserBounds.x + 24);
+
     await address.fill(origin);
     await address.press('Enter');
     await expect.poll(() => pageInfo(application!, origin)).toMatchObject({
@@ -102,6 +117,37 @@ describe('packaged browser workflow', () => {
       node: 'undefined',
       bridge: 'undefined',
     });
+
+    await address.fill(`${origin}/fullscreen`);
+    await address.press('Enter');
+    await expect.poll(() => exactPageInfo(application!, `${origin}/fullscreen`)).toMatchObject({ title: 'Fullscreen fixture' });
+    await application.evaluate(({ app, BrowserWindow }) => {
+      app.focus({ steal: true });
+      BrowserWindow.getAllWindows()[0]?.focus();
+    });
+    await application.evaluate(({ webContents }, targetUrl) => {
+      const contents = webContents.getAllWebContents().find((candidate) => candidate.getURL() === targetUrl);
+      (contents as unknown as { emit(event: string): void })?.emit('enter-html-full-screen');
+    }, `${origin}/fullscreen`);
+    await expect.poll(
+      () => application!.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.isFullScreen()),
+      { timeout: 5_000, interval: 100 },
+    ).toBe(true);
+    await expect.poll(async () => {
+      const bounds = await activeBrowserViewBounds(application!);
+      return bounds.x === 0 && bounds.y === 0;
+    }).toBe(true);
+    await application.evaluate(({ webContents }, targetUrl) => {
+      const contents = webContents.getAllWebContents().find((candidate) => candidate.getURL() === targetUrl);
+      (contents as unknown as { emit(event: string): void })?.emit('leave-html-full-screen');
+    }, `${origin}/fullscreen`);
+    await expect.poll(
+      () => application!.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.isFullScreen()),
+      { timeout: 5_000, interval: 100 },
+    ).toBe(false);
+    await address.fill(origin);
+    await address.press('Enter');
+    await expect.poll(() => pageInfo(application!, origin)).toMatchObject({ title: 'Local fixture' });
 
     const workspace = shell.getByLabel('Workspace');
     await workspace.getByLabel('Workspace name').fill('Launch workspace');
@@ -143,6 +189,7 @@ describe('packaged browser workflow', () => {
 
     ({ app: application, shell } = await launch(userDataPath));
     await expect.poll(() => shell.getByRole('tab').count()).toBe(2);
+    await expect.poll(() => shell.getByRole('separator', { name: 'Resize workspace pane' }).getAttribute('aria-valuenow')).toBe(String(resizedWorkspaceWidth));
     await expect.poll(() => shell.getByLabel('Workspace').getByRole('heading', { name: 'Launch workspace' }).isVisible()).toBe(true);
     const cookies = await application.evaluate(async ({ session }, fixtureOrigin) => {
       return session.fromPartition('persist:poppin-browser').cookies.get({ url: fixtureOrigin });
@@ -152,3 +199,11 @@ describe('packaged browser workflow', () => {
     );
   });
 });
+
+async function activeBrowserViewBounds(app: ElectronApplication) {
+  return app.evaluate(({ BrowserWindow }) => {
+    const window = BrowserWindow.getAllWindows()[0];
+    const child = window?.contentView.children.find((view) => view.getVisible());
+    return child?.getBounds() ?? { x: -1, y: -1, width: -1, height: -1 };
+  });
+}

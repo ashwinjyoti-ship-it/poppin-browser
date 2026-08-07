@@ -12,6 +12,8 @@ This boundary is deliberate:
 
 The persistent `persist:poppin-browser` Chromium session remains the safe Phase 1 answer for ordinary logins: cookies, site data, and authenticated sessions survive quit and relaunch. A site may still require password re-entry after a password change, security challenge, cookie revocation, or OAuth reauthentication.
 
+Poppin does not import authenticated sessions from Safari, Chrome, or native applications. When Google selects a passkey flow that this unsigned build cannot service, the browser chrome explains the separate-session boundary and offers an explicit action for Google's visible alternate sign-in methods. After one supported sign-in succeeds, the resulting Google session remains in Poppin's persistent browser partition.
+
 ## Supported future path
 
 Electron can provide a Touch ID platform authenticator for WebAuthn/passkeys through `app.configureWebAuthn`. This is not an iCloud Passwords integration:

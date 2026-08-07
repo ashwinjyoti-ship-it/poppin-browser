@@ -25,6 +25,7 @@ export interface BrowserTabSnapshot {
 export interface BrowserSnapshot {
   tabs: BrowserTabSnapshot[];
   activeTabId: string;
+  isFullScreen: boolean;
 }
 
 export type BrowserCommand =
@@ -35,7 +36,9 @@ export type BrowserCommand =
   | { type: 'back'; tabId: string }
   | { type: 'forward'; tabId: string }
   | { type: 'reload'; tabId: string }
-  | { type: 'setLayout'; leftInset: number; rightInset: number; bottomInset: number };
+  | { type: 'showGoogleSignInAlternatives'; tabId: string }
+  | { type: 'openTaskResult' }
+  | { type: 'setLayout'; topInset: number; leftInset: number; rightInset: number; bottomInset: number };
 
 export interface BrowserCommandResult {
   ok: boolean;

@@ -51,6 +51,7 @@ describe.skipIf(!runLive)('live Codex integration', () => {
         prompt: 'Create a file named codex-proof.txt containing exactly: Poppin Codex integration works. Do not change any other file and do not run commands.',
         model: model?.id ?? '',
         reasoningEffort: model?.defaultReasoningEffort ?? '',
+        kind: 'code',
       });
       expect(started.ok, started.message).toBe(true);
 
