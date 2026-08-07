@@ -52,7 +52,7 @@ try {
   const checkbox = workspace.getByRole('checkbox', { name: 'Poppin launch brief' });
   await checkbox.waitFor({ timeout: 10_000 });
   await checkbox.click();
-  await shell.getByLabel('Context').getByText('Poppin launch brief', { exact: true }).waitFor({ timeout: 10_000 });
+  await shell.getByLabel('Context, task and result').getByText('Poppin launch brief', { exact: true }).waitFor({ timeout: 10_000 });
   await shell.getByRole('button', { name: 'New tab' }).click();
   await addressInput.fill(`${origin}/reference`);
   await addressInput.press('Enter');
@@ -61,21 +61,14 @@ try {
   await addressInput.fill(`${origin}/requirements`);
   await addressInput.press('Enter');
   await waitForPageTitle(application, `${origin}/requirements`, 'Requirements');
-  await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.focus());
+  await application.evaluate(({ BrowserWindow }) => {
+    const window = BrowserWindow.getAllWindows()[0];
+    window?.maximize();
+    window?.focus();
+  });
   await delay(500);
-
-  const swift = `import CoreGraphics
-import Foundation
-let target = Int32(CommandLine.arguments[1])!
-let info = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as! [[String: Any]]
-for item in info where (item[kCGWindowOwnerPID as String] as? Int32) == target {
-  if let number = item[kCGWindowNumber as String] { print(number); break }
-}`;
-  const { stdout } = await execFileAsync('swift', ['-e', swift, String(application.process().pid)]);
-  const windowId = stdout.trim();
-  if (!/^\d+$/.test(windowId)) throw new Error('Could not find the Poppin window.');
   await mkdir(path.dirname(outputPath), { recursive: true });
-  await execFileAsync('screencapture', ['-x', '-l', windowId, outputPath]);
+  await execFileAsync('screencapture', ['-x', outputPath]);
   process.stdout.write(`${outputPath}\n`);
 } finally {
   await application?.close().catch(() => undefined);

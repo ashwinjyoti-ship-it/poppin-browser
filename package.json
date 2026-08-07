@@ -13,6 +13,7 @@
     "test:smoke": "npm run package && vitest run --config vitest.smoke.config.mts",
     "test:codex-live": "POPPIN_RUN_LIVE_CODEX=1 vitest run tests/codex-live.test.ts --testTimeout=240000",
     "screenshot:checkpoint-a": "node scripts/capture-checkpoint-a.mjs",
+    "screenshot:checkpoint-b": "node scripts/capture-checkpoint-b.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "eslint . --max-warnings=0",
     "package": "electron-forge package",
