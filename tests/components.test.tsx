@@ -4,7 +4,11 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { BrowserToolbar } from '../src/renderer/ui/BrowserToolbar';
 import { TabStrip } from '../src/renderer/ui/TabStrip';
+import { CommandBar } from '../src/renderer/ui/CommandBar';
+import { ContextPane } from '../src/renderer/ui/ContextPane';
 import type { BrowserTabSnapshot } from '../src/shared/browser';
+import type { TaskSnapshot } from '../src/shared/task';
+import type { WorkspaceSnapshot } from '../src/shared/workspace';
 
 const TAB: BrowserTabSnapshot = {
   id: 'tab-one',
@@ -68,3 +72,44 @@ describe('browser chrome', () => {
   });
 });
 
+const READY_TASK: TaskSnapshot = {
+  connection: {
+    state: 'ready', message: 'Codex is ready.', accountLabel: 'tester@example.com',
+    models: [{ id: 'gpt-test', name: 'GPT Test', description: 'Fixture', reasoningEfforts: ['low', 'high'], defaultReasoningEffort: 'high', isDefault: true }],
+  },
+  task: null,
+};
+
+const EMPTY_WORKSPACE: WorkspaceSnapshot = { workspace: null, documents: [], tabContexts: [], project: null };
+
+describe('Codex controls', () => {
+  it('sends the selected model, reasoning, and prompt', async () => {
+    const user = userEvent.setup();
+    const onCommand = vi.fn().mockResolvedValue({ ok: true });
+    render(<CommandBar snapshot={READY_TASK} collapsed={false} onCollapseChange={vi.fn()} onCommand={onCommand} />);
+    await user.type(screen.getByRole('textbox', { name: /prompt/i }), 'Make the button amber');
+    await user.click(screen.getByRole('button', { name: /send to codex/i }));
+    expect(onCommand).toHaveBeenCalledWith({
+      type: 'startTask', prompt: 'Make the button amber', model: 'gpt-test', reasoningEffort: 'high',
+    });
+  });
+
+  it('shows exactly what an approval will allow', async () => {
+    const user = userEvent.setup();
+    const onCommand = vi.fn().mockResolvedValue({ ok: true });
+    const snapshot: TaskSnapshot = {
+      ...READY_TASK,
+      task: {
+        state: 'Needs Approval', prompt: 'Change it', model: 'gpt-test', reasoningEffort: 'high',
+        threadId: 'thread-1', turnId: 'turn-1', baselineCommit: 'a'.repeat(40), progress: [],
+        pendingApproval: { requestId: 9, kind: 'command', title: 'Codex wants to run a command', detail: 'npm test\n/tmp/project', reason: 'Verify the change' },
+        result: '', diff: '', error: null, createdAt: '', updatedAt: '',
+      },
+    };
+    render(<ContextPane collapsed={false} snapshot={EMPTY_WORKSPACE} taskSnapshot={snapshot} onCollapseChange={vi.fn()} onRefreshTab={vi.fn()} onTaskCommand={onCommand} />);
+    await user.click(screen.getByRole('button', { name: /^task/i }));
+    expect(screen.getByText('npm test', { exact: false })).toBeVisible();
+    await user.click(screen.getByRole('button', { name: /allow once/i }));
+    expect(onCommand).toHaveBeenCalledWith({ type: 'respondApproval', decision: 'accept' });
+  });
+});

@@ -1,6 +1,6 @@
-export function Brand() {
+export function Brand({ compact = false }: { compact?: boolean }) {
   return (
-    <div className="brand" aria-label="Poppin Browser">
+    <div className={`brand ${compact ? 'brand-compact' : ''}`} aria-label="Poppin Browser">
       <span className="brand-orbit" aria-hidden="true">
         <i className="orbit-dot orbit-dot-1" />
         <i className="orbit-dot orbit-dot-2" />
@@ -12,8 +12,7 @@ export function Brand() {
         <i className="orbit-dot orbit-dark-2" />
         <i className="orbit-dot orbit-core" />
       </span>
-      <span className="brand-name">poppin <strong>browser</strong></span>
+      {compact ? null : <span className="brand-name">poppin <strong>browser</strong></span>}
     </div>
   );
 }
-
