@@ -25,7 +25,7 @@ import type { CapturedTabContext } from '../../shared/workspace';
 import { GOOGLE_SIGN_IN_FALLBACK_SCRIPT, isGoogleAccountsUrl } from '../../shared/google-auth';
 
 const PAGE_MARGIN = 12;
-const CHROME_HEIGHT = 152;
+const DEFAULT_CHROME_HEIGHT = 152;
 const SAVE_DELAY_MS = 250;
 const MAX_LAYOUT_INSET = 520;
 const MAX_TAB_CONTEXT_CHARACTERS = 60_000;
@@ -46,7 +46,7 @@ export class BrowserEngine {
   private activeTabId = '';
   private saveTimer: NodeJS.Timeout | null = null;
   private isClosing = false;
-  private viewInsets = { left: 0, right: 0, bottom: 0 };
+  private viewInsets = { top: DEFAULT_CHROME_HEIGHT, left: 0, right: 0, bottom: 0 };
 
   constructor(
     private readonly window: BrowserWindow,
@@ -128,6 +128,7 @@ export class BrowserEngine {
         return this.showGoogleSignInAlternatives(command.tabId);
       case 'setLayout':
         this.viewInsets = {
+          top: clampInset(command.topInset),
           left: clampInset(command.leftInset),
           right: clampInset(command.rightInset),
           bottom: clampInset(command.bottomInset),
@@ -406,9 +407,9 @@ export class BrowserEngine {
     const [width = 1, height = 1] = this.window.getContentSize();
     const bounds: Rectangle = {
       x: PAGE_MARGIN + this.viewInsets.left,
-      y: CHROME_HEIGHT,
+      y: this.viewInsets.top,
       width: Math.max(1, width - PAGE_MARGIN * 2 - this.viewInsets.left - this.viewInsets.right),
-      height: Math.max(1, height - CHROME_HEIGHT - PAGE_MARGIN - this.viewInsets.bottom),
+      height: Math.max(1, height - this.viewInsets.top - PAGE_MARGIN - this.viewInsets.bottom),
     };
     for (const tab of this.tabs.values()) tab.view.setBounds(bounds);
   }

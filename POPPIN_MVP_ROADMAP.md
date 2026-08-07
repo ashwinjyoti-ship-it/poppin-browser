@@ -103,5 +103,6 @@ Launch the configured preview process, open its URL in the centre browser, show 
 - **2026-08-07:** Checkpoint B uses the locally installed Codex app-server and its existing account rather than embedding an API key. Tasks require a clean Git baseline, run inside the connected project with workspace-write sandboxing, surface approvals, and finish at an explicit approve-or-revise gate.
 - **2026-08-07:** Apple Passwords remains outside the credential boundary. Electron cannot load Apple's arbitrary browser extension, and direct Keychain password access is rejected. Signed, device-bound Touch ID WebAuthn is documented as a separate future browser capability.
 - **2026-08-07:** Hands-on testing adds persistent resizing for both workspace panes and a Google Accounts sign-in fallback. Poppin never imports authenticated sessions from other browsers or applications; it helps the user choose Google's alternate method and then preserves the successful login in its own browser session.
+- **2026-08-07:** Laptop testing makes browser chrome responsive to usable window dimensions. Roomy, compact, and dense modes keep the native page viewport aligned while reducing logo, toolbar, and tab height on constrained screens.
 
 Future decisions should be added here only after an approved phase boundary or meaningful user feedback.

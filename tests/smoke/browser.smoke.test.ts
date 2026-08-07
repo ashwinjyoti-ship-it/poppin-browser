@@ -97,11 +97,13 @@ describe('packaged browser workflow', () => {
     const address = shell.getByLabel('Address and search');
     const workspaceDivider = shell.getByRole('separator', { name: 'Resize workspace pane' });
     const initialWorkspaceWidth = Number(await workspaceDivider.getAttribute('aria-valuenow'));
-    const initialBrowserX = await activeBrowserViewX(application);
+    const chromeHeight = await shell.locator('.app-shell').evaluate((element) => Number.parseInt(getComputedStyle(element).getPropertyValue('--chrome-height'), 10));
+    const initialBrowserBounds = await activeBrowserViewBounds(application);
+    expect(initialBrowserBounds.y).toBe(chromeHeight);
     await workspaceDivider.press('Shift+ArrowRight');
     const resizedWorkspaceWidth = initialWorkspaceWidth + 24;
     await expect.poll(() => workspaceDivider.getAttribute('aria-valuenow')).toBe(String(resizedWorkspaceWidth));
-    await expect.poll(() => activeBrowserViewX(application!)).toBe(initialBrowserX + 24);
+    await expect.poll(async () => (await activeBrowserViewBounds(application!)).x).toBe(initialBrowserBounds.x + 24);
 
     await address.fill(origin);
     await address.press('Enter');
@@ -162,10 +164,10 @@ describe('packaged browser workflow', () => {
   });
 });
 
-async function activeBrowserViewX(app: ElectronApplication): Promise<number> {
+async function activeBrowserViewBounds(app: ElectronApplication) {
   return app.evaluate(({ BrowserWindow }) => {
     const window = BrowserWindow.getAllWindows()[0];
     const child = window?.contentView.children.find((view) => view.getVisible());
-    return child?.getBounds().x ?? -1;
+    return child?.getBounds() ?? { x: -1, y: -1, width: -1, height: -1 };
   });
 }

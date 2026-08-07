@@ -11,6 +11,8 @@ import { WorkspacePane } from './WorkspacePane';
 import { ContextPane } from './ContextPane';
 import { CommandBar } from './CommandBar';
 import { PaneResizer } from './PaneResizer';
+import { getChromeLayout } from './chrome-layout';
+import { issueForCommand, visibleAddressIssue, type AddressIssue } from './address-issue';
 import {
   clampResizedPaneWidth,
   getPaneWidthRange,
@@ -27,7 +29,7 @@ const EMPTY_TASK: TaskSnapshot = { connection: { state: 'checking', message: 'Co
 export function App() {
   const [snapshot, setSnapshot] = useState<BrowserSnapshot>(EMPTY_SNAPSHOT);
   const [addressDraft, setAddressDraft] = useState('');
-  const [addressError, setAddressError] = useState('');
+  const [addressIssue, setAddressIssue] = useState<AddressIssue | null>(null);
   const [isEditingAddress, setIsEditingAddress] = useState(false);
   const [workspaceSnapshot, setWorkspaceSnapshot] = useState<WorkspaceSnapshot>(EMPTY_WORKSPACE);
   const [workspaceCollapsed, setWorkspaceCollapsed] = useState(false);
@@ -35,13 +37,16 @@ export function App() {
   const [taskSnapshot, setTaskSnapshot] = useState<TaskSnapshot>(EMPTY_TASK);
   const [commandCollapsed, setCommandCollapsed] = useState(false);
   const [preferredPaneWidths, setPreferredPaneWidths] = useState(() => loadPaneWidths(window.localStorage));
-  const [viewportWidth, setViewportWidth] = useState(window.innerWidth);
+  const [viewport, setViewport] = useState(() => ({ width: window.innerWidth, height: window.innerHeight }));
   const addressInputRef = useRef<HTMLInputElement>(null);
 
   const activeTab = snapshot.tabs.find((tab) => tab.id === snapshot.activeTabId) ?? null;
   const address = isEditingAddress ? addressDraft : activeTab?.url ?? '';
-  const paneWidths = normalizePaneWidths(preferredPaneWidths, viewportWidth);
+  const addressError = visibleAddressIssue(addressIssue, activeTab);
+  const chromeLayout = getChromeLayout(viewport.width, viewport.height);
+  const paneWidths = normalizePaneWidths(preferredPaneWidths, viewport.width);
   const paneStyle = {
+    '--chrome-height': `${chromeLayout.height}px`,
     '--workspace-pane-width': `${paneWidths.left}px`,
     '--context-pane-width': `${paneWidths.right}px`,
   } as CSSProperties;
@@ -74,9 +79,9 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    const updateViewportWidth = () => setViewportWidth(window.innerWidth);
-    window.addEventListener('resize', updateViewportWidth);
-    return () => window.removeEventListener('resize', updateViewportWidth);
+    const updateViewport = () => setViewport({ width: window.innerWidth, height: window.innerHeight });
+    window.addEventListener('resize', updateViewport);
+    return () => window.removeEventListener('resize', updateViewport);
   }, []);
 
   useEffect(() => {
@@ -86,24 +91,29 @@ export function App() {
   useEffect(() => {
     void window.poppinBrowser.command({
       type: 'setLayout',
+      topInset: chromeLayout.height,
       leftInset: workspaceCollapsed ? 46 : paneWidths.left + 14,
       rightInset: contextCollapsed ? 46 : paneWidths.right + 14,
       bottomInset: commandCollapsed ? 0 : 94,
     });
-  }, [commandCollapsed, contextCollapsed, paneWidths.left, paneWidths.right, workspaceCollapsed]);
+  }, [chromeLayout.height, commandCollapsed, contextCollapsed, paneWidths.left, paneWidths.right, workspaceCollapsed]);
 
   const resizePane = (side: PaneSide, requestedWidth: number) => {
     const otherSide = side === 'left' ? 'right' : 'left';
-    const width = clampResizedPaneWidth(side, requestedWidth, viewportWidth, paneWidths[otherSide]);
+    const width = clampResizedPaneWidth(side, requestedWidth, viewport.width, paneWidths[otherSide]);
     setPreferredPaneWidths((current) => ({ ...current, [side]: width }));
   };
 
   const sendCommand = async (command: BrowserCommand) => {
     try {
       const result = await window.poppinBrowser.command(command);
-      setAddressError(result.ok ? '' : result.message ?? 'That action is not available.');
+      if (result.ok) {
+        setAddressIssue(null);
+      } else {
+        setAddressIssue(issueForCommand(command, result.message ?? 'That action is not available.', snapshot, activeTab));
+      }
     } catch {
-      setAddressError('Poppin could not complete that action.');
+      setAddressIssue(issueForCommand(command, 'Poppin could not complete that action.', snapshot, activeTab));
     }
   };
 
@@ -137,7 +147,7 @@ export function App() {
   };
 
   return (
-    <main className={`app-shell ${commandCollapsed ? 'command-is-collapsed' : ''}`} style={paneStyle}>
+    <main className={`app-shell chrome-${chromeLayout.density} ${commandCollapsed ? 'command-is-collapsed' : ''}`} style={paneStyle}>
       <header className="browser-chrome">
         <div className="top-row">
           <Brand />
@@ -149,7 +159,7 @@ export function App() {
             addressInputRef={addressInputRef}
             onAddressChange={(value) => {
               setAddressDraft(value);
-              setAddressError('');
+              setAddressIssue(null);
             }}
             onAddressFocus={() => {
               setAddressDraft(activeTab?.url ?? '');
@@ -195,7 +205,7 @@ export function App() {
         <PaneResizer
           side="left"
           width={paneWidths.left}
-          {...getPaneWidthRange('left', viewportWidth, paneWidths.right)}
+          {...getPaneWidthRange('left', viewport.width, paneWidths.right)}
           onResize={(width) => resizePane('left', width)}
         />
       ) : null}
@@ -203,7 +213,7 @@ export function App() {
         <PaneResizer
           side="right"
           width={paneWidths.right}
-          {...getPaneWidthRange('right', viewportWidth, paneWidths.left)}
+          {...getPaneWidthRange('right', viewport.width, paneWidths.left)}
           onResize={(width) => resizePane('right', width)}
         />
       ) : null}
