@@ -4,7 +4,7 @@
 
 Poppin Browser validates one workflow:
 
-> Browse → Create Workspace → Select Context → Connect Local Project → Select UI → Send to Codex → Preview → Approve or Revise
+> Browse → Select Context → Ask → Watch Controlled Work → Review in Browser → Approve, Revise, or Deliver
 
 This is a browser first—not an IDE and not another AI chat. Intelligence should disappear behind normal browsing until the user deliberately invokes it.
 
@@ -13,12 +13,17 @@ This roadmap is living guidance, not pre-authorization to implement every phase.
 ## Permanent Product Invariants
 
 - The centre browser is always the hero and can occupy the complete window.
+- Poppin remains browser-first and must not become a general chat application. The existing prompt box is the single entry point for arbitrary Work and Code requests.
 - UI remains thin; reusable engines own browser, workspace, context, project, selection, task, provider, and preview behavior.
 - Context is explicit and inspectable. Nothing hidden is sent to a provider.
 - The MVP supports one workspace and one active task.
+- Browser actions stay visible, provider actions stay reviewable, and task-scoped permissions end with the task.
+- Work tasks do not require a Git project. Code tasks retain the clean-Git, connected-project, review, and one-task safeguards.
 - The product is local first. SQLite stores structured metadata; large content remains on disk.
 - Coding previews remain inside the browser.
+- Substantial task results and generated-artifact previews belong in trusted, sandboxed centre-browser tabs.
 - Provider actions require explicit review through approve or revise.
+- Poppin never accesses, scrapes, copies, reveals, exports, or stores passwords, passkeys, cookies, authenticated-session tokens, Apple Passwords data, or Keychain credentials, and never imports authentication from another browser or application.
 - A feature that does not improve the core workflow does not belong in the MVP.
 - The current v0.1 brief overrides older architecture notes where they conflict, including the earlier five-workspace and archive concepts.
 
@@ -79,47 +84,100 @@ The collapsible bottom bar exposes Codex as the only provider plus explicit mode
 
 Supported states are Running, Needs Approval, Completed, Failed, Cancelled, and Discarded. The right pane shows progress, approvals, result, and diff. Revision continues the active workflow rather than creating a parallel chat history.
 
-## Phase 7 — Visual Selection
+## Phase 7 — Unified Work, Visual Selection, and Controlled Browser Use
 
-**Status:** Planned only. Do not implement until the user explicitly approves Phases 7–8.
+**Status:** Approved for implementation on 2026-08-07. Do not expand beyond this scope.
 
-**Provisional outcome:** Select an element in a localhost application as the task target.
+**Outcome:** The existing prompt box accepts arbitrary work. Poppin determines required capabilities without forcing the user through a workflow wizard, while keeping context and permissions explicit.
 
-Capture the selected element's HTML, relevant CSS, DOM context, screenshot, and bounding box. The resulting target is visible inside the context package before submission.
+### Unified tasks and preflight
+
+Poppin supports two internal task capability sets through the same prompt:
+
+- A **Work task** does not require a Git project. It uses selected tabs and attached documents to create summaries, research, comparisons, structured notes, tables, checklists, drafts, reports, Markdown, and generated files. It may use controlled browser interaction only when explicitly granted.
+- A **Code task** uses the connected local project and preserves the clean-Git and one-task safeguards. It can inspect localhost UI, modify code, run checks, launch a preview, show a diff, revise, and prepare GitHub delivery.
+
+These are capability sets, not hard-coded workflow templates. Requests such as summarizing a selected YouTube video, comparing two selected documents, researching with approved tabs, turning a transcript into notes, drafting a sourced report, and fixing a connected-project UI for a pull request are acceptance scenarios.
+
+Before execution, Poppin shows a concise preflight when useful: selected context, requested browser use, whether a local project will be modified, expected consequential actions, and required approvals. The user can adjust context or permissions before starting. Benign tasks remain simple and do not gain unnecessary confirmations.
+
+### Visual selection
+
+The user can select an element in a localhost application. Poppin captures its HTML, relevant CSS, DOM context, screenshot, and bounding box and shows the captured target in the explicit context package before submission.
 
 ### Controlled browser use
 
-Phase 7 also adds a controlled way for the active Codex task to use the page already open in Poppin. This is not unrestricted computer control.
+Controlled browser use is visible task-scoped page operation, not unrestricted computer control.
 
-- The user explicitly starts browser use for the active task and can pause or stop it at any time.
-- The task can inspect and act only in the selected Poppin tab or a user-approved tab opened from it. It cannot silently switch to unrelated tabs, workspaces, profiles, or native applications.
-- The browser surface stays visible while the task is operating. Poppin shows the current target tab, requested action, and an append-only action log.
-- Navigation, typing, clicking, scrolling, and reading rendered page text are allowed only for the active task's stated goal.
-- Actions with material external effects—including sign-in, password or passkey prompts, payments, purchases, submissions, publishing, deletion, downloads, permission prompts, and sending messages—pause for explicit user approval.
-- The user may take over the tab at any time. Taking over pauses browser use until the user explicitly resumes it.
+- Codex may navigate, click, type, scroll, search, and read rendered content only within the selected Poppin tab or additional user-approved tabs.
+- `BrowserAgentEngine` uses the existing `BrowserEngine` tab model. It must not create a hidden browser, second profile, second workspace, or parallel task.
+- The centre browser stays visible. Poppin shows the current action and an append-only action log.
+- Start, Pause, Resume, Stop, and Take Over controls remain available. Take Over immediately pauses Codex; only explicit Resume restarts it.
+- Tab access is revoked when the task ends. Poppin never silently switches to an unrelated tab.
+- Web content receives no privileged Electron, Node, or Poppin API access.
 
-### Credential and privacy boundary
+Poppin pauses before sign-in/authentication, password/passkey/biometric/credential prompts, form submission, sending messages or email, publishing, downloads, uploads, purchases/payments, deletion, permission prompts, creating external records, pushing branches, creating or merging pull requests, or any other consequential external action. Login pages may be opened, but the user performs credential entry. Codex does not inspect credential fields, cookies, session tokens, Apple Passwords, or Keychain. Authentication stays inside Poppin's persistent browser partition.
 
-- Browser use must never read, copy, scrape, export, or store passwords, passkeys, Keychain records, cookies, or authenticated-session tokens.
-- It must not import authentication from another browser or native application.
-- Login pages may be navigated to, but credential entry and passkey/biometric prompts remain user-operated and require an approval pause.
-- Task context remains explicit: only user-selected page content, visual-selection artifacts, and approved action-log records can be sent to Codex.
+### YouTube transcript-summary acceptance flow
+
+For a request such as “Give me a five-point summary”, the user selects a YouTube tab, reviews Poppin's request to use that tab and read its transcript, and grants access. Codex visibly opens or reads captions/transcript exposed by the approved page and creates a timestamped summary in the centre result tab. No Git project is required. The user may approve, revise, copy, save, or export it. Poppin must not silently download or transcribe protected media.
 
 ### Architecture and verification
 
-`BrowserAgentEngine` will be a reusable main-process engine behind a narrow IPC contract. It owns the task-scoped browser-use lifecycle, validates the target tab and allowed actions, records actions, and tears down access when the task ends. It must use the existing `BrowserEngine` tab model rather than creating a hidden browser, a second profile, or a second workspace.
+`BrowserAgentEngine` is a reusable main-process engine behind a narrow IPC contract. It owns lifecycle, tab scope, action validation, approval gates, logging, and teardown. Verification includes unit coverage for tab scope, pause/stop/takeover, approval gates, and credential-boundary rejection; integration coverage proving that unapproved tabs and privileged APIs are inaccessible; and a localhost fixture covering visual selection, navigation, typing, click, approval, takeover, and teardown. Hands-on local-site testing precedes general web use.
 
-The renderer will expose a small task control surface in the existing right pane: start, pause, resume, stop, current action, approval request, and action log. It must not become a chat surface or permit more than one task.
+## Phase 8 — Centre-Browser Results, Preview, Review, and Delivery
 
-Verification before release requires unit coverage for tab scope, pause/stop behavior, approval gates, and credential-boundary rejection; integration coverage proving that browser use cannot access an unapproved tab or privileged Electron/Node APIs; a localhost fixture covering visual selection, navigation, typing, click, explicit approval, user takeover, and task teardown; and hands-on local-site testing before any general web browsing is enabled.
+**Status:** Approved for implementation on 2026-08-07. Do not expand beyond this scope.
 
-## Phase 8 — In-Browser Preview and Review
+**Outcome:** Substantial Work and Code output is reviewed in the centre browser, with compact controls and metadata in the right pane.
 
-**Provisional outcome:** See Codex's project modification running inside the centre browser and approve or revise it.
+### Trusted result tabs
 
-Launch the configured preview process, open its URL in the centre browser, show the code diff in the right pane, and preserve the browser as the main review surface. Acceptance ends the workflow; revision sends a scoped follow-up against the same task.
+- Open a trusted, sandboxed internal result page such as `poppin://task/current/result` as a normal Poppin tab.
+- Revisions update the same result tab instead of creating duplicates, and the result persists with the current task where appropriate.
+- Result content receives no Node or privileged Poppin APIs. Source links may open as additional Poppin tabs.
+- Supported presentations include timestamped video summaries, research briefs with source links, document summaries, comparisons, structured tables, checklists and action items, drafts and reports, Markdown, generated-document previews, test reports, localhost previews, and pull-request summaries.
+- Actions include Approve, Revise in the same active task, Copy, Save, Export, Open Sources, and Open Generated Files. Never overwrite an original attachment without explicit approval; prefer a new previewable output artifact.
 
-Phase 8 may consume Phase 7's selected-element and browser-use records, but it does not expand browser use into unrestricted computer control.
+### Coding preview and review
+
+Launch the configured local preview in the centre browser and show code diff and task controls in the right pane. The browser remains the primary work and review surface. Approval or revision continues the same task; acceptance may proceed to separately reviewed commit, push, and pull-request preparation.
+
+### Automatic task and approval attention
+
+Whenever Codex needs approval, a decision, clarification, permission, or recovery action, Poppin automatically expands the right pane if collapsed, switches it to the relevant Task/Approval section, scrolls the pending card into view, identifies what is blocking progress, and shows the exact action, target, scope, consequence, and Approve/Reject/alternative controls. Badges and task status update immediately. The centre tab and page state are preserved, task state advances automatically after resolution, and the pane is not automatically collapsed afterward.
+
+This applies to browser-tab access, consequential browser actions, filesystem/network permission, artifact overwrite, push/PR/merge, blocking clarification, and task failure requiring recovery. The single active task exposes only its one currently required approval.
+
+### GitHub pull-request delivery
+
+- A completed Code task may prepare a branch and commits after showing the final diff and test results.
+- An explicit Create Pull Request action shows repository, remote, branch, commits, and target base branch before delivery.
+- Pushing and creating a pull request are distinct external actions and each requires approval.
+- A reusable engine uses argument-safe Git and the authenticated GitHub CLI without reading or displaying tokens.
+- If GitHub CLI authentication is unavailable, open the GitHub compare/PR page in Poppin for manual completion.
+- After creation, open the PR URL in a new Poppin tab and show PR number, URL, base/head branches, and current checks. Read-only checks and review monitoring are allowed.
+
+### Separately approved merge
+
+Merge is never implied by code approval or PR creation. A separate Merge action displays repository, PR number, base branch, checks, review status, and allowed merge strategy. Poppin supports merge, squash, or rebase only when repository policy permits, respects protection and required checks/reviews, and requires final confirmation immediately before merging. If merge is unavailable, open the PR for manual completion. Any later local-branch update that may be destructive requires separate explicit approval.
+
+### Surface responsibilities
+
+The right pane owns exact Context; Task/Approval state, current browser action, append-only log, controls, and pending approval; compact Result metadata, sources, and artifact actions; and Code diff/review controls. It is not a chat transcript.
+
+The centre browser owns browsing, controlled browser operation, localhost preview, visual selection, rich task results, generated-artifact previews, GitHub PR pages, and source pages.
+
+### Fullscreen-aware logo and compact layout
+
+When macOS traffic lights are absent, place the Poppin logo near the top-left. In an ordinary window retain only the minimum safe traffic-light inset. Preserve the draggable titlebar, compact responsive chrome, and maximum practical viewport on a 13-inch MacBook Air. Add visual or integration coverage for windowed and fullscreen positioning.
+
+### Delivery verification
+
+Keep changes modular and the app runnable after each coherent increment. Add unit, component, integration, packaged-smoke, and hands-on coverage proportional to each capability. Preserve all completed browser, pane, session, favicon, fullscreen, default-browser, workspace, context, project, Codex, approval, progress, result, revision, and diff behavior.
+
+The final Apple Silicon build uses Node 22 where required. Rebuild and `hdiutil`-verify the single stable `Poppin-Browser-arm64.dmg`, replacing the existing installer without accumulating duplicates.
 
 ## Decision Log
 
@@ -136,5 +194,6 @@ Phase 8 may consume Phase 7's selected-element and browser-use records, but it d
 - **2026-08-07:** Laptop testing makes browser chrome responsive to usable window dimensions. Roomy, compact, and dense modes keep the native page viewport aligned while reducing logo, toolbar, and tab height on constrained screens.
 - **2026-08-07:** Browser feedback adds website fullscreen support, compact tabs at every window size, and standard `http`/`https` registration so the user can choose Poppin as the macOS default browser.
 - **2026-08-07:** Future Phase 7 records controlled browser use for the one active task: explicit start/pause/stop, tab-scoped actions, visible logs, user takeover, approval gates for consequential actions, and a permanent credential boundary. The roadmap is the sole source of truth for this planned work.
+- **2026-08-07:** Phases 7–8 are approved for implementation. The single prompt now routes arbitrary Work and Code capabilities; Work no longer requires Git. Approved scope adds preflight, visible task-scoped browser use, localhost visual selection, trusted centre-browser results, automatic approval attention, preview/review, and separately approved GitHub delivery and merge. No work beyond Phase 8 is authorized.
 
 Future decisions should be added here only after an approved phase boundary or meaningful user feedback.
