@@ -36,10 +36,16 @@ describe('normalizeAddressInput', () => {
     });
   });
 
+  it('can use Google as the selected search engine', () => {
+    expect(normalizeAddressInput('calm browser design', 'google')).toEqual({
+      kind: 'search',
+      url: 'https://www.google.com/search?q=calm%20browser%20design',
+    });
+  });
+
   it('rejects unsafe and unsupported schemes', () => {
     expect(normalizeAddressInput('javascript:alert(1)')).toMatchObject({ kind: 'invalid' });
     expect(normalizeAddressInput('file:///tmp/private')).toMatchObject({ kind: 'invalid' });
     expect(normalizeAddressInput('data:text/html,hello')).toMatchObject({ kind: 'invalid' });
   });
 });
-

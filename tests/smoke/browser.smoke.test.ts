@@ -15,6 +15,11 @@ let application: ElectronApplication | null = null;
 beforeEach(async () => {
   server = createServer((request, response) => {
     const route = request.url ?? '/';
+    if (route === '/favicon.svg') {
+      response.setHeader('Content-Type', 'image/svg+xml');
+      response.end('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><circle cx="16" cy="16" r="15" fill="#e8820b"/></svg>');
+      return;
+    }
     response.setHeader('Content-Type', 'text/html; charset=utf-8');
     if (route === '/second') {
       response.end('<!doctype html><title>Second page</title><h1>Second page</h1>');
@@ -35,6 +40,7 @@ beforeEach(async () => {
     }
     response.setHeader('Set-Cookie', 'poppin-session=restored; Path=/; SameSite=Lax');
     response.end(`<!doctype html>
+      <link rel="icon" href="/favicon.svg">
       <title>Local fixture</title>
       <h1>Local fixture</h1>
       <a href="/second" id="second">Second page</a>
@@ -117,6 +123,7 @@ describe('packaged browser workflow', () => {
       node: 'undefined',
       bridge: 'undefined',
     });
+    await expect.poll(() => shell.locator('.tab-active .tab-favicon').getAttribute('src')).toContain('/favicon.svg');
 
     await address.fill(`${origin}/fullscreen`);
     await address.press('Enter');
@@ -148,6 +155,21 @@ describe('packaged browser workflow', () => {
     await address.fill(origin);
     await address.press('Enter');
     await expect.poll(() => pageInfo(application!, origin)).toMatchObject({ title: 'Local fixture' });
+
+    await shell.getByRole('button', { name: 'Browser settings' }).click();
+    await shell.getByLabel('Links open in').selectOption('same-tab');
+    await shell.getByRole('button', { name: 'Close browser settings' }).click();
+    await application.evaluate(async ({ webContents }, prefix) => {
+      const contents = webContents.getAllWebContents().find((candidate) => candidate.getURL().startsWith(prefix));
+      await contents?.executeJavaScript("document.querySelector('#popup').click()");
+    }, origin);
+    await expect.poll(() => exactPageInfo(application!, `${origin}/popup`)).toMatchObject({ title: 'Popup page' });
+    expect(await shell.getByRole('tab').count()).toBe(1);
+    await address.fill(origin);
+    await address.press('Enter');
+    await shell.getByRole('button', { name: 'Browser settings' }).click();
+    await shell.getByLabel('Links open in').selectOption('follow-site');
+    await shell.getByRole('button', { name: 'Close browser settings' }).click();
 
     const workspace = shell.getByLabel('Workspace');
     await workspace.getByLabel('Workspace name').fill('Launch workspace');

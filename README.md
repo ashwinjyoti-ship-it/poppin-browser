@@ -1,6 +1,6 @@
 # Poppin Browser
 
-Poppin Browser is a calm, macOS-first browser shell for a local-first Codex workflow. Checkpoint A includes normal browsing, one workspace, explicit tab/document context, and one connected local Git project.
+Poppin Browser is a calm, macOS-first browser shell for a local-first Codex workflow. It combines normal browsing—including persistent, reorderable, pinned and grouped tabs, native context menus, stable favicons, and browser preferences—with one workspace, explicit context, controlled browser use, and reviewed Work or Code tasks.
 
 ## Run locally
 

@@ -15,17 +15,54 @@ export interface BrowserTabSnapshot {
   id: string;
   url: string;
   title: string;
-  faviconUrl: string | null;
+  faviconUrls: string[];
+  pinned: boolean;
+  groupId: string | null;
   isLoading: boolean;
   canGoBack: boolean;
   canGoForward: boolean;
   failure: BrowserFailure | null;
 }
 
+export type BrowserGroupColor = 'amber' | 'blue' | 'green' | 'rose' | 'violet';
+
+export interface BrowserTabGroup {
+  id: string;
+  name: string;
+  color: BrowserGroupColor;
+  collapsed: boolean;
+}
+
+export type LinkOpeningPreference = 'follow-site' | 'new-tab' | 'same-tab';
+export type StartupPreference = 'restore' | 'new-tab';
+export type NewTabPositionPreference = 'next-to-active' | 'end';
+export type SearchEnginePreference = 'duckduckgo' | 'google';
+
+export interface BrowserSettings {
+  linkOpening: LinkOpeningPreference;
+  focusNewTabs: boolean;
+  startup: StartupPreference;
+  newTabPosition: NewTabPositionPreference;
+  warnBeforeClosingMultipleTabs: boolean;
+  searchEngine: SearchEnginePreference;
+}
+
+export const DEFAULT_BROWSER_SETTINGS: BrowserSettings = {
+  linkOpening: 'follow-site',
+  focusNewTabs: true,
+  startup: 'restore',
+  newTabPosition: 'next-to-active',
+  warnBeforeClosingMultipleTabs: false,
+  searchEngine: 'duckduckgo',
+};
+
 export interface BrowserSnapshot {
   tabs: BrowserTabSnapshot[];
+  groups: BrowserTabGroup[];
   activeTabId: string;
   isFullScreen: boolean;
+  canReopenClosedTab: boolean;
+  settings: BrowserSettings;
 }
 
 export type BrowserCommand =
@@ -36,7 +73,17 @@ export type BrowserCommand =
   | { type: 'back'; tabId: string }
   | { type: 'forward'; tabId: string }
   | { type: 'reload'; tabId: string }
-  | { type: 'showGoogleSignInAlternatives'; tabId: string }
+  | { type: 'duplicate'; tabId: string }
+  | { type: 'reopenClosedTab' }
+  | { type: 'reorder'; tabId: string; beforeTabId: string | null }
+  | { type: 'togglePin'; tabId: string }
+  | { type: 'createGroup'; tabId: string }
+  | { type: 'moveToGroup'; tabId: string; groupId: string | null }
+  | { type: 'toggleGroup'; groupId: string }
+  | { type: 'renameGroup'; groupId: string; name: string }
+  | { type: 'showTabMenu'; tabId: string }
+  | { type: 'showGroupMenu'; groupId: string }
+  | { type: 'updateSettings'; settings: Partial<BrowserSettings> }
   | { type: 'openTaskResult' }
   | { type: 'setLayout'; topInset: number; leftInset: number; rightInset: number; bottomInset: number };
 
@@ -57,12 +104,23 @@ export interface WindowState {
 export interface PersistedTabState {
   id: string;
   url: string;
+  pinned?: boolean;
+  groupId?: string | null;
 }
 
 export interface PersistedBrowserStateV1 {
   version: 1;
   tabs: PersistedTabState[];
   activeTabId: string;
+  window: WindowState;
+}
+
+export interface PersistedBrowserStateV2 {
+  version: 2;
+  tabs: PersistedTabState[];
+  groups: BrowserTabGroup[];
+  activeTabId: string;
+  settings: BrowserSettings;
   window: WindowState;
 }
 
