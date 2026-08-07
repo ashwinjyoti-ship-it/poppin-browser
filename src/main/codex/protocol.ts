@@ -29,6 +29,27 @@ export interface CodexTurn {
   error: { message: string; additionalDetails: string | null } | null;
 }
 
+export interface CodexDynamicToolSpec {
+  type: 'function';
+  name: string;
+  description: string;
+  inputSchema: JsonObject;
+}
+
+export interface CodexDynamicToolCallParams {
+  threadId: string;
+  turnId: string;
+  callId: string;
+  tool: string;
+  namespace?: string | null;
+  arguments: unknown;
+}
+
+export interface CodexDynamicToolCallResponse {
+  success: boolean;
+  contentItems: Array<{ type: 'inputText'; text: string }>;
+}
+
 export type CodexThreadItem =
   | { type: 'agentMessage'; id: string; text: string }
   | { type: 'plan'; id: string; text: string }

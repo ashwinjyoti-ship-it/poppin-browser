@@ -12,6 +12,7 @@ export type BrowserAgentAction =
   | { type: 'click'; selector: string }
   | { type: 'type'; selector: string; text: string }
   | { type: 'scroll'; deltaY: number }
+  | { type: 'wait'; milliseconds: number }
   | { type: 'search'; text: string }
   | { type: 'captureTranscript' };
 

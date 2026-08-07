@@ -131,15 +131,12 @@ function TaskView({ snapshot, workspace, browserAgent, onCommand, onBrowserAgent
   const [questionAnswer, setQuestionAnswer] = useState('');
   const approvalRef = useRef<HTMLElement>(null);
   useEffect(() => {
-    if (typeof approvalRef.current?.scrollIntoView === 'function') approvalRef.current.scrollIntoView({ block: 'nearest' });
-  }, [task?.pendingApproval]);
+    if (typeof approvalRef.current?.scrollIntoView === 'function') approvalRef.current.scrollIntoView({ block: 'start' });
+  }, [browserAgent?.pendingApproval, task?.pendingApproval]);
   return (
     <div className="right-pane-content task-view">
-      <div className="pane-heading"><div><span className="eyebrow">Codex</span><h2>{task ? task.state : 'Ready for a task'}</h2></div><span className={`connection-pill connection-${snapshot.connection.state}`}>{snapshot.connection.state}</span></div>
-      <p className="task-account">{snapshot.connection.accountLabel ?? snapshot.connection.message}</p>
-      {snapshot.connection.state !== 'ready' ? <button type="button" className="secondary-button" onClick={() => { void onCommand({ type: 'refreshConnection' }); }}>Reconnect Codex</button> : null}
       {task?.pendingApproval ? (
-        <section ref={approvalRef} className="approval-card" aria-label="Codex approval required">
+        <section ref={approvalRef} className="approval-card approval-card-prominent" aria-label="Codex approval required">
           <span className="eyebrow">Approval required</span>
           <h3>{task.pendingApproval.title}</h3>
           {task.pendingApproval.reason ? <p>{task.pendingApproval.reason}</p> : null}
@@ -151,7 +148,7 @@ function TaskView({ snapshot, workspace, browserAgent, onCommand, onBrowserAgent
         </section>
       ) : null}
       {browserAgent?.pendingApproval && onBrowserAgentCommand ? (
-        <section ref={approvalRef} className="approval-card" aria-label="Browser action approval required">
+        <section ref={approvalRef} className="approval-card approval-card-prominent" aria-label="Browser action approval required">
           <span className="eyebrow">Browser approval required</span>
           <h3>{browserAgent.pendingApproval.title}</h3>
           <p><strong>Target:</strong> {browserAgent.pendingApproval.target}</p>
@@ -160,6 +157,9 @@ function TaskView({ snapshot, workspace, browserAgent, onCommand, onBrowserAgent
           <div className="approval-actions"><button type="button" className="primary-button" onClick={() => { void onBrowserAgentCommand({ type: 'respondApproval', decision: 'approve' }); }}><Check size={14} /> Approve</button><button type="button" className="secondary-button" onClick={() => { void onBrowserAgentCommand({ type: 'respondApproval', decision: 'reject' }); }}><X size={14} /> Reject</button></div>
         </section>
       ) : null}
+      <div className="pane-heading"><div><span className="eyebrow">Codex</span><h2>{task ? task.state : 'Ready for a task'}</h2></div><span className={`connection-pill connection-${snapshot.connection.state}`}>{snapshot.connection.state}</span></div>
+      <p className="task-account">{snapshot.connection.accountLabel ?? snapshot.connection.message}</p>
+      {snapshot.connection.state !== 'ready' ? <button type="button" className="secondary-button" onClick={() => { void onCommand({ type: 'refreshConnection' }); }}>Reconnect Codex</button> : null}
       {task && onBrowserAgentCommand ? <BrowserUseView taskId={task.threadId || task.createdAt} workspace={workspace} snapshot={browserAgent} onCommand={onBrowserAgentCommand} /> : null}
       {task ? (
         <div className="task-progress-list">

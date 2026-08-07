@@ -20,7 +20,7 @@ It is not a general chat app or IDE. The centre browser is always the primary su
 | Tab organization | Reorder, pin, duplicate, reopen closed tabs, named and color-coded groups, persistent settings, contiguous group ordering, colored group underlines, named/countable collapsed groups, direct rename, and group color selection. |
 | Workspace/context | One workspace; selected tabs and documents; exact frozen context preview; optional localhost visual selection capture; connected project metadata. |
 | Tasks | One active Work or Code task via the installed Codex app-server and the user’s existing account. Work does not require Git; Code requires a connected clean Git project. |
-| Controlled browsing | Visible, task-scoped navigation/read/click/type/scroll/search/transcript capture in approved tabs only, with pause, takeover, action logs, and approval gates. |
+| Controlled browsing | Codex dynamic tools drive visible, task-scoped navigation/read/click/type/wait/scroll/search/transcript capture in selected tabs only, with pause, takeover, action logs, and exact approval gates for critical actions. |
 | Results and delivery | Trusted centre-browser result page, copy/save/export/revise/approve actions, localhost preview, code diff, and reviewed Git/GitHub preparation actions. |
 
 ## Deliberate product constraints
@@ -29,7 +29,7 @@ It is not a general chat app or IDE. The centre browser is always the primary su
 - The prompt bar is the only task-entry surface; do not build a separate chat transcript.
 - Context is explicit: no hidden history, page metadata, or automatically collected inputs are sent to Codex.
 - Work and Code are capability sets, not rigid templates.
-- Consequential actions require a visible approval. This includes authentication boundaries, external form submission, downloads/uploads, external writes, Git push/PR/merge, and destructive actions.
+- Critical actions require a visible approval. This includes authentication boundaries, final form submission, sending, publishing, downloads/uploads, purchases, destructive actions, Git push/PR/merge, and destructive external writes. Ordinary selected-tab browsing, typing, and saving a reversible draft do not add another gate.
 - Poppin is local-first. Structured workspace/task metadata is local; user files and repositories stay in their original locations.
 - Do not implement future ideas merely because they appear useful. Get explicit approval or a roadmap update first.
 
@@ -96,13 +96,15 @@ These rules are non-negotiable:
 - Authentication happens only in Poppin’s persistent browser partition and is performed by the user.
 - Web content has no privileged Poppin API access.
 - User-entered addresses are restricted to HTTP(S). Trusted internal result pages are allowlisted only for Poppin-created/restored tabs; do not open arbitrary custom schemes from the address bar.
-- Browser-agent actions remain visible and allowed only in the user-approved tabs for the active task. Credential forms and consequential actions pause for approval.
+- Explicitly selecting a tab and asking for browser use grants ordinary visible actions in that task. Credential forms and critical actions pause for exact approval; reversible draft creation and saving do not.
 - Task approvals must automatically make the right Task pane visible. Preserve the browser page and tab state while doing so.
 
 ## Key interaction details and recent regressions
 
 - A result tab uses `poppin://task/current/result`. It must render the result; it must never fall back to an ordinary New Tab.
 - A blocking task or browser approval takes precedence over the user’s collapsed/right-pane-section preference until it is resolved.
+- A critical approval is the first, sticky card in the Task view. Browser-use Work tasks start directly; do not reintroduce a generic browser-access confirmation.
+- Codex receives browser operations as task-scoped dynamic tools. Page reads return safe temporary selectors, and Codex must verify the page state before claiming that a draft or other browser action completed.
 - The Settings panel belongs above a collapsed right-pane rail. It needs a stacking layer above panes when open.
 - A tab group is a contiguous run. Normalizing only pinned tabs is insufficient: new tabs, drag/drop, restore, duplication, pinning, and group moves must not split a group.
 - A collapsed group must retain name, count, color, expand affordance, and rename affordance. Never rely on `currentColor` for a foreground/background combination that can collapse to an invisible state.
@@ -188,7 +190,7 @@ Before changing anything, read AGENTS.md, docs/DEVELOPMENT_GUIDE.md, and POPPIN_
 
 Architecture: src/main owns Electron and reusable engines; src/shared owns typed IPC contracts; src/preload/index.ts is the only contextBridge; src/renderer is React shell only. Remote websites run in sandboxed WebContentsViews with no Node or Poppin APIs.
 
-Preserve these invariants: browser-first centre surface, explicit inspectable context, one workspace, one active task, visible task-scoped browser automation, approval before consequential actions, and the permanent credential boundary (never access passwords/passkeys/cookies/tokens/Keychain/Apple Passwords or import sessions from other browsers).
+Preserve these invariants: browser-first centre surface, explicit inspectable context, one workspace, one active task, visible task-scoped browser automation, exact approval before critical or irreversible actions, and the permanent credential boundary (never access passwords/passkeys/cookies/tokens/Keychain/Apple Passwords or import sessions from other browsers).
 
 For each change, trace shared contract → preload → engine → renderer → tests. Run npm run lint, npm run typecheck, and npm test. For Electron/browser/visual changes also run the Node 22 packaged smoke command in the development guide. Do not push, merge, or replace the stable DMG unless explicitly asked.
 ```

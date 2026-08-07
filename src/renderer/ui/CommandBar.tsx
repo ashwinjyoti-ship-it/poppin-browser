@@ -38,10 +38,10 @@ export function CommandBar({ snapshot, workspace, collapsed, onCollapseChange, o
     );
   }
 
-  const start = async (kind: 'work' | 'code') => {
+  const start = async (kind: 'work' | 'code', requirements: TaskRequirements | null = preflight) => {
     setSending(true);
     setError('');
-    if (preflight?.browserUse) {
+    if (requirements?.browserUse) {
       const contexts = workspace.tabContexts;
       if (contexts.length === 0 || !onBrowserAgentCommand) {
         setSending(false);
@@ -70,7 +70,7 @@ export function CommandBar({ snapshot, workspace, collapsed, onCollapseChange, o
       setPrompt('');
       setPreflight(null);
     } else {
-      if (preflight?.browserUse && onBrowserAgentCommand) await onBrowserAgentCommand({ type: 'stop' });
+      if (requirements?.browserUse && onBrowserAgentCommand) await onBrowserAgentCommand({ type: 'stop' });
       setError(result.message ?? 'Codex could not start that task.');
     }
   };
@@ -79,12 +79,12 @@ export function CommandBar({ snapshot, workspace, collapsed, onCollapseChange, o
     event.preventDefault();
     if (sending || isActive) return;
     const requirements = inferTaskRequirements(prompt, Boolean(workspace.project));
-    const needsPreflight = requirements.kind === 'code' || requirements.browserUse || requirements.consequentialActions.length > 0;
+    const needsPreflight = requirements.kind === 'code';
     if (needsPreflight && !preflight) {
       setPreflight(requirements);
       return;
     }
-    await start(preflight?.kind ?? requirements.kind);
+    await start(preflight?.kind ?? requirements.kind, preflight ?? requirements);
   };
 
   return (
@@ -133,7 +133,7 @@ export function CommandBar({ snapshot, workspace, collapsed, onCollapseChange, o
         <section className="task-preflight" aria-label="Task preflight">
           <div><strong>{preflight.kind === 'code' ? 'Code task' : 'Work task'}</strong><span>{selectedContextCount(workspace)} selected context item(s)</span></div>
           <ul>
-            <li>{preflight.browserUse ? 'Requests visible browser use; tab access will require approval.' : 'Uses only the frozen selected context.'}</li>
+            <li>{preflight.browserUse ? 'Uses the selected tabs visibly. Only critical actions pause for approval.' : 'Uses only the frozen selected context.'}</li>
             <li>{preflight.modifiesProject ? `May modify ${workspace.project?.repositoryPath ?? 'the connected project'}.` : 'Will not modify the connected project.'}</li>
             {preflight.consequentialActions.map((action) => <li key={action}>{action} will pause for separate approval.</li>)}
           </ul>

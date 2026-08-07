@@ -70,6 +70,17 @@ describe('BrowserAgentEngine', () => {
     expect(pages.performed).toHaveLength(1);
   });
 
+  it('reports a rejected critical action as not performed', async () => {
+    const { engine, pages } = setup();
+    await engine.execute({ type: 'start', taskId: 'task-1', tabIds: ['approved'] });
+    pages.inspection = { credential: false, consequential: 'This action may send a message.', target: 'Send' };
+    await engine.execute({ type: 'act', tabId: 'approved', action: { type: 'click', selector: '#send' } });
+    expect(await engine.execute({ type: 'respondApproval', decision: 'reject' })).toEqual({
+      ok: false, message: 'Browser action rejected by the user.',
+    });
+    expect(pages.performed).toHaveLength(0);
+  });
+
   it('stores captured rendered content without exposing another tab', async () => {
     const { engine, captured } = setup();
     await engine.execute({ type: 'start', taskId: 'task-1', tabIds: ['approved'] });
