@@ -1,5 +1,7 @@
 import path from 'node:path';
 
+import { mkdir } from 'node:fs/promises';
+
 import { app, BrowserWindow, ipcMain, Menu, screen, session } from 'electron';
 
 import {
@@ -64,7 +66,10 @@ async function createWindow(): Promise<void> {
   });
 
   const browserSession = session.fromPartition('persist:poppin-browser', { cache: true });
-  handleInternalPages(browserSession);
+  handleInternalPages(browserSession, {
+    getTask: () => taskEngine?.getSnapshot().task ?? null,
+    getWorkspace: () => workspaceEngine?.getSnapshot() ?? null,
+  });
   const getWindowState = (): WindowState => {
     if (!mainWindow) return windowState;
     const normalBounds = mainWindow.getNormalBounds();
@@ -80,7 +85,12 @@ async function createWindow(): Promise<void> {
   const git = new GitEngine();
   workspaceEngine = new WorkspaceEngine(mainWindow, workspaceStore, browserEngine, git);
   if (!taskStore) throw new Error('Task storage is not ready.');
-  taskEngine = new TaskEngine(mainWindow, taskStore, workspaceStore, git);
+  const workDirectory = path.join(app.getPath('userData'), 'task-output');
+  await mkdir(workDirectory, { recursive: true });
+  taskEngine = new TaskEngine(mainWindow, taskStore, workspaceStore, git, {
+    workDirectory,
+    onResultReady: () => browserEngine?.openTaskResult(),
+  });
   browserEngine.restore(
     persisted
       ? { tabs: persisted.tabs, activeTabId: persisted.activeTabId }

@@ -1,8 +1,9 @@
 import { DatabaseSync } from 'node:sqlite';
 
-import type { TaskApprovalSnapshot, TaskProgressSnapshot, TaskRecordSnapshot, TaskState } from '../../shared/task';
+import type { TaskApprovalSnapshot, TaskKind, TaskProgressSnapshot, TaskRecordSnapshot, TaskState } from '../../shared/task';
 
 interface TaskRow {
+  kind: TaskKind;
   state: TaskState;
   prompt: string;
   model: string;
@@ -29,6 +30,7 @@ export class TaskStore {
       CREATE TABLE IF NOT EXISTS active_task (
         id TEXT PRIMARY KEY CHECK (id = 'primary'),
         state TEXT NOT NULL,
+        kind TEXT NOT NULL DEFAULT 'code',
         prompt TEXT NOT NULL,
         model TEXT NOT NULL,
         reasoning_effort TEXT NOT NULL,
@@ -44,11 +46,15 @@ export class TaskStore {
         updated_at TEXT NOT NULL
       ) STRICT;
     `);
+    const columns = this.database.prepare('PRAGMA table_info(active_task)').all() as Array<{ name: string }>;
+    if (!columns.some((column) => column.name === 'kind')) {
+      this.database.exec("ALTER TABLE active_task ADD COLUMN kind TEXT NOT NULL DEFAULT 'code'");
+    }
   }
 
   load(): TaskRecordSnapshot | null {
     const row = this.database.prepare(`
-      SELECT state, prompt, model, reasoning_effort, thread_id, turn_id, baseline_commit,
+      SELECT state, kind, prompt, model, reasoning_effort, thread_id, turn_id, baseline_commit,
         progress_json, approval_json, result, diff, error, created_at, updated_at
       FROM active_task WHERE id = 'primary'
     `).get() as unknown as TaskRow | undefined;
@@ -61,6 +67,7 @@ export class TaskStore {
       if (!Array.isArray(progress)) throw new Error('Invalid progress');
       return {
         state: row.state,
+        kind: row.kind === 'work' ? 'work' : 'code',
         prompt: row.prompt,
         model: row.model,
         reasoningEffort: row.reasoning_effort,
@@ -84,11 +91,12 @@ export class TaskStore {
   save(task: TaskRecordSnapshot): void {
     this.database.prepare(`
       INSERT INTO active_task (
-        id, state, prompt, model, reasoning_effort, thread_id, turn_id, baseline_commit,
+        id, state, kind, prompt, model, reasoning_effort, thread_id, turn_id, baseline_commit,
         progress_json, approval_json, result, diff, error, created_at, updated_at
-      ) VALUES ('primary', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES ('primary', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         state = excluded.state,
+        kind = excluded.kind,
         prompt = excluded.prompt,
         model = excluded.model,
         reasoning_effort = excluded.reasoning_effort,
@@ -104,6 +112,7 @@ export class TaskStore {
         updated_at = excluded.updated_at
     `).run(
       task.state,
+      task.kind,
       task.prompt,
       task.model,
       task.reasoningEffort,

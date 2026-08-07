@@ -15,6 +15,7 @@ describe('task store', () => {
     const store = new TaskStore(path.join(directory, 'poppin.sqlite'));
     const task: TaskRecordSnapshot = {
       state: 'Needs Approval',
+      kind: 'code',
       prompt: 'Change the button',
       model: 'gpt-5.6-sol',
       reasoningEffort: 'high',
@@ -42,7 +43,7 @@ describe('task store', () => {
     const store = new TaskStore(databasePath);
     const now = new Date().toISOString();
     store.save({
-      state: 'Running', prompt: 'Test', model: 'model', reasoningEffort: 'low', threadId: '', turnId: '',
+      state: 'Running', kind: 'code', prompt: 'Test', model: 'model', reasoningEffort: 'low', threadId: '', turnId: '',
       baselineCommit: 'b'.repeat(40), progress: [], pendingApproval: null, result: '', diff: '', error: null,
       createdAt: now, updatedAt: now,
     });

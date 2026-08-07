@@ -5,6 +5,7 @@ export const TASK_CHANNELS = {
 } as const;
 
 export type TaskState = 'Running' | 'Needs Approval' | 'Completed' | 'Failed' | 'Cancelled' | 'Discarded';
+export type TaskKind = 'work' | 'code';
 export type CodexConnectionState = 'checking' | 'ready' | 'notInstalled' | 'signedOut' | 'error';
 
 export interface CodexModelSnapshot {
@@ -33,6 +34,7 @@ export interface TaskApprovalSnapshot {
 }
 
 export interface TaskRecordSnapshot {
+  kind: TaskKind;
   state: TaskState;
   prompt: string;
   model: string;
@@ -61,7 +63,7 @@ export interface TaskSnapshot {
 
 export type TaskCommand =
   | { type: 'refreshConnection' }
-  | { type: 'startTask'; prompt: string; model: string; reasoningEffort: string }
+  | { type: 'startTask'; prompt: string; model: string; reasoningEffort: string; kind: TaskKind }
   | { type: 'respondApproval'; decision: 'accept' | 'decline' | 'cancel' }
   | { type: 'cancelTask' }
   | { type: 'reviseTask'; prompt: string }

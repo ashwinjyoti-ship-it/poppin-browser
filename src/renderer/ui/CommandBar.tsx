@@ -2,21 +2,25 @@ import { type FormEvent, useState } from 'react';
 import { ChevronDown, ChevronUp, Send, Square } from 'lucide-react';
 
 import type { TaskCommand, TaskCommandResult, TaskSnapshot } from '../../shared/task';
+import type { WorkspaceSnapshot } from '../../shared/workspace';
+import { inferTaskRequirements, type TaskRequirements } from '../../shared/task-requirements';
 import { Brand } from './Brand';
 
 interface CommandBarProps {
   snapshot: TaskSnapshot;
+  workspace: WorkspaceSnapshot;
   collapsed: boolean;
   onCollapseChange: (collapsed: boolean) => void;
   onCommand: (command: TaskCommand) => Promise<TaskCommandResult>;
 }
 
-export function CommandBar({ snapshot, collapsed, onCollapseChange, onCommand }: CommandBarProps) {
+export function CommandBar({ snapshot, workspace, collapsed, onCollapseChange, onCommand }: CommandBarProps) {
   const [prompt, setPrompt] = useState('');
   const [modelId, setModelId] = useState('');
   const [effort, setEffort] = useState('');
   const [error, setError] = useState('');
   const [sending, setSending] = useState(false);
+  const [preflight, setPreflight] = useState<TaskRequirements | null>(null);
   const defaultModel = snapshot.connection.models.find((candidate) => candidate.isDefault) ?? snapshot.connection.models[0] ?? null;
   const model = snapshot.connection.models.find((candidate) => candidate.id === modelId) ?? defaultModel;
   const selectedModelId = model?.id ?? '';
@@ -32,15 +36,27 @@ export function CommandBar({ snapshot, collapsed, onCollapseChange, onCommand }:
     );
   }
 
+  const start = async (kind: 'work' | 'code') => {
+    setSending(true);
+    setError('');
+    const result = await onCommand({ type: 'startTask', prompt, model: selectedModelId, reasoningEffort: selectedEffort, kind });
+    setSending(false);
+    if (result.ok) {
+      setPrompt('');
+      setPreflight(null);
+    } else setError(result.message ?? 'Codex could not start that task.');
+  };
+
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     if (sending || isActive) return;
-    setSending(true);
-    setError('');
-    const result = await onCommand({ type: 'startTask', prompt, model: selectedModelId, reasoningEffort: selectedEffort });
-    setSending(false);
-    if (result.ok) setPrompt('');
-    else setError(result.message ?? 'Codex could not start that task.');
+    const requirements = inferTaskRequirements(prompt, Boolean(workspace.project));
+    const needsPreflight = requirements.kind === 'code' || requirements.browserUse || requirements.consequentialActions.length > 0;
+    if (needsPreflight && !preflight) {
+      setPreflight(requirements);
+      return;
+    }
+    await start(preflight?.kind ?? requirements.kind);
   };
 
   return (
@@ -73,8 +89,8 @@ export function CommandBar({ snapshot, collapsed, onCollapseChange, onCommand }:
         <span className="sr-only">Prompt</span>
         <input
           value={prompt}
-          onChange={(event) => { setPrompt(event.target.value); setError(''); }}
-          placeholder={snapshot.connection.state === 'ready' ? 'Describe the change you want Codex to make…' : snapshot.connection.message}
+          onChange={(event) => { setPrompt(event.target.value); setError(''); setPreflight(null); }}
+          placeholder={snapshot.connection.state === 'ready' ? 'Ask Poppin to summarize, research, draft, or change code…' : snapshot.connection.message}
           disabled={snapshot.connection.state !== 'ready' || isActive}
         />
         {error ? <span className="command-error">{error}</span> : null}
@@ -85,8 +101,27 @@ export function CommandBar({ snapshot, collapsed, onCollapseChange, onCommand }:
         <button className="command-send" type="submit" disabled={!prompt.trim() || !selectedModelId || !selectedEffort || sending || isActive} aria-label="Send to Codex"><Send size={17} /></button>
       )}
       <button className="command-collapse" type="button" onClick={() => onCollapseChange(true)} aria-label="Collapse Codex command bar"><ChevronDown size={15} /></button>
+      {preflight ? (
+        <section className="task-preflight" aria-label="Task preflight">
+          <div><strong>{preflight.kind === 'code' ? 'Code task' : 'Work task'}</strong><span>{selectedContextCount(workspace)} selected context item(s)</span></div>
+          <ul>
+            <li>{preflight.browserUse ? 'Requests visible browser use; tab access will require approval.' : 'Uses only the frozen selected context.'}</li>
+            <li>{preflight.modifiesProject ? `May modify ${workspace.project?.repositoryPath ?? 'the connected project'}.` : 'Will not modify the connected project.'}</li>
+            {preflight.consequentialActions.map((action) => <li key={action}>{action} will pause for separate approval.</li>)}
+          </ul>
+          <div className="preflight-actions">
+            <button type="button" className="secondary-button" onClick={() => setPreflight(null)}>Adjust</button>
+            {preflight.kind === 'code' && !workspace.project ? <button type="button" className="secondary-button" onClick={() => { void start('work'); }}>Run as Work</button> : null}
+            <button type="button" className="primary-button" disabled={preflight.kind === 'code' && !workspace.project} onClick={() => { void start(preflight.kind); }}>Start {preflight.kind === 'code' ? 'Code' : 'Work'}</button>
+          </div>
+        </section>
+      ) : null}
     </form>
   );
+}
+
+function selectedContextCount(workspace: WorkspaceSnapshot): number {
+  return workspace.tabContexts.length + workspace.documents.filter((item) => item.selected).length;
 }
 
 function titleCase(value: string): string {

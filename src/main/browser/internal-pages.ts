@@ -1,6 +1,15 @@
 import { protocol, type Session } from 'electron';
 
 import { escapeHtml } from './safe-html';
+import type { TaskRecordSnapshot } from '../../shared/task';
+import type { WorkspaceSnapshot } from '../../shared/workspace';
+
+export const TASK_RESULT_URL = 'poppin://task/current/result';
+
+interface InternalPageData {
+  getTask: () => TaskRecordSnapshot | null;
+  getWorkspace: () => WorkspaceSnapshot | null;
+}
 
 export function registerInternalScheme(): void {
   protocol.registerSchemesAsPrivileged([
@@ -11,15 +20,41 @@ export function registerInternalScheme(): void {
   ]);
 }
 
-export function handleInternalPages(browserSession: Session): void {
+export function handleInternalPages(browserSession: Session, data?: InternalPageData): void {
   if (browserSession.protocol.isProtocolHandled('poppin')) return;
   browserSession.protocol.handle('poppin', (request) => {
     const url = new URL(request.url);
     if (url.hostname === 'error') {
       return htmlResponse(renderErrorPage(url));
     }
+    if (url.hostname === 'task' && url.pathname === '/current/result') {
+      return htmlResponse(renderTaskResult(data?.getTask() ?? null, data?.getWorkspace() ?? null));
+    }
     return htmlResponse(renderNewTabPage());
   });
+}
+
+function renderTaskResult(task: TaskRecordSnapshot | null, workspace: WorkspaceSnapshot | null): string {
+  if (!task) {
+    return pageShell('<main class="result-page"><p class="eyebrow">TASK RESULT</p><h1>No result yet</h1><p>Start a Work or Code task from the Poppin prompt box.</p></main>', 'Task result');
+  }
+  const sources = [
+    ...(workspace?.tabContexts.map((item) => ({ title: item.title, url: item.url })) ?? []),
+    ...(workspace?.documents.filter((item) => item.selected).map((item) => ({ title: item.name, url: '' })) ?? []),
+  ];
+  const sourceList = sources.length === 0 ? '<p class="empty">No sources were selected.</p>' : `<ul>${sources.map((source) => {
+    const title = escapeHtml(source.title);
+    return source.url ? `<li><a href="${escapeHtml(source.url)}">${title}</a></li>` : `<li>${title}</li>`;
+  }).join('')}</ul>`;
+  const kind = task.kind === 'code' ? 'CODE TASK' : 'WORK TASK';
+  return pageShell(`
+    <main class="result-page">
+      <header class="result-header"><div><p class="eyebrow">${kind}</p><h1>${escapeHtml(task.prompt)}</h1></div><span class="result-state">${escapeHtml(task.state)}</span></header>
+      <article class="result-content"><pre>${escapeHtml(task.result || 'No result was returned.')}</pre></article>
+      ${task.kind === 'code' ? `<details><summary>Git diff</summary><pre class="diff">${escapeHtml(task.diff || 'No project diff.')}</pre></details>` : ''}
+      <aside class="sources"><h2>Sources</h2>${sourceList}</aside>
+    </main>
+  `, `${task.kind === 'code' ? 'Code' : 'Work'} result`);
 }
 
 export function errorPageUrl(url: string, code: number, description: string): string {
@@ -101,7 +136,23 @@ function pageShell(content: string, title: string): string {
         .error-page { max-width: 620px; margin: auto; }
         .error-page .eyebrow { margin-top: 20px; color: #bb6b15; font-size: 11px; font-weight: 700; letter-spacing: .16em; }
         code { max-width: min(560px, 80vw); overflow: hidden; margin-top: 20px; padding: 10px 14px; border-radius: 10px; color: #6f665c; background: #f3ede4; text-overflow: ellipsis; white-space: nowrap; }
-        a { margin-top: 20px; padding: 10px 16px; border: 1px solid #dfcdb5; border-radius: 10px; color: #8f4e0b; text-decoration: none; background: #fffaf2; }
+        a { color: #8f4e0b; text-decoration: none; }
+        .error-page > a { margin-top: 20px; padding: 10px 16px; border: 1px solid #dfcdb5; border-radius: 10px; background: #fffaf2; }
+        .result-page { display: block; width: min(920px, 100%); min-height: 100vh; margin: auto; padding: clamp(36px, 7vw, 82px); text-align: left; }
+        .result-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 28px; padding-bottom: 30px; border-bottom: 1px solid #e7dccb; }
+        .result-header h1 { max-width: 720px; margin: 7px 0 0; font-size: clamp(26px, 4vw, 44px); }
+        .eyebrow { color: #b7650b; font-size: 11px; font-weight: 750; letter-spacing: .15em; }
+        .result-state { flex: none; padding: 7px 10px; border-radius: 999px; color: #7a552b; background: #fff0dc; font-size: 11px; font-weight: 700; }
+        .result-content { padding: 38px 0; }
+        .result-content pre, details pre { margin: 0; color: #302b26; font: 15px/1.75 Inter, -apple-system, BlinkMacSystemFont, sans-serif; white-space: pre-wrap; overflow-wrap: anywhere; }
+        details { margin-bottom: 34px; padding: 18px; border: 1px solid #e7dccb; border-radius: 14px; background: rgba(255,255,255,.5); }
+        summary { cursor: pointer; color: #6f5b43; font-size: 13px; font-weight: 700; }
+        details .diff { max-height: 420px; margin-top: 16px; overflow: auto; font: 11px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; }
+        .sources { padding-top: 26px; border-top: 1px solid #e7dccb; }
+        .sources h2 { margin: 0 0 14px; font-size: 14px; }
+        .sources ul { margin: 0; padding-left: 20px; }
+        .sources li { margin: 8px 0; color: #766f67; font-size: 13px; }
+        .empty { font-size: 13px; }
       </style>
     </head>
     <body>${content}</body>

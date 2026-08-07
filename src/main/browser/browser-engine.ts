@@ -18,7 +18,7 @@ import {
   type PersistedBrowserStateV1,
   type WindowState,
 } from '../../shared/browser';
-import { errorPageUrl } from './internal-pages';
+import { errorPageUrl, TASK_RESULT_URL } from './internal-pages';
 import { BrowserStateStore } from './state-store';
 import { displayUrl, NEW_TAB_URL, normalizeAddressInput } from './url-input';
 import type { CapturedTabContext } from '../../shared/workspace';
@@ -103,6 +103,16 @@ export class BrowserEngine {
     this.createTab(normalized.url, randomUUID(), false);
   }
 
+  openTaskResult(): void {
+    const existing = Array.from(this.tabs.values()).find((tab) => tab.lastExternalUrl === TASK_RESULT_URL);
+    if (existing) {
+      this.activateTab(existing.snapshot.id);
+      existing.view.webContents.reloadIgnoringCache();
+      return;
+    }
+    this.createTab(TASK_RESULT_URL, randomUUID(), false);
+  }
+
   async captureTabContext(tabId: string): Promise<CapturedTabContext | null> {
     const tab = this.tabs.get(tabId);
     if (!tab || tab.view.webContents.isDestroyed()) return null;
@@ -149,6 +159,9 @@ export class BrowserEngine {
         return this.reload(command.tabId);
       case 'showGoogleSignInAlternatives':
         return this.showGoogleSignInAlternatives(command.tabId);
+      case 'openTaskResult':
+        this.openTaskResult();
+        return { ok: true };
       case 'setLayout':
         this.viewInsets = {
           top: clampInset(command.topInset),

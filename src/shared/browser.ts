@@ -37,6 +37,7 @@ export type BrowserCommand =
   | { type: 'forward'; tabId: string }
   | { type: 'reload'; tabId: string }
   | { type: 'showGoogleSignInAlternatives'; tabId: string }
+  | { type: 'openTaskResult' }
   | { type: 'setLayout'; topInset: number; leftInset: number; rightInset: number; bottomInset: number };
 
 export interface BrowserCommandResult {

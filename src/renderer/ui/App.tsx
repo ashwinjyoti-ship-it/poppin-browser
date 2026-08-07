@@ -8,7 +8,7 @@ import { Brand } from './Brand';
 import { BrowserToolbar } from './BrowserToolbar';
 import { TabStrip } from './TabStrip';
 import { WorkspacePane } from './WorkspacePane';
-import { ContextPane } from './ContextPane';
+import { ContextPane, type PaneSection } from './ContextPane';
 import { CommandBar } from './CommandBar';
 import { PaneResizer } from './PaneResizer';
 import { getChromeLayout, getTitlebarLeftInset } from './chrome-layout';
@@ -34,6 +34,7 @@ export function App() {
   const [workspaceSnapshot, setWorkspaceSnapshot] = useState<WorkspaceSnapshot>(EMPTY_WORKSPACE);
   const [workspaceCollapsed, setWorkspaceCollapsed] = useState(false);
   const [contextCollapsed, setContextCollapsed] = useState(false);
+  const [contextSection, setContextSection] = useState<PaneSection>('context');
   const [taskSnapshot, setTaskSnapshot] = useState<TaskSnapshot>(EMPTY_TASK);
   const [commandCollapsed, setCommandCollapsed] = useState(false);
   const [preferredPaneWidths, setPreferredPaneWidths] = useState(() => loadPaneWidths(window.localStorage));
@@ -62,10 +63,18 @@ export function App() {
       if (mounted) setWorkspaceSnapshot(initialSnapshot);
     });
     const unsubscribeWorkspace = window.poppinWorkspace.subscribe(setWorkspaceSnapshot);
+    const receiveTaskSnapshot = (nextSnapshot: TaskSnapshot) => {
+      if (!mounted) return;
+      setTaskSnapshot(nextSnapshot);
+      if (nextSnapshot.task?.pendingApproval || nextSnapshot.task?.state === 'Failed') {
+        setContextCollapsed(false);
+        setContextSection('task');
+      }
+    };
     void window.poppinTask.getSnapshot().then((initialSnapshot) => {
-      if (mounted) setTaskSnapshot(initialSnapshot);
+      receiveTaskSnapshot(initialSnapshot);
     });
-    const unsubscribeTask = window.poppinTask.subscribe(setTaskSnapshot);
+    const unsubscribeTask = window.poppinTask.subscribe(receiveTaskSnapshot);
     const unsubscribeFocus = window.poppinBrowser.onFocusAddress(() => {
       addressInputRef.current?.focus();
       addressInputRef.current?.select();
@@ -201,6 +210,9 @@ export function App() {
         onCollapseChange={setContextCollapsed}
         onRefreshTab={(tabId) => { void sendWorkspaceCommand({ type: 'refreshTabContext', tabId }); }}
         onTaskCommand={sendTaskCommand}
+        onOpenResult={() => { void sendCommand({ type: 'openTaskResult' }); }}
+        section={contextSection}
+        onSectionChange={setContextSection}
       />
       {!workspaceCollapsed ? (
         <PaneResizer
@@ -219,7 +231,7 @@ export function App() {
         />
       ) : null}
       <div className={`browser-stage ${workspaceCollapsed ? 'workspace-collapsed' : ''} ${contextCollapsed ? 'context-collapsed' : ''}`} aria-hidden="true" />
-      <CommandBar snapshot={taskSnapshot} collapsed={commandCollapsed} onCollapseChange={setCommandCollapsed} onCommand={sendTaskCommand} />
+      <CommandBar snapshot={taskSnapshot} workspace={workspaceSnapshot} collapsed={commandCollapsed} onCollapseChange={setCommandCollapsed} onCommand={sendTaskCommand} />
     </main>
   );
 }

@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Check, ChevronLeft, ChevronRight, FileText, Globe2, RefreshCw, RotateCcw, X } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { Check, ChevronLeft, ChevronRight, Copy, ExternalLink, FileText, Globe2, RefreshCw, RotateCcw, X } from 'lucide-react';
 
 import type { TaskCommand, TaskCommandResult, TaskSnapshot } from '../../shared/task';
 import type { WorkspaceSnapshot } from '../../shared/workspace';
@@ -11,12 +11,16 @@ interface ContextPaneProps {
   onCollapseChange: (collapsed: boolean) => void;
   onRefreshTab: (tabId: string) => void;
   onTaskCommand: (command: TaskCommand) => Promise<TaskCommandResult>;
+  onOpenResult: () => void;
+  section?: PaneSection;
+  onSectionChange?: (section: PaneSection) => void;
 }
 
-type PaneSection = 'context' | 'task' | 'result';
+export type PaneSection = 'context' | 'task' | 'result';
 
-export function ContextPane({ collapsed, snapshot, taskSnapshot, onCollapseChange, onRefreshTab, onTaskCommand }: ContextPaneProps) {
-  const [section, setSection] = useState<PaneSection>('context');
+export function ContextPane({ collapsed, snapshot, taskSnapshot, onCollapseChange, onRefreshTab, onTaskCommand, onOpenResult, section, onSectionChange }: ContextPaneProps) {
+  const [internalSection, setInternalSection] = useState<PaneSection>('context');
+  const activeSection = section ?? internalSection;
   const selectedDocuments = snapshot.documents.filter((document) => document.selected);
   const itemCount = snapshot.tabContexts.length + selectedDocuments.length;
 
@@ -35,7 +39,7 @@ export function ContextPane({ collapsed, snapshot, taskSnapshot, onCollapseChang
       <div className="right-pane-top">
         <nav className="right-pane-tabs" aria-label="Right pane sections">
           {(['context', 'task', 'result'] as const).map((value) => (
-            <button key={value} type="button" className={section === value ? 'right-pane-tab-active' : ''} onClick={() => setSection(value)}>
+            <button key={value} type="button" className={activeSection === value ? 'right-pane-tab-active' : ''} onClick={() => { setInternalSection(value); onSectionChange?.(value); }}>
               {titleCase(value)}
               {value === 'context' && itemCount > 0 ? <span>{itemCount}</span> : null}
               {value === 'task' && taskSnapshot.task?.state === 'Needs Approval' ? <i /> : null}
@@ -44,9 +48,9 @@ export function ContextPane({ collapsed, snapshot, taskSnapshot, onCollapseChang
         </nav>
         <button type="button" className="pane-toggle" onClick={() => onCollapseChange(true)} aria-label="Collapse right pane"><ChevronRight size={17} /></button>
       </div>
-      {section === 'context' ? <ContextView snapshot={snapshot} onRefreshTab={onRefreshTab} /> : null}
-      {section === 'task' ? <TaskView snapshot={taskSnapshot} onCommand={onTaskCommand} /> : null}
-      {section === 'result' ? <ResultView snapshot={taskSnapshot} onCommand={onTaskCommand} /> : null}
+      {activeSection === 'context' ? <ContextView snapshot={snapshot} onRefreshTab={onRefreshTab} /> : null}
+      {activeSection === 'task' ? <TaskView snapshot={taskSnapshot} onCommand={onTaskCommand} /> : null}
+      {activeSection === 'result' ? <ResultView snapshot={taskSnapshot} onCommand={onTaskCommand} onOpenResult={onOpenResult} /> : null}
     </aside>
   );
 }
@@ -83,13 +87,17 @@ function ContextView({ snapshot, onRefreshTab }: { snapshot: WorkspaceSnapshot; 
 
 function TaskView({ snapshot, onCommand }: { snapshot: TaskSnapshot; onCommand: (command: TaskCommand) => Promise<TaskCommandResult> }) {
   const task = snapshot.task;
+  const approvalRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (typeof approvalRef.current?.scrollIntoView === 'function') approvalRef.current.scrollIntoView({ block: 'nearest' });
+  }, [task?.pendingApproval]);
   return (
     <div className="right-pane-content task-view">
       <div className="pane-heading"><div><span className="eyebrow">Codex</span><h2>{task ? task.state : 'Ready for a task'}</h2></div><span className={`connection-pill connection-${snapshot.connection.state}`}>{snapshot.connection.state}</span></div>
       <p className="task-account">{snapshot.connection.accountLabel ?? snapshot.connection.message}</p>
       {snapshot.connection.state !== 'ready' ? <button type="button" className="secondary-button" onClick={() => { void onCommand({ type: 'refreshConnection' }); }}>Reconnect Codex</button> : null}
       {task?.pendingApproval ? (
-        <section className="approval-card" aria-label="Codex approval required">
+        <section ref={approvalRef} className="approval-card" aria-label="Codex approval required">
           <span className="eyebrow">Approval required</span>
           <h3>{task.pendingApproval.title}</h3>
           {task.pendingApproval.reason ? <p>{task.pendingApproval.reason}</p> : null}
@@ -106,14 +114,14 @@ function TaskView({ snapshot, onCommand }: { snapshot: TaskSnapshot; onCommand: 
             <article key={item.id} className="task-progress-item"><i className={`progress-state progress-${item.status}`} /><div><strong>{item.title}</strong>{item.detail ? <pre>{item.detail}</pre> : null}</div></article>
           ))}
         </div>
-      ) : <div className="context-empty">Connect a project, choose visible context, then describe one concrete change in the command bar.</div>}
+      ) : <div className="context-empty">Choose visible context, then ask for a summary, report, research, or a project change.</div>}
       {task?.state === 'Running' || task?.pendingApproval ? <button type="button" className="task-cancel" onClick={() => { void onCommand({ type: 'cancelTask' }); }}>Cancel task</button> : null}
       {task?.error ? <p className="task-error">{task.error}</p> : null}
     </div>
   );
 }
 
-function ResultView({ snapshot, onCommand }: { snapshot: TaskSnapshot; onCommand: (command: TaskCommand) => Promise<TaskCommandResult> }) {
+function ResultView({ snapshot, onCommand, onOpenResult }: { snapshot: TaskSnapshot; onCommand: (command: TaskCommand) => Promise<TaskCommandResult>; onOpenResult: () => void }) {
   const task = snapshot.task;
   const [revision, setRevision] = useState('');
   const [message, setMessage] = useState('');
@@ -121,9 +129,10 @@ function ResultView({ snapshot, onCommand }: { snapshot: TaskSnapshot; onCommand
   const canReview = task.state === 'Needs Approval' && !task.pendingApproval;
   return (
     <div className="right-pane-content result-view">
-      <div className="pane-heading"><div><span className="eyebrow">Result</span><h2>Review the change</h2></div><span className={`task-state task-state-${slug(task.state)}`}>{task.state}</span></div>
+      <div className="pane-heading"><div><span className="eyebrow">{task.kind} result</span><h2>{task.kind === 'code' ? 'Review the change' : 'Review the output'}</h2></div><span className={`task-state task-state-${slug(task.state)}`}>{task.state}</span></div>
+      {task.result ? <div className="result-toolbar"><button type="button" className="secondary-button" onClick={onOpenResult}><ExternalLink size={13} /> Open result tab</button><button type="button" className="secondary-button" onClick={() => { void navigator.clipboard.writeText(task.result).then(() => setMessage('Copied result.')); }}><Copy size={13} /> Copy</button></div> : null}
       <section className="result-section"><h3>Codex summary</h3><pre>{task.result || (task.state === 'Running' ? 'Codex is working…' : 'No summary was returned.')}</pre></section>
-      <section className="result-section diff-section"><h3>Git diff</h3><pre>{task.diff || 'No project diff yet.'}</pre></section>
+      {task.kind === 'code' ? <section className="result-section diff-section"><h3>Git diff</h3><pre>{task.diff || 'No project diff yet.'}</pre></section> : null}
       {canReview ? (
         <div className="review-actions">
           <button type="button" className="primary-button" onClick={() => { void onCommand({ type: 'approveResult' }).then((result) => setMessage(result.message ?? 'Approved. The changes remain in your working tree.')); }}><Check size={14} /> Approve</button>

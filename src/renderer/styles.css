@@ -527,6 +527,13 @@ body.pane-is-resizing * { cursor: col-resize !important; user-select: none !impo
 .review-actions textarea { min-height: 72px; resize: vertical; padding: 9px; border: 1px solid var(--border); border-radius: 9px; outline: 0; color: #554d45; background: var(--surface); font-size: 10px; line-height: 1.45; }
 .review-actions textarea:focus { border-color: #dc9a4f; box-shadow: 0 0 0 3px rgba(232,130,11,.1); }
 .review-message { color: #7a6f65; font-size: 10px; line-height: 1.45; }
+.result-toolbar { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.task-preflight { position: absolute; right: 48px; bottom: 76px; width: min(440px, calc(100vw - 40px)); padding: 15px; border: 1px solid #dfc6a7; border-radius: 14px; background: rgba(255,253,249,.99); box-shadow: 0 16px 40px rgba(65,44,20,.16); }
+.task-preflight > div:first-child { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.task-preflight strong { font-size: 13px; }
+.task-preflight span { color: var(--text-muted); font-size: 10px; }
+.task-preflight ul { margin: 10px 0; padding-left: 18px; color: #6f6254; font-size: 10px; line-height: 1.55; }
+.preflight-actions { display: flex; justify-content: flex-end; gap: 7px; }
 
 @media (max-width: 1080px) {
   .top-row { grid-template-columns: 150px 1fr; gap: 12px; }
