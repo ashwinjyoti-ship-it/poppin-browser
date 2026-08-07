@@ -179,6 +179,19 @@ Keep changes modular and the app runnable after each coherent increment. Add uni
 
 The final Apple Silicon build uses Node 22 where required. Rebuild and `hdiutil`-verify the single stable `Poppin-Browser-arm64.dmg`, replacing the existing installer without accumulating duplicates.
 
+## Phase 9 — Browser Fundamentals and Tab Organization
+
+**Status:** Implemented and release-verified on 2026-08-07.
+
+**Outcome:** Daily browsing receives the missing native editing, organization, and preference controls without diminishing the centre browser.
+
+- The tab strip uses roughly 40% less vertical space and narrower tab containers while preserving readable labels, favicons, pinned-tab targets, and full-title tooltips. Roomy, compact, and dense layouts return 22–29 pixels of height to the page viewport.
+- Favicons retain the last valid icon during same-site loading, cache valid candidates per origin, try site-provided alternatives before falling back, and use consistent globe and page-failure states rather than a broken-image placeholder.
+- Native context menus cover editable fields, selected text, links, general page navigation, tabs, and tab groups. Standard undo, redo, cut, copy, paste, paste-and-match-style, delete, and select-all keyboard commands remain available in remote pages and Poppin inputs.
+- Tabs support drag reordering, pinning, duplication, recently closed recovery, named/color-coded groups, group collapse/expand, group renaming, and bulk close actions. Version-one sessions migrate automatically to the version-two tab/group/settings state.
+- A top-bar Settings panel controls website link disposition, new-tab focus and placement, startup restoration, multiple-tab close warnings, and DuckDuckGo or Google address-bar search.
+- The temporary Google sign-in helper is removed; authentication remains entirely within Poppin's persistent browser session and under the permanent credential boundary.
+
 ## Decision Log
 
 - **2026-08-06:** Phase 1 begins from the supplied v0.1 brief and design assets.
@@ -196,5 +209,6 @@ The final Apple Silicon build uses Node 22 where required. Rebuild and `hdiutil`
 - **2026-08-07:** Future Phase 7 records controlled browser use for the one active task: explicit start/pause/stop, tab-scoped actions, visible logs, user takeover, approval gates for consequential actions, and a permanent credential boundary. The roadmap is the sole source of truth for this planned work.
 - **2026-08-07:** Phases 7–8 are approved for implementation. The single prompt now routes arbitrary Work and Code capabilities; Work no longer requires Git. Approved scope adds preflight, visible task-scoped browser use, localhost visual selection, trusted centre-browser results, automatic approval attention, preview/review, and separately approved GitHub delivery and merge. No work beyond Phase 8 is authorized.
 - **2026-08-07:** Phases 7–8 are implemented through reusable capability boundaries and release-verified. Verification covers typecheck, zero-warning lint, 66 passing unit/component/integration tests with one expected live-Codex skip, repeated packaged browser smoke checks, a Node 22 arm64 package/DMG build, and `hdiutil` validation of the single stable installer.
+- **2026-08-07:** Hands-on browser feedback approves Phase 9 fundamentals: a substantially smaller tab strip, stable favicon fallbacks, native copy/paste and page/tab context menus, reorderable pinned and grouped tabs, closed-tab recovery, and persistent top-bar browser settings. Link behavior defaults to respecting the website; close warnings remain opt-in.
 
 Future decisions should be added here only after an approved phase boundary or meaningful user feedback.

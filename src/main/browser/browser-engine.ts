@@ -3,7 +3,10 @@ import { randomUUID } from 'node:crypto';
 import {
   app,
   BrowserWindow,
+  dialog,
+  Menu,
   type Input,
+  type MenuItemConstructorOptions,
   type Rectangle,
   type Session,
   WebContentsView,
@@ -11,11 +14,16 @@ import {
 
 import {
   BROWSER_CHANNELS,
+  DEFAULT_BROWSER_SETTINGS,
+  type BrowserGroupColor,
   type BrowserCommand,
   type BrowserCommandResult,
+  type BrowserSettings,
   type BrowserSnapshot,
+  type BrowserTabGroup,
   type BrowserTabSnapshot,
-  type PersistedBrowserStateV1,
+  type PersistedBrowserStateV2,
+  type PersistedTabState,
   type WindowState,
 } from '../../shared/browser';
 import { errorPageUrl, TASK_RESULT_URL } from './internal-pages';
@@ -23,15 +31,17 @@ import { BrowserStateStore } from './state-store';
 import { displayUrl, NEW_TAB_URL, normalizeAddressInput } from './url-input';
 import type { CapturedTabContext } from '../../shared/workspace';
 import type { VisualSelectionSnapshot } from '../../shared/workspace';
-import { GOOGLE_SIGN_IN_FALLBACK_SCRIPT, isGoogleAccountsUrl } from '../../shared/google-auth';
 import { HtmlFullscreenCoordinator, type HtmlFullscreenTransition } from './html-fullscreen';
 import type { BrowserAgentAction } from '../../shared/browser-agent';
+import { showPageContextMenu } from './context-menu';
 
 const PAGE_MARGIN = 12;
-const DEFAULT_CHROME_HEIGHT = 152;
+const DEFAULT_CHROME_HEIGHT = 103;
 const SAVE_DELAY_MS = 250;
 const MAX_LAYOUT_INSET = 520;
 const MAX_TAB_CONTEXT_CHARACTERS = 60_000;
+const CLOSED_TAB_LIMIT = 12;
+const GROUP_COLORS: BrowserGroupColor[] = ['amber', 'blue', 'green', 'rose', 'violet'];
 
 interface BrowserTabRecord {
   view: WebContentsView;
@@ -39,18 +49,21 @@ interface BrowserTabRecord {
   lastExternalUrl: string;
 }
 
-interface RestoredBrowserState {
-  tabs: Array<{ id: string; url: string }>;
-  activeTabId: string;
-}
+type ClosedTab = PersistedTabState;
 
 export class BrowserEngine {
   private readonly tabs = new Map<string, BrowserTabRecord>();
+  private tabOrder: string[] = [];
+  private readonly groups = new Map<string, BrowserTabGroup>();
+  private readonly closedTabs: ClosedTab[] = [];
+  private readonly faviconByOrigin = new Map<string, string[]>();
+  private settings: BrowserSettings = { ...DEFAULT_BROWSER_SETTINGS };
   private activeTabId = '';
   private saveTimer: NodeJS.Timeout | null = null;
   private isClosing = false;
   private readonly htmlFullscreen = new HtmlFullscreenCoordinator();
   private viewInsets = { top: DEFAULT_CHROME_HEIGHT, left: 0, right: 0, bottom: 0 };
+  private closeConfirmed = false;
 
   constructor(
     private readonly window: BrowserWindow,
@@ -71,6 +84,23 @@ export class BrowserEngine {
       }
       this.layoutViews();
     });
+    this.window.on('close', (event) => {
+      if (this.closeConfirmed || !this.settings.warnBeforeClosingMultipleTabs || this.tabs.size < 2) return;
+      event.preventDefault();
+      void dialog.showMessageBox(this.window, {
+        type: 'question',
+        title: 'Close Poppin Browser?',
+        message: `Close ${this.tabs.size} tabs?`,
+        detail: 'Your open tabs are saved and can be restored the next time Poppin starts.',
+        buttons: ['Cancel', 'Close tabs'],
+        defaultId: 0,
+        cancelId: 0,
+      }).then(({ response }) => {
+        if (response !== 1 || this.window.isDestroyed()) return;
+        this.closeConfirmed = true;
+        this.window.close();
+      });
+    });
     this.window.on('closed', () => {
       this.isClosing = true;
       if (this.saveTimer) clearTimeout(this.saveTimer);
@@ -81,30 +111,39 @@ export class BrowserEngine {
     });
   }
 
-  restore(state: RestoredBrowserState | null): void {
-    const tabs: Array<{ id: string; url: string }> = state?.tabs.length
+  restore(state: PersistedBrowserStateV2 | null): void {
+    this.settings = state ? { ...state.settings } : { ...DEFAULT_BROWSER_SETTINGS };
+    for (const group of state?.groups ?? []) this.groups.set(group.id, { ...group });
+    const shouldRestore = state?.settings.startup !== 'new-tab';
+    const tabs: PersistedTabState[] = shouldRestore && state?.tabs.length
       ? state.tabs
-      : [{ id: randomUUID(), url: NEW_TAB_URL }];
-    for (const tab of tabs) this.createTab(tab.url, tab.id, false);
-    this.activateTab(state?.activeTabId && this.tabs.has(state.activeTabId) ? state.activeTabId : tabs[0]!.id);
+      : [{ id: randomUUID(), url: NEW_TAB_URL, pinned: false, groupId: null }];
+    for (const tab of tabs) this.createTab(tab.url, tab.id, false, tab, false, 'end');
+    this.activateTab(shouldRestore && state?.activeTabId && this.tabs.has(state.activeTabId) ? state.activeTabId : tabs[0]!.id);
   }
 
   getSnapshot(): BrowserSnapshot {
     return {
-      tabs: Array.from(this.tabs.values(), ({ snapshot }) => ({ ...snapshot })),
+      tabs: this.tabOrder.flatMap((id) => {
+        const tab = this.tabs.get(id);
+        return tab ? [{ ...tab.snapshot, faviconUrls: [...tab.snapshot.faviconUrls] }] : [];
+      }),
+      groups: Array.from(this.groups.values(), (group) => ({ ...group })),
       activeTabId: this.activeTabId,
       isFullScreen: this.window.isFullScreen(),
+      canReopenClosedTab: this.closedTabs.length > 0,
+      settings: { ...this.settings },
     };
   }
 
   openExternalUrl(url: string): void {
     const normalized = normalizeAddressInput(url);
     if (normalized.kind !== 'url') return;
-    this.createTab(normalized.url, randomUUID(), false);
+    this.createTab(normalized.url, randomUUID(), false, undefined, true, 'end');
   }
 
   openTaskResult(): void {
-    const existing = Array.from(this.tabs.values()).find((tab) => tab.lastExternalUrl === TASK_RESULT_URL);
+    const existing = this.tabOrder.map((id) => this.tabs.get(id)).find((tab) => tab?.lastExternalUrl === TASK_RESULT_URL);
     if (existing) {
       this.activateTab(existing.snapshot.id);
       existing.view.webContents.reloadIgnoringCache();
@@ -282,8 +321,28 @@ export class BrowserEngine {
         return this.goForward(command.tabId);
       case 'reload':
         return this.reload(command.tabId);
-      case 'showGoogleSignInAlternatives':
-        return this.showGoogleSignInAlternatives(command.tabId);
+      case 'duplicate':
+        return this.duplicateTab(command.tabId);
+      case 'reopenClosedTab':
+        return this.reopenClosedTab();
+      case 'reorder':
+        return this.reorderTab(command.tabId, command.beforeTabId);
+      case 'togglePin':
+        return this.togglePin(command.tabId);
+      case 'createGroup':
+        return this.createGroup(command.tabId);
+      case 'moveToGroup':
+        return this.moveToGroup(command.tabId, command.groupId);
+      case 'toggleGroup':
+        return this.toggleGroup(command.groupId);
+      case 'renameGroup':
+        return this.renameGroup(command.groupId, command.name);
+      case 'showTabMenu':
+        return this.showTabMenu(command.tabId);
+      case 'showGroupMenu':
+        return this.showGroupMenu(command.groupId);
+      case 'updateSettings':
+        return this.updateSettings(command.settings);
       case 'openTaskResult':
         this.openTaskResult();
         return { ok: true };
@@ -310,26 +369,34 @@ export class BrowserEngine {
 
   async flush(): Promise<void> {
     if (this.tabs.size === 0) return;
-    const state: PersistedBrowserStateV1 = {
-      version: 1,
-      tabs: Array.from(this.tabs.values(), (tab) => ({
-        id: tab.snapshot.id,
-        url: tab.lastExternalUrl || NEW_TAB_URL,
-      })),
+    const state: PersistedBrowserStateV2 = {
+      version: 2,
+      tabs: this.tabOrder.flatMap((id) => {
+        const tab = this.tabs.get(id);
+        return tab ? [{
+          id: tab.snapshot.id,
+          url: tab.lastExternalUrl || NEW_TAB_URL,
+          pinned: tab.snapshot.pinned,
+          groupId: tab.snapshot.groupId,
+        }] : [];
+      }),
+      groups: Array.from(this.groups.values(), (group) => ({ ...group })),
       activeTabId: this.activeTabId,
+      settings: { ...this.settings },
       window: this.getWindowState(),
     };
     await this.stateStore.save(state);
   }
 
   handleShortcut(input: Input): boolean {
-    if (input.type !== 'keyDown' || !input.meta || input.alt || input.control) return false;
+    if (input.type !== 'keyDown' || (!input.meta && !input.control) || input.alt) return false;
     const key = input.key.toLowerCase();
     if (key === 'l') {
       this.window.webContents.send(BROWSER_CHANNELS.focusAddress);
       return true;
     }
     if (key === 't') {
+      if (input.shift) return this.reopenClosedTab().ok;
       this.createTab();
       return true;
     }
@@ -344,8 +411,15 @@ export class BrowserEngine {
     return false;
   }
 
-  private createTab(input = '', id: string = randomUUID(), focusAddress = true): string {
-    const normalized = normalizeAddressInput(input);
+  private createTab(
+    input = '',
+    id: string = randomUUID(),
+    focusAddress = true,
+    persisted?: PersistedTabState,
+    activate = true,
+    position: 'preferred' | 'end' = 'preferred',
+  ): string {
+    const normalized = normalizeAddressInput(input, this.settings.searchEngine);
     const initialUrl = normalized.kind === 'invalid' ? NEW_TAB_URL : normalized.url;
     const view = new WebContentsView({
       webPreferences: {
@@ -366,7 +440,9 @@ export class BrowserEngine {
       id,
       url: displayUrl(initialUrl),
       title: initialUrl === NEW_TAB_URL ? 'New Tab' : 'Loading…',
-      faviconUrl: null,
+      faviconUrls: faviconForUrl(initialUrl, this.faviconByOrigin),
+      pinned: persisted?.pinned === true,
+      groupId: persisted?.groupId ?? null,
       isLoading: false,
       canGoBack: false,
       canGoForward: false,
@@ -374,9 +450,10 @@ export class BrowserEngine {
     };
     const record: BrowserTabRecord = { view, snapshot, lastExternalUrl: initialUrl };
     this.tabs.set(id, record);
+    this.insertTabId(id, position);
     this.window.contentView.addChildView(view);
     this.attachTabEvents(record);
-    this.activateTab(id);
+    if (activate) this.activateTab(id);
     void view.webContents.loadURL(initialUrl).catch(() => undefined);
 
     if (focusAddress && initialUrl === NEW_TAB_URL) {
@@ -390,8 +467,29 @@ export class BrowserEngine {
   private attachTabEvents(tab: BrowserTabRecord): void {
     const contents = tab.view.webContents;
     contents.setWindowOpenHandler(({ url }) => {
-      this.createTab(url, randomUUID(), false);
+      if (this.settings.linkOpening === 'same-tab') {
+        void contents.loadURL(url).catch(() => undefined);
+      } else {
+        this.createTab(url, randomUUID(), false, undefined, this.settings.focusNewTabs);
+      }
       return { action: 'deny' };
+    });
+    contents.on('context-menu', (_event, params) => {
+      showPageContextMenu(this.window, contents, params, {
+        canGoBack: contents.navigationHistory.canGoBack(),
+        canGoForward: contents.navigationHistory.canGoForward(),
+        onBack: () => contents.navigationHistory.goBack(),
+        onForward: () => contents.navigationHistory.goForward(),
+        onReload: () => this.reload(tab.snapshot.id),
+        onOpenLink: (url, disposition) => {
+          if (disposition === 'current') void contents.loadURL(url).catch(() => undefined);
+          else this.createTab(url, randomUUID(), false, undefined, this.settings.focusNewTabs);
+        },
+        onSearchSelection: (selection) => {
+          const search = normalizeAddressInput(selection, this.settings.searchEngine);
+          if (search.kind !== 'invalid') this.createTab(search.url, randomUUID(), false, undefined, true);
+        },
+      });
     });
     contents.on('will-navigate', (event, url) => {
       const protocol = safeProtocol(url);
@@ -415,13 +513,18 @@ export class BrowserEngine {
       this.syncNavigationState(tab);
       this.updateTab(tab, { isLoading: false });
     });
+    contents.on('dom-ready', () => this.applyLinkOpeningPreference(tab));
     contents.on('did-navigate', (_event, url) => this.handleNavigation(tab, url, true));
     contents.on('did-navigate-in-page', (_event, url) => this.handleNavigation(tab, url, false));
     contents.on('page-title-updated', (_event, title) => {
       if (!contents.getURL().startsWith('poppin://error')) this.updateTab(tab, { title: title || 'Untitled' });
     });
     contents.on('page-favicon-updated', (_event, favicons) => {
-      this.updateTab(tab, { faviconUrl: favicons[0] ?? null });
+      const candidates = favicons.filter(isSupportedFaviconUrl);
+      if (candidates.length === 0) return;
+      const origin = safeOrigin(contents.getURL());
+      if (origin) this.faviconByOrigin.set(origin, candidates);
+      this.updateTab(tab, { faviconUrls: candidates });
     });
     contents.on('did-fail-load', (_event, code, description, url, isMainFrame) => {
       if (!isMainFrame || code === -3 || url.startsWith('poppin://')) return;
@@ -432,7 +535,7 @@ export class BrowserEngine {
         title: 'Page unavailable',
         failure,
         isLoading: false,
-        faviconUrl: null,
+        faviconUrls: [],
       });
       void contents.loadURL(errorPageUrl(url, code, description));
     });
@@ -449,13 +552,17 @@ export class BrowserEngine {
   private handleNavigation(tab: BrowserTabRecord, url: string, resetFavicon: boolean): void {
     if (url.startsWith('poppin://error')) return;
     const isNewTab = url.startsWith('poppin://new-tab');
+    const previousOrigin = safeOrigin(tab.lastExternalUrl);
     tab.lastExternalUrl = isNewTab ? NEW_TAB_URL : url;
     this.syncNavigationState(tab);
+    const nextOrigin = safeOrigin(url);
     this.updateTab(tab, {
       url: displayUrl(url),
       title: isNewTab ? 'New Tab' : tab.snapshot.title,
       failure: null,
-      ...(resetFavicon ? { faviconUrl: null } : {}),
+      ...(resetFavicon && previousOrigin !== nextOrigin
+        ? { faviconUrls: faviconForUrl(url, this.faviconByOrigin) }
+        : {}),
     });
     this.scheduleSave();
   }
@@ -463,6 +570,10 @@ export class BrowserEngine {
   private activateTab(tabId: string): BrowserCommandResult {
     const tab = this.tabs.get(tabId);
     if (!tab) return { ok: false, message: 'That tab is no longer available.' };
+    if (tab.snapshot.groupId) {
+      const group = this.groups.get(tab.snapshot.groupId);
+      if (group) group.collapsed = false;
+    }
     for (const [id, candidate] of this.tabs) candidate.view.setVisible(id === tabId);
     this.activeTabId = tabId;
     this.layoutViews();
@@ -475,10 +586,21 @@ export class BrowserEngine {
   private closeTab(tabId: string): BrowserCommandResult {
     const tab = this.tabs.get(tabId);
     if (!tab) return { ok: false, message: 'That tab is already closed.' };
-    const orderedIds = Array.from(this.tabs.keys());
+    const orderedIds = [...this.tabOrder];
     const closingIndex = orderedIds.indexOf(tabId);
+    if (tab.lastExternalUrl) {
+      this.closedTabs.push({
+        id: randomUUID(),
+        url: tab.lastExternalUrl,
+        pinned: tab.snapshot.pinned,
+        groupId: tab.snapshot.groupId,
+      });
+      if (this.closedTabs.length > CLOSED_TAB_LIMIT) this.closedTabs.shift();
+    }
     this.window.contentView.removeChildView(tab.view);
     this.tabs.delete(tabId);
+    this.tabOrder = this.tabOrder.filter((id) => id !== tabId);
+    this.cleanupEmptyGroups();
     if (!tab.view.webContents.isDestroyed()) tab.view.webContents.close();
 
     if (this.tabs.size === 0) {
@@ -486,7 +608,7 @@ export class BrowserEngine {
       return { ok: true };
     }
     if (this.activeTabId === tabId) {
-      const remainingIds = Array.from(this.tabs.keys());
+      const remainingIds = [...this.tabOrder];
       this.activateTab(remainingIds[Math.min(closingIndex, remainingIds.length - 1)]!);
     } else {
       this.emitSnapshot();
@@ -498,7 +620,7 @@ export class BrowserEngine {
   private navigate(tabId: string, input: string): BrowserCommandResult {
     const tab = this.tabs.get(tabId);
     if (!tab) return { ok: false, message: 'That tab is no longer available.' };
-    const normalized = normalizeAddressInput(input);
+    const normalized = normalizeAddressInput(input, this.settings.searchEngine);
     if (normalized.kind === 'invalid') return { ok: false, message: normalized.message };
     tab.snapshot.failure = null;
     // A page can intentionally replace or redirect its initial navigation. Electron
@@ -534,23 +656,220 @@ export class BrowserEngine {
     return { ok: true };
   }
 
-  private async showGoogleSignInAlternatives(tabId: string): Promise<BrowserCommandResult> {
+  private duplicateTab(tabId: string): BrowserCommandResult {
     const tab = this.tabs.get(tabId);
-    if (!tab || tab.view.webContents.isDestroyed()) {
-      return { ok: false, message: 'That tab is no longer available.' };
-    }
-    if (!isGoogleAccountsUrl(tab.view.webContents.getURL())) {
-      return { ok: false, message: 'Sign-in assistance is only available on Google Accounts.' };
-    }
+    if (!tab) return { ok: false, message: 'That tab is no longer available.' };
+    this.createTab(tab.lastExternalUrl, randomUUID(), false, {
+      id: randomUUID(),
+      url: tab.lastExternalUrl,
+      pinned: false,
+      groupId: tab.snapshot.groupId,
+    });
+    return { ok: true };
+  }
 
-    try {
-      const activated = await tab.view.webContents.executeJavaScript(GOOGLE_SIGN_IN_FALLBACK_SCRIPT, true);
-      return activated === true
-        ? { ok: true }
-        : { ok: false, message: 'Choose “Try another way” directly on Google’s page.' };
-    } catch {
-      return { ok: false, message: 'Choose “Try another way” directly on Google’s page.' };
+  private reopenClosedTab(): BrowserCommandResult {
+    const tab = this.closedTabs.pop();
+    if (!tab) return { ok: false, message: 'There are no recently closed tabs.' };
+    if (tab.groupId && !this.groups.has(tab.groupId)) tab.groupId = null;
+    this.createTab(tab.url, tab.id, false, tab);
+    return { ok: true };
+  }
+
+  private reorderTab(tabId: string, beforeTabId: string | null): BrowserCommandResult {
+    const tab = this.tabs.get(tabId);
+    if (!tab) return { ok: false, message: 'That tab is no longer available.' };
+    const target = beforeTabId ? this.tabs.get(beforeTabId) : null;
+    if (!tab.snapshot.pinned) tab.snapshot.groupId = target?.snapshot.groupId ?? null;
+    const remaining = this.tabOrder.filter((id) => id !== tabId);
+    const beforeIndex = beforeTabId ? remaining.indexOf(beforeTabId) : -1;
+    const insertionIndex = beforeIndex >= 0 ? beforeIndex : remaining.length;
+    remaining.splice(insertionIndex, 0, tabId);
+    this.tabOrder = normalizePinnedOrder(remaining, this.tabs);
+    this.cleanupEmptyGroups();
+    this.emitSnapshot();
+    this.scheduleSave();
+    return { ok: true };
+  }
+
+  private togglePin(tabId: string): BrowserCommandResult {
+    const tab = this.tabs.get(tabId);
+    if (!tab) return { ok: false, message: 'That tab is no longer available.' };
+    tab.snapshot.pinned = !tab.snapshot.pinned;
+    if (tab.snapshot.pinned) tab.snapshot.groupId = null;
+    this.cleanupEmptyGroups();
+    this.tabOrder = normalizePinnedOrder(this.tabOrder, this.tabs);
+    this.emitSnapshot();
+    this.scheduleSave();
+    return { ok: true };
+  }
+
+  private createGroup(tabId: string): BrowserCommandResult {
+    const tab = this.tabs.get(tabId);
+    if (!tab) return { ok: false, message: 'That tab is no longer available.' };
+    const id = randomUUID();
+    const group: BrowserTabGroup = {
+      id,
+      name: `Group ${this.groups.size + 1}`,
+      color: GROUP_COLORS[this.groups.size % GROUP_COLORS.length]!,
+      collapsed: false,
+    };
+    this.groups.set(id, group);
+    tab.snapshot.pinned = false;
+    tab.snapshot.groupId = id;
+    this.cleanupEmptyGroups();
+    this.tabOrder = normalizePinnedOrder(this.tabOrder, this.tabs);
+    this.emitSnapshot();
+    this.scheduleSave();
+    return { ok: true };
+  }
+
+  private moveToGroup(tabId: string, groupId: string | null): BrowserCommandResult {
+    const tab = this.tabs.get(tabId);
+    if (!tab || (groupId && !this.groups.has(groupId))) return { ok: false, message: 'That tab or group is no longer available.' };
+    tab.snapshot.groupId = groupId;
+    if (groupId) tab.snapshot.pinned = false;
+    if (groupId) {
+      this.tabOrder = this.tabOrder.filter((id) => id !== tabId);
+      const lastGroupIndex = this.tabOrder.reduce(
+        (last, id, index) => this.tabs.get(id)?.snapshot.groupId === groupId ? index : last,
+        -1,
+      );
+      this.tabOrder.splice(lastGroupIndex + 1, 0, tabId);
     }
+    this.cleanupEmptyGroups();
+    this.tabOrder = normalizePinnedOrder(this.tabOrder, this.tabs);
+    this.emitSnapshot();
+    this.scheduleSave();
+    return { ok: true };
+  }
+
+  private toggleGroup(groupId: string): BrowserCommandResult {
+    const group = this.groups.get(groupId);
+    if (!group) return { ok: false, message: 'That tab group is no longer available.' };
+    group.collapsed = !group.collapsed;
+    this.emitSnapshot();
+    this.scheduleSave();
+    return { ok: true };
+  }
+
+  private renameGroup(groupId: string, name: string): BrowserCommandResult {
+    const group = this.groups.get(groupId);
+    const normalized = name.trim().slice(0, 32);
+    if (!group || !normalized) return { ok: false, message: 'Enter a name for this tab group.' };
+    group.name = normalized;
+    this.emitSnapshot();
+    this.scheduleSave();
+    return { ok: true };
+  }
+
+  private showTabMenu(tabId: string): BrowserCommandResult {
+    const tab = this.tabs.get(tabId);
+    if (!tab) return { ok: false, message: 'That tab is no longer available.' };
+    const index = this.tabOrder.indexOf(tabId);
+    const groups: MenuItemConstructorOptions[] = Array.from(this.groups.values(), (group) => ({
+      label: group.name,
+      type: 'checkbox',
+      checked: tab.snapshot.groupId === group.id,
+      click: () => this.moveToGroup(tabId, group.id),
+    }));
+    const template: MenuItemConstructorOptions[] = [
+      { label: 'Reload', click: () => this.reload(tabId) },
+      { label: 'Duplicate', click: () => this.duplicateTab(tabId) },
+      { type: 'separator' },
+      { label: tab.snapshot.pinned ? 'Unpin Tab' : 'Pin Tab', click: () => this.togglePin(tabId) },
+      { label: 'Add to New Group', enabled: !tab.snapshot.pinned, click: () => this.createGroup(tabId) },
+      ...(groups.length ? [{ label: 'Move to Group', enabled: !tab.snapshot.pinned, submenu: groups } as MenuItemConstructorOptions] : []),
+      ...(tab.snapshot.groupId ? [{ label: 'Remove from Group', click: () => this.moveToGroup(tabId, null) } as MenuItemConstructorOptions] : []),
+      { type: 'separator' },
+      { label: 'Close Tab', click: () => this.closeTab(tabId) },
+      { label: 'Close Other Tabs', enabled: this.tabs.size > 1, click: () => this.closeOtherTabs(tabId) },
+      { label: 'Close Tabs to the Right', enabled: index >= 0 && index < this.tabOrder.length - 1, click: () => this.closeTabsToRight(tabId) },
+    ];
+    Menu.buildFromTemplate(template).popup({ window: this.window });
+    return { ok: true };
+  }
+
+  private showGroupMenu(groupId: string): BrowserCommandResult {
+    const group = this.groups.get(groupId);
+    if (!group) return { ok: false, message: 'That tab group is no longer available.' };
+    Menu.buildFromTemplate([
+      { label: group.collapsed ? 'Expand Group' : 'Collapse Group', click: () => this.toggleGroup(groupId) },
+      { label: 'Ungroup Tabs', click: () => this.removeGroup(groupId) },
+      { label: 'Close Group', click: () => this.closeGroup(groupId) },
+    ]).popup({ window: this.window });
+    return { ok: true };
+  }
+
+  private updateSettings(updates: Partial<BrowserSettings>): BrowserCommandResult {
+    this.settings = sanitizeBrowserSettings({ ...this.settings, ...updates });
+    for (const tab of this.tabs.values()) this.applyLinkOpeningPreference(tab);
+    this.emitSnapshot();
+    this.scheduleSave();
+    return { ok: true };
+  }
+
+  private insertTabId(id: string, position: 'preferred' | 'end'): void {
+    const tab = this.tabs.get(id);
+    if (!tab) return;
+    if (position === 'end' || this.settings.newTabPosition === 'end' || !this.activeTabId) {
+      this.tabOrder.push(id);
+    } else {
+      const activeIndex = this.tabOrder.indexOf(this.activeTabId);
+      this.tabOrder.splice(activeIndex >= 0 ? activeIndex + 1 : this.tabOrder.length, 0, id);
+    }
+    this.tabOrder = normalizePinnedOrder(this.tabOrder, this.tabs);
+  }
+
+  private closeOtherTabs(tabId: string): void {
+    for (const id of [...this.tabOrder]) if (id !== tabId && !this.tabs.get(id)?.snapshot.pinned) this.closeTab(id);
+  }
+
+  private closeTabsToRight(tabId: string): void {
+    const index = this.tabOrder.indexOf(tabId);
+    for (const id of this.tabOrder.slice(index + 1)) if (!this.tabs.get(id)?.snapshot.pinned) this.closeTab(id);
+  }
+
+  private closeGroup(groupId: string): void {
+    for (const id of [...this.tabOrder]) if (this.tabs.get(id)?.snapshot.groupId === groupId) this.closeTab(id);
+    this.groups.delete(groupId);
+    this.emitSnapshot();
+    this.scheduleSave();
+  }
+
+  private removeGroup(groupId: string): void {
+    for (const tab of this.tabs.values()) if (tab.snapshot.groupId === groupId) tab.snapshot.groupId = null;
+    this.groups.delete(groupId);
+    this.emitSnapshot();
+    this.scheduleSave();
+  }
+
+  private cleanupEmptyGroups(): void {
+    const used = new Set(Array.from(this.tabs.values(), (tab) => tab.snapshot.groupId).filter(Boolean));
+    for (const id of this.groups.keys()) if (!used.has(id)) this.groups.delete(id);
+  }
+
+  private applyLinkOpeningPreference(tab: BrowserTabRecord): void {
+    if (tab.view.webContents.isDestroyed()) return;
+    const forceNewTab = this.settings.linkOpening === 'new-tab';
+    void tab.view.webContents.executeJavaScript(`(() => {
+      const key = '__poppinLinkPreference';
+      const existing = window[key];
+      if (existing) document.removeEventListener('click', existing, true);
+      if (!${JSON.stringify(forceNewTab)}) { window[key] = null; return; }
+      const handler = (event) => {
+        if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        const target = event.target instanceof Element ? event.target.closest('a[href]') : null;
+        if (!target || target.hasAttribute('download')) return;
+        const href = target.href;
+        if (!href || href.startsWith('javascript:') || href.startsWith('mailto:') || href.startsWith('tel:') || target.hash && target.origin === location.origin && target.pathname === location.pathname) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        window.open(href, '_blank', 'noopener');
+      };
+      window[key] = handler;
+      document.addEventListener('click', handler, true);
+    })()`, true).catch(() => undefined);
   }
 
   private updateTab(tab: BrowserTabRecord, updates: Partial<BrowserTabSnapshot>): void {
@@ -608,6 +927,52 @@ function safeProtocol(value: string): string {
   } catch {
     return '';
   }
+}
+
+function safeOrigin(value: string): string | null {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.origin : null;
+  } catch {
+    return null;
+  }
+}
+
+function faviconForUrl(value: string, cache: Map<string, string[]>): string[] {
+  const origin = safeOrigin(value);
+  return origin ? [...(cache.get(origin) ?? [])] : [];
+}
+
+function isSupportedFaviconUrl(value: string): boolean {
+  try {
+    const protocol = new URL(value).protocol;
+    return protocol === 'http:' || protocol === 'https:' || protocol === 'data:';
+  } catch {
+    return false;
+  }
+}
+
+function normalizePinnedOrder(order: string[], tabs: Map<string, BrowserTabRecord>): string[] {
+  const pinned: string[] = [];
+  const regular: string[] = [];
+  for (const id of order) {
+    if (tabs.get(id)?.snapshot.pinned) pinned.push(id);
+    else regular.push(id);
+  }
+  return [...pinned, ...regular];
+}
+
+function sanitizeBrowserSettings(settings: BrowserSettings): BrowserSettings {
+  return {
+    linkOpening: ['follow-site', 'new-tab', 'same-tab'].includes(settings.linkOpening)
+      ? settings.linkOpening
+      : DEFAULT_BROWSER_SETTINGS.linkOpening,
+    focusNewTabs: Boolean(settings.focusNewTabs),
+    startup: settings.startup === 'new-tab' ? 'new-tab' : 'restore',
+    newTabPosition: settings.newTabPosition === 'end' ? 'end' : 'next-to-active',
+    warnBeforeClosingMultipleTabs: Boolean(settings.warnBeforeClosingMultipleTabs),
+    searchEngine: settings.searchEngine === 'google' ? 'google' : 'duckduckgo',
+  };
 }
 
 export function isLocalhostUrl(value: string): boolean {

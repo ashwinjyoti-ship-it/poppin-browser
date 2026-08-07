@@ -1,13 +1,15 @@
-import { ArrowLeft, ArrowRight, KeyRound, LockKeyhole, RefreshCw, Search, X } from 'lucide-react';
-import { Fragment, type FormEvent, type RefObject, useState } from 'react';
+import { ArrowLeft, ArrowRight, LockKeyhole, RefreshCw, RotateCcw, Search, Settings2, X } from 'lucide-react';
+import { type FormEvent, type RefObject } from 'react';
 
-import type { BrowserTabSnapshot } from '../../shared/browser';
+import type { BrowserSettings, BrowserTabSnapshot } from '../../shared/browser';
 
 interface BrowserToolbarProps {
   activeTab: BrowserTabSnapshot | null;
   address: string;
   addressError: string;
-  googleSignInHelp: boolean;
+  settings: BrowserSettings;
+  settingsOpen: boolean;
+  canReopenClosedTab: boolean;
   addressInputRef: RefObject<HTMLInputElement | null>;
   onAddressChange: (value: string) => void;
   onAddressFocus: () => void;
@@ -15,7 +17,9 @@ interface BrowserToolbarProps {
   onBack: () => void;
   onForward: () => void;
   onReload: () => void;
-  onShowGoogleSignInAlternatives: () => void;
+  onReopenClosedTab: () => void;
+  onSettingsOpenChange: (open: boolean) => void;
+  onUpdateSettings: (settings: Partial<BrowserSettings>) => void;
   onSubmit: (event: FormEvent) => void;
 }
 
@@ -23,7 +27,9 @@ export function BrowserToolbar({
   activeTab,
   address,
   addressError,
-  googleSignInHelp,
+  settings,
+  settingsOpen,
+  canReopenClosedTab,
   addressInputRef,
   onAddressChange,
   onAddressFocus,
@@ -31,7 +37,9 @@ export function BrowserToolbar({
   onBack,
   onForward,
   onReload,
-  onShowGoogleSignInAlternatives,
+  onReopenClosedTab,
+  onSettingsOpenChange,
+  onUpdateSettings,
   onSubmit,
 }: BrowserToolbarProps) {
   return (
@@ -69,53 +77,89 @@ export function BrowserToolbar({
         {addressError ? <span className="address-error" role="alert">{addressError}</span> : null}
       </form>
 
-      {googleSignInHelp ? (
-        <GoogleSignInAssistance onShowAlternatives={onShowGoogleSignInAlternatives} />
-      ) : <div className="toolbar-actions" />}
+      <div className="toolbar-actions">
+        <button
+          type="button"
+          className="settings-button"
+          aria-label="Browser settings"
+          aria-expanded={settingsOpen}
+          onClick={() => onSettingsOpenChange(!settingsOpen)}
+        >
+          <Settings2 size={18} />
+        </button>
+      </div>
+
+      {settingsOpen ? (
+        <BrowserSettingsPanel
+          settings={settings}
+          canReopenClosedTab={canReopenClosedTab}
+          onClose={() => onSettingsOpenChange(false)}
+          onReopenClosedTab={onReopenClosedTab}
+          onUpdate={onUpdateSettings}
+        />
+      ) : null}
     </div>
   );
 }
 
-function GoogleSignInAssistance({ onShowAlternatives }: { onShowAlternatives: () => void }) {
-  const [open, setOpen] = useState(true);
+interface BrowserSettingsPanelProps {
+  settings: BrowserSettings;
+  canReopenClosedTab: boolean;
+  onClose: () => void;
+  onReopenClosedTab: () => void;
+  onUpdate: (settings: Partial<BrowserSettings>) => void;
+}
 
+function BrowserSettingsPanel({ settings, canReopenClosedTab, onClose, onReopenClosedTab, onUpdate }: BrowserSettingsPanelProps) {
   return (
-    <Fragment>
-      <div className="toolbar-actions">
-        <button
-          type="button"
-          className="sign-in-help-button"
-          aria-label="Google sign-in help"
-          aria-expanded={open}
-          onClick={() => setOpen((current) => !current)}
-        >
-          <KeyRound size={17} />
-          <span>Sign-in help</span>
-        </button>
+    <aside className="browser-settings-panel" aria-label="Browser settings">
+      <div className="settings-heading">
+        <div><span>Browser</span><strong>Settings</strong></div>
+        <button type="button" aria-label="Close browser settings" onClick={onClose}><X size={15} /></button>
       </div>
 
-      {open ? (
-        <aside className="google-sign-in-help" aria-label="Google sign-in guidance">
-          <KeyRound size={17} aria-hidden="true" />
-          <div>
-            <strong>Finish signing in to Google</strong>
-            <p>Poppin has a separate secure browser session. Show Google’s other methods, then use a phone prompt, security key, or password. Poppin remembers the login after it succeeds.</p>
-          </div>
-          <button
-            type="button"
-            className="google-sign-in-fallback"
-            onClick={() => {
-              onShowAlternatives();
-              setOpen(false);
-            }}
-          >
-            Show other methods
-          </button>
-          <button type="button" className="google-sign-in-close" aria-label="Dismiss Google sign-in help" onClick={() => setOpen(false)}>
-            <X size={14} />
-          </button>
-        </aside>
-      ) : null}
-    </Fragment>
+      <label>
+        Links open in
+        <select value={settings.linkOpening} onChange={(event) => onUpdate({ linkOpening: event.target.value as BrowserSettings['linkOpening'] })}>
+          <option value="follow-site">Follow the website</option>
+          <option value="new-tab">Always a new tab</option>
+          <option value="same-tab">Always the current tab</option>
+        </select>
+      </label>
+      <label>
+        New tabs appear
+        <select value={settings.newTabPosition} onChange={(event) => onUpdate({ newTabPosition: event.target.value as BrowserSettings['newTabPosition'] })}>
+          <option value="next-to-active">Next to the active tab</option>
+          <option value="end">At the end</option>
+        </select>
+      </label>
+      <label>
+        On startup
+        <select value={settings.startup} onChange={(event) => onUpdate({ startup: event.target.value as BrowserSettings['startup'] })}>
+          <option value="restore">Restore previous session</option>
+          <option value="new-tab">Open a new tab</option>
+        </select>
+      </label>
+      <label>
+        Search engine
+        <select value={settings.searchEngine} onChange={(event) => onUpdate({ searchEngine: event.target.value as BrowserSettings['searchEngine'] })}>
+          <option value="duckduckgo">DuckDuckGo</option>
+          <option value="google">Google</option>
+        </select>
+      </label>
+
+      <label className="settings-toggle">
+        <input type="checkbox" checked={settings.focusNewTabs} onChange={(event) => onUpdate({ focusNewTabs: event.target.checked })} />
+        Switch to newly opened tabs
+      </label>
+      <label className="settings-toggle">
+        <input type="checkbox" checked={settings.warnBeforeClosingMultipleTabs} onChange={(event) => onUpdate({ warnBeforeClosingMultipleTabs: event.target.checked })} />
+        Warn before closing multiple tabs
+      </label>
+
+      <button type="button" className="settings-secondary" disabled={!canReopenClosedTab} onClick={onReopenClosedTab}>
+        <RotateCcw size={14} /> Reopen closed tab
+      </button>
+    </aside>
   );
 }

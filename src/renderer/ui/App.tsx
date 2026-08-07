@@ -1,10 +1,9 @@
 import { type CSSProperties, type FormEvent, useEffect, useRef, useState } from 'react';
 
-import type { BrowserCommand, BrowserSnapshot } from '../../shared/browser';
+import { DEFAULT_BROWSER_SETTINGS, type BrowserCommand, type BrowserSnapshot } from '../../shared/browser';
 import type { WorkspaceCommand, WorkspaceSnapshot } from '../../shared/workspace';
 import type { TaskCommand, TaskCommandResult, TaskSnapshot } from '../../shared/task';
 import type { BrowserAgentCommand, BrowserAgentCommandResult, BrowserAgentSnapshot } from '../../shared/browser-agent';
-import { isGoogleAccountsUrl } from '../../shared/google-auth';
 import { Brand } from './Brand';
 import { BrowserToolbar } from './BrowserToolbar';
 import { TabStrip } from './TabStrip';
@@ -23,7 +22,10 @@ import {
   type PaneSide,
 } from './pane-layout';
 
-const EMPTY_SNAPSHOT: BrowserSnapshot = { tabs: [], activeTabId: '', isFullScreen: false };
+const EMPTY_SNAPSHOT: BrowserSnapshot = {
+  tabs: [], groups: [], activeTabId: '', isFullScreen: false, canReopenClosedTab: false,
+  settings: { ...DEFAULT_BROWSER_SETTINGS },
+};
 const EMPTY_WORKSPACE: WorkspaceSnapshot = { workspace: null, documents: [], tabContexts: [], project: null, visualSelection: null };
 const EMPTY_TASK: TaskSnapshot = { connection: { state: 'checking', message: 'Connecting to Codex…', accountLabel: null, models: [] }, task: null };
 const EMPTY_BROWSER_AGENT: BrowserAgentSnapshot = { state: 'idle', taskId: null, allowedTabIds: [], activeTabId: null, currentAction: null, pendingApproval: null, log: [] };
@@ -40,6 +42,7 @@ export function App() {
   const [taskSnapshot, setTaskSnapshot] = useState<TaskSnapshot>(EMPTY_TASK);
   const [browserAgentSnapshot, setBrowserAgentSnapshot] = useState<BrowserAgentSnapshot>(EMPTY_BROWSER_AGENT);
   const [commandCollapsed, setCommandCollapsed] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [preferredPaneWidths, setPreferredPaneWidths] = useState(() => loadPaneWidths(window.localStorage));
   const [viewport, setViewport] = useState(() => ({ width: window.innerWidth, height: window.innerHeight }));
   const addressInputRef = useRef<HTMLInputElement>(null);
@@ -121,9 +124,10 @@ export function App() {
       topInset: chromeLayout.height,
       leftInset: workspaceCollapsed ? 46 : paneWidths.left + 14,
       rightInset: contextCollapsed ? 46 : paneWidths.right + 14,
+      ...(settingsOpen ? { rightInset: Math.max(contextCollapsed ? 46 : paneWidths.right + 14, 350) } : {}),
       bottomInset: commandCollapsed ? 0 : 94,
     });
-  }, [chromeLayout.height, commandCollapsed, contextCollapsed, paneWidths.left, paneWidths.right, workspaceCollapsed]);
+  }, [chromeLayout.height, commandCollapsed, contextCollapsed, paneWidths.left, paneWidths.right, settingsOpen, workspaceCollapsed]);
 
   const resizePane = (side: PaneSide, requestedWidth: number) => {
     const otherSide = side === 'left' ? 'right' : 'left';
@@ -190,7 +194,9 @@ export function App() {
             activeTab={activeTab}
             address={address}
             addressError={addressError}
-            googleSignInHelp={Boolean(activeTab && isGoogleAccountsUrl(activeTab.url))}
+            settings={snapshot.settings}
+            settingsOpen={settingsOpen}
+            canReopenClosedTab={snapshot.canReopenClosedTab}
             addressInputRef={addressInputRef}
             onAddressChange={(value) => {
               setAddressDraft(value);
@@ -206,18 +212,24 @@ export function App() {
             onBack={() => withActiveTab('back')}
             onForward={() => withActiveTab('forward')}
             onReload={() => withActiveTab('reload')}
-            onShowGoogleSignInAlternatives={() => {
-              if (activeTab) void sendCommand({ type: 'showGoogleSignInAlternatives', tabId: activeTab.id });
-            }}
+            onReopenClosedTab={() => void sendCommand({ type: 'reopenClosedTab' })}
+            onSettingsOpenChange={setSettingsOpen}
+            onUpdateSettings={(settings) => void sendCommand({ type: 'updateSettings', settings })}
             onSubmit={submitAddress}
           />
         </div>
         <TabStrip
           tabs={snapshot.tabs}
+          groups={snapshot.groups}
           activeTabId={snapshot.activeTabId}
           onActivate={(tabId) => void sendCommand({ type: 'activate', tabId })}
           onClose={(tabId) => void sendCommand({ type: 'close', tabId })}
           onCreate={() => void sendCommand({ type: 'create' })}
+          onReorder={(tabId, beforeTabId) => void sendCommand({ type: 'reorder', tabId, beforeTabId })}
+          onShowTabMenu={(tabId) => void sendCommand({ type: 'showTabMenu', tabId })}
+          onToggleGroup={(groupId) => void sendCommand({ type: 'toggleGroup', groupId })}
+          onRenameGroup={(groupId, name) => void sendCommand({ type: 'renameGroup', groupId, name })}
+          onShowGroupMenu={(groupId) => void sendCommand({ type: 'showGroupMenu', groupId })}
         />
       </header>
       <WorkspacePane

@@ -10,7 +10,7 @@ export type NormalizedInput =
   | { kind: 'search'; url: string }
   | { kind: 'invalid'; message: string };
 
-export function normalizeAddressInput(input: string): NormalizedInput {
+export function normalizeAddressInput(input: string, searchEngine: 'duckduckgo' | 'google' = 'duckduckgo'): NormalizedInput {
   const value = input.trim();
 
   if (!value) {
@@ -39,7 +39,9 @@ export function normalizeAddressInput(input: string): NormalizedInput {
 
   return {
     kind: 'search',
-    url: `https://duckduckgo.com/?q=${encodeURIComponent(value)}`,
+    url: searchEngine === 'google'
+      ? `https://www.google.com/search?q=${encodeURIComponent(value)}`
+      : `https://duckduckgo.com/?q=${encodeURIComponent(value)}`,
   };
 }
 

@@ -7,7 +7,7 @@ import { TabStrip } from '../src/renderer/ui/TabStrip';
 import { CommandBar } from '../src/renderer/ui/CommandBar';
 import { ContextPane } from '../src/renderer/ui/ContextPane';
 import { PaneResizer } from '../src/renderer/ui/PaneResizer';
-import type { BrowserTabSnapshot } from '../src/shared/browser';
+import { DEFAULT_BROWSER_SETTINGS, type BrowserTabSnapshot } from '../src/shared/browser';
 import type { TaskSnapshot } from '../src/shared/task';
 import type { WorkspaceSnapshot } from '../src/shared/workspace';
 
@@ -15,7 +15,9 @@ const TAB: BrowserTabSnapshot = {
   id: 'tab-one',
   title: 'Poppin',
   url: 'https://example.com/',
-  faviconUrl: null,
+  faviconUrls: [],
+  pinned: false,
+  groupId: null,
   isLoading: false,
   canGoBack: false,
   canGoForward: true,
@@ -44,10 +46,16 @@ describe('browser chrome', () => {
     render(
       <TabStrip
         tabs={[TAB]}
+        groups={[]}
         activeTabId={TAB.id}
         onActivate={onActivate}
         onClose={onClose}
         onCreate={onCreate}
+        onReorder={vi.fn()}
+        onShowTabMenu={vi.fn()}
+        onToggleGroup={vi.fn()}
+        onRenameGroup={vi.fn()}
+        onShowGroupMenu={vi.fn()}
       />,
     );
 
@@ -62,19 +70,53 @@ describe('browser chrome', () => {
   it('keeps the globe fallback when a tab favicon cannot load', () => {
     const { container } = render(
       <TabStrip
-        tabs={[{ ...TAB, faviconUrl: 'https://example.com/missing-favicon.ico' }]}
+        tabs={[{ ...TAB, faviconUrls: ['https://example.com/missing-favicon.ico'] }]}
+        groups={[]}
         activeTabId={TAB.id}
         onActivate={vi.fn()}
         onClose={vi.fn()}
         onCreate={vi.fn()}
+        onReorder={vi.fn()}
+        onShowTabMenu={vi.fn()}
+        onToggleGroup={vi.fn()}
+        onRenameGroup={vi.fn()}
+        onShowGroupMenu={vi.fn()}
       />,
     );
 
     const favicon = container.querySelector<HTMLImageElement>('.tab-favicon');
     expect(favicon).not.toBeNull();
     fireEvent.error(favicon!);
-    expect(favicon).toHaveAttribute('hidden');
+    expect(container.querySelector('.tab-favicon')).toBeNull();
     expect(container.querySelector('.tab-icon svg')).not.toBeNull();
+  });
+
+  it('renders pinned tabs compactly and collapses named groups', async () => {
+    const user = userEvent.setup();
+    const onToggleGroup = vi.fn();
+    render(
+      <TabStrip
+        tabs={[
+          { ...TAB, pinned: true },
+          { ...TAB, id: 'grouped', title: 'Grouped page', groupId: 'group-one' },
+        ]}
+        groups={[{ id: 'group-one', name: 'Research', color: 'blue', collapsed: false }]}
+        activeTabId={TAB.id}
+        onActivate={vi.fn()}
+        onClose={vi.fn()}
+        onCreate={vi.fn()}
+        onReorder={vi.fn()}
+        onShowTabMenu={vi.fn()}
+        onToggleGroup={onToggleGroup}
+        onRenameGroup={vi.fn()}
+        onShowGroupMenu={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('tab', { name: /poppin, pinned/i })).toBeVisible();
+    expect(screen.queryByRole('button', { name: /close poppin/i })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /research tab group/i }));
+    expect(onToggleGroup).toHaveBeenCalledWith('group-one');
   });
 
   it('reflects navigation availability and submits the address form', async () => {
@@ -86,7 +128,9 @@ describe('browser chrome', () => {
         activeTab={TAB}
         address={TAB.url}
         addressError=""
-        googleSignInHelp={false}
+        settings={DEFAULT_BROWSER_SETTINGS}
+        settingsOpen={false}
+        canReopenClosedTab={false}
         addressInputRef={ref}
         onAddressChange={vi.fn()}
         onAddressFocus={vi.fn()}
@@ -94,7 +138,9 @@ describe('browser chrome', () => {
         onBack={vi.fn()}
         onForward={vi.fn()}
         onReload={vi.fn()}
-        onShowGoogleSignInAlternatives={vi.fn()}
+        onReopenClosedTab={vi.fn()}
+        onSettingsOpenChange={vi.fn()}
+        onUpdateSettings={vi.fn()}
         onSubmit={onSubmit}
       />,
     );
@@ -105,15 +151,17 @@ describe('browser chrome', () => {
     expect(onSubmit).toHaveBeenCalledOnce();
   });
 
-  it('offers a safe fallback when Google selects an unavailable passkey flow', async () => {
+  it('opens browser settings and updates link behavior', async () => {
     const user = userEvent.setup();
-    const onShowGoogleSignInAlternatives = vi.fn();
+    const onUpdateSettings = vi.fn();
     render(
       <BrowserToolbar
         activeTab={{ ...TAB, url: 'https://accounts.google.com/v3/signin/challenge/pk' }}
         address="https://accounts.google.com/v3/signin/challenge/pk"
         addressError=""
-        googleSignInHelp
+        settings={DEFAULT_BROWSER_SETTINGS}
+        settingsOpen
+        canReopenClosedTab={false}
         addressInputRef={{ current: null }}
         onAddressChange={vi.fn()}
         onAddressFocus={vi.fn()}
@@ -121,15 +169,16 @@ describe('browser chrome', () => {
         onBack={vi.fn()}
         onForward={vi.fn()}
         onReload={vi.fn()}
-        onShowGoogleSignInAlternatives={onShowGoogleSignInAlternatives}
+        onReopenClosedTab={vi.fn()}
+        onSettingsOpenChange={vi.fn()}
+        onUpdateSettings={onUpdateSettings}
         onSubmit={vi.fn()}
       />,
     );
 
-    expect(await screen.findByRole('complementary', { name: /google sign-in guidance/i })).toBeVisible();
-    expect(screen.getByText(/separate secure browser session/i)).toBeVisible();
-    await user.click(screen.getByRole('button', { name: /show other methods/i }));
-    expect(onShowGoogleSignInAlternatives).toHaveBeenCalledOnce();
+    expect(await screen.findByRole('complementary', { name: /browser settings/i })).toBeVisible();
+    await user.selectOptions(screen.getByLabelText(/links open in/i), 'new-tab');
+    expect(onUpdateSettings).toHaveBeenCalledWith({ linkOpening: 'new-tab' });
   });
 });
 

@@ -24,6 +24,7 @@ import { TaskStore } from './task/task-store';
 import { BrowserAgentEngine } from './browser/browser-agent-engine';
 import { BROWSER_AGENT_CHANNELS, type BrowserAgentCommand } from '../shared/browser-agent';
 import { PreviewEngine } from './project/preview-engine';
+import { showEditContextMenu } from './browser/context-menu';
 
 registerInternalScheme();
 
@@ -120,15 +121,14 @@ async function createWindow(): Promise<void> {
       return result.filePath;
     },
   });
-  browserEngine.restore(
-    persisted
-      ? { tabs: persisted.tabs, activeTabId: persisted.activeTabId }
-      : null,
-  );
+  browserEngine.restore(persisted);
   for (const url of pendingExternalUrls.splice(0)) openExternalUrl(url);
 
   mainWindow.webContents.on('before-input-event', (event, input) => {
     if (browserEngine?.handleShortcut(input)) event.preventDefault();
+  });
+  mainWindow.webContents.on('context-menu', (_event, params) => {
+    if (mainWindow) showEditContextMenu(mainWindow, mainWindow.webContents, params);
   });
   mainWindow.on('move', () => browserEngine?.scheduleSave());
   mainWindow.on('resize', () => browserEngine?.scheduleSave());
@@ -165,7 +165,18 @@ function isTrustedShellSender(sender: Electron.WebContents): boolean {
 }
 
 app.whenReady().then(async () => {
-  Menu.setApplicationMenu(null);
+  Menu.setApplicationMenu(Menu.buildFromTemplate([
+    { role: 'appMenu' },
+    {
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' }, { role: 'redo' }, { type: 'separator' },
+        { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'pasteAndMatchStyle' },
+        { role: 'delete' }, { role: 'selectAll' },
+      ],
+    },
+    { role: 'windowMenu' },
+  ]));
   workspaceStore = new WorkspaceStore(path.join(app.getPath('userData'), 'poppin.sqlite'));
   taskStore = new TaskStore(path.join(app.getPath('userData'), 'poppin.sqlite'));
   ipcMain.handle(BROWSER_CHANNELS.getSnapshot, (event) => {
