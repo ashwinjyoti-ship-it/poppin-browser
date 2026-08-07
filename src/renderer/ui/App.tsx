@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useRef, useState } from 'react';
+import { type CSSProperties, type FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { BrowserCommand, BrowserSnapshot } from '../../shared/browser';
 import type { WorkspaceCommand, WorkspaceSnapshot } from '../../shared/workspace';
@@ -9,6 +9,15 @@ import { TabStrip } from './TabStrip';
 import { WorkspacePane } from './WorkspacePane';
 import { ContextPane } from './ContextPane';
 import { CommandBar } from './CommandBar';
+import { PaneResizer } from './PaneResizer';
+import {
+  clampResizedPaneWidth,
+  getPaneWidthRange,
+  loadPaneWidths,
+  normalizePaneWidths,
+  savePaneWidths,
+  type PaneSide,
+} from './pane-layout';
 
 const EMPTY_SNAPSHOT: BrowserSnapshot = { tabs: [], activeTabId: '' };
 const EMPTY_WORKSPACE: WorkspaceSnapshot = { workspace: null, documents: [], tabContexts: [], project: null };
@@ -24,10 +33,20 @@ export function App() {
   const [contextCollapsed, setContextCollapsed] = useState(false);
   const [taskSnapshot, setTaskSnapshot] = useState<TaskSnapshot>(EMPTY_TASK);
   const [commandCollapsed, setCommandCollapsed] = useState(false);
+  const [preferredPaneWidths, setPreferredPaneWidths] = useState(() => loadPaneWidths(window.localStorage));
+  const [viewportWidth, setViewportWidth] = useState(window.innerWidth);
   const addressInputRef = useRef<HTMLInputElement>(null);
 
   const activeTab = snapshot.tabs.find((tab) => tab.id === snapshot.activeTabId) ?? null;
   const address = isEditingAddress ? addressDraft : activeTab?.url ?? '';
+  const paneWidths = useMemo(
+    () => normalizePaneWidths(preferredPaneWidths, viewportWidth),
+    [preferredPaneWidths, viewportWidth],
+  );
+  const paneStyle = {
+    '--workspace-pane-width': `${paneWidths.left}px`,
+    '--context-pane-width': `${paneWidths.right}px`,
+  } as CSSProperties;
 
   useEffect(() => {
     let mounted = true;
@@ -57,13 +76,29 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    const updateViewportWidth = () => setViewportWidth(window.innerWidth);
+    window.addEventListener('resize', updateViewportWidth);
+    return () => window.removeEventListener('resize', updateViewportWidth);
+  }, []);
+
+  useEffect(() => {
+    savePaneWidths(window.localStorage, preferredPaneWidths);
+  }, [preferredPaneWidths]);
+
+  useEffect(() => {
     void window.poppinBrowser.command({
       type: 'setLayout',
-      leftInset: workspaceCollapsed ? 46 : 300,
-      rightInset: contextCollapsed ? 46 : 330,
+      leftInset: workspaceCollapsed ? 46 : paneWidths.left + 14,
+      rightInset: contextCollapsed ? 46 : paneWidths.right + 14,
       bottomInset: commandCollapsed ? 0 : 94,
     });
-  }, [commandCollapsed, contextCollapsed, workspaceCollapsed]);
+  }, [commandCollapsed, contextCollapsed, paneWidths.left, paneWidths.right, workspaceCollapsed]);
+
+  const resizePane = (side: PaneSide, requestedWidth: number) => {
+    const otherSide = side === 'left' ? 'right' : 'left';
+    const width = clampResizedPaneWidth(side, requestedWidth, viewportWidth, paneWidths[otherSide]);
+    setPreferredPaneWidths((current) => ({ ...current, [side]: width }));
+  };
 
   const sendCommand = async (command: BrowserCommand) => {
     try {
@@ -104,7 +139,7 @@ export function App() {
   };
 
   return (
-    <main className={`app-shell ${commandCollapsed ? 'command-is-collapsed' : ''}`}>
+    <main className={`app-shell ${commandCollapsed ? 'command-is-collapsed' : ''}`} style={paneStyle}>
       <header className="browser-chrome">
         <div className="top-row">
           <Brand />
@@ -154,6 +189,22 @@ export function App() {
         onRefreshTab={(tabId) => { void sendWorkspaceCommand({ type: 'refreshTabContext', tabId }); }}
         onTaskCommand={sendTaskCommand}
       />
+      {!workspaceCollapsed ? (
+        <PaneResizer
+          side="left"
+          width={paneWidths.left}
+          {...getPaneWidthRange('left', viewportWidth, paneWidths.right)}
+          onResize={(width) => resizePane('left', width)}
+        />
+      ) : null}
+      {!contextCollapsed ? (
+        <PaneResizer
+          side="right"
+          width={paneWidths.right}
+          {...getPaneWidthRange('right', viewportWidth, paneWidths.left)}
+          onResize={(width) => resizePane('right', width)}
+        />
+      ) : null}
       <div className={`browser-stage ${workspaceCollapsed ? 'workspace-collapsed' : ''} ${contextCollapsed ? 'context-collapsed' : ''}`} aria-hidden="true" />
       <CommandBar snapshot={taskSnapshot} collapsed={commandCollapsed} onCollapseChange={setCommandCollapsed} onCommand={sendTaskCommand} />
     </main>

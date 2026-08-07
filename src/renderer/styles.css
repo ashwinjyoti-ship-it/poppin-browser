@@ -25,6 +25,8 @@ button, input, select, textarea { font: inherit; }
 button { color: inherit; }
 
 .app-shell {
+  --workspace-pane-width: 286px;
+  --context-pane-width: 316px;
   position: relative;
   width: 100%;
   height: 100%;
@@ -210,7 +212,7 @@ button { color: inherit; }
 .browser-stage {
   position: absolute;
   z-index: 1;
-  inset: 152px 340px 104px 310px;
+  inset: 152px calc(var(--context-pane-width) + 24px) 104px calc(var(--workspace-pane-width) + 24px);
   border: 1px solid rgba(226, 216, 204, .9);
   border-radius: 20px;
   background: var(--surface);
@@ -235,7 +237,7 @@ button { color: inherit; }
 
 .workspace-pane {
   left: 12px;
-  width: 286px;
+  width: var(--workspace-pane-width);
   padding: 20px;
   border-radius: 18px;
   overflow: hidden;
@@ -253,10 +255,47 @@ button { color: inherit; }
   color: #8a7966;
 }
 
-.context-pane { right: 12px; width: 316px; padding: 14px 14px 18px; border-radius: 18px; }
+.context-pane { right: 12px; width: var(--context-pane-width); padding: 14px 14px 18px; border-radius: 18px; }
 .side-rail-right { right: 12px; width: 34px; display: flex; flex-direction: column; align-items: center; gap: 16px; padding: 10px 0; border-radius: 14px; color: #8a7966; }
 .command-is-collapsed .side-pane, .command-is-collapsed .side-rail { bottom: 12px; }
 .rail-count { display: grid; place-items: center; min-width: 21px; height: 21px; padding: 0 5px; border-radius: 999px; color: #9b5911; background: var(--amber-soft); font-size: 10px; font-weight: 700; }
+
+.pane-resizer {
+  position: absolute;
+  z-index: 5;
+  top: 164px;
+  bottom: 116px;
+  width: 12px;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  cursor: col-resize;
+  -webkit-app-region: no-drag;
+  touch-action: none;
+}
+.pane-resizer-left { left: calc(12px + var(--workspace-pane-width) - 6px); }
+.pane-resizer-right { right: calc(12px + var(--context-pane-width) - 6px); }
+.command-is-collapsed .pane-resizer { bottom: 24px; }
+.pane-resizer::before {
+  content: '';
+  position: absolute;
+  top: 18px;
+  bottom: 18px;
+  left: 5px;
+  width: 2px;
+  border-radius: 999px;
+  background: transparent;
+  transition: background-color 120ms ease, box-shadow 120ms ease;
+}
+.pane-resizer:hover::before,
+.pane-resizer:focus-visible::before,
+.pane-resizer-active::before {
+  background: #d68a34;
+  box-shadow: 0 0 0 3px rgba(232, 130, 11, .12);
+}
+body.pane-is-resizing,
+body.pane-is-resizing * { cursor: col-resize !important; user-select: none !important; }
 
 .pane-heading {
   display: flex;

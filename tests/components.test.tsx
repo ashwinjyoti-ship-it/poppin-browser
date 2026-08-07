@@ -6,6 +6,7 @@ import { BrowserToolbar } from '../src/renderer/ui/BrowserToolbar';
 import { TabStrip } from '../src/renderer/ui/TabStrip';
 import { CommandBar } from '../src/renderer/ui/CommandBar';
 import { ContextPane } from '../src/renderer/ui/ContextPane';
+import { PaneResizer } from '../src/renderer/ui/PaneResizer';
 import type { BrowserTabSnapshot } from '../src/shared/browser';
 import type { TaskSnapshot } from '../src/shared/task';
 import type { WorkspaceSnapshot } from '../src/shared/workspace';
@@ -22,6 +23,19 @@ const TAB: BrowserTabSnapshot = {
 };
 
 describe('browser chrome', () => {
+  it('resizes a pane from the keyboard and resets it accessibly', async () => {
+    const user = userEvent.setup();
+    const onResize = vi.fn();
+    render(<PaneResizer side="left" width={300} minimum={240} maximum={480} onResize={onResize} />);
+
+    const separator = screen.getByRole('separator', { name: /resize workspace pane/i });
+    separator.focus();
+    await user.keyboard('{ArrowRight}');
+    expect(onResize).toHaveBeenLastCalledWith(308);
+    await user.dblClick(separator);
+    expect(onResize).toHaveBeenLastCalledWith(286);
+  });
+
   it('activates, closes, and creates tabs accessibly', async () => {
     const user = userEvent.setup();
     const onActivate = vi.fn();
