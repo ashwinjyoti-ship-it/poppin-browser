@@ -70,6 +70,25 @@ export class GitEngine {
     return [tracked, ...untrackedDiffs].filter(Boolean).join('\n\n');
   }
 
+  async prepareCommit(repositoryPath: string, branch: string, message: string): Promise<{ branch: string; commit: string }> {
+    const normalizedBranch = validateBranch(branch);
+    const normalizedMessage = message.trim();
+    if (!normalizedMessage || normalizedMessage.length > 240) throw new Error('Use a commit message between 1 and 240 characters.');
+    const changes = await this.getWorkingTreeChanges(repositoryPath);
+    if (changes.length === 0) throw new Error('There are no project changes to commit.');
+    const currentBranch = await this.run(['-C', repositoryPath, 'branch', '--show-current']);
+    if (currentBranch !== normalizedBranch) await this.run(['-C', repositoryPath, 'switch', '-c', normalizedBranch]);
+    await this.run(['-C', repositoryPath, 'add', '--all', '--']);
+    await this.run(['-C', repositoryPath, 'commit', '-m', normalizedMessage]);
+    return { branch: normalizedBranch, commit: await this.getHead(repositoryPath) };
+  }
+
+  async listCommits(repositoryPath: string, baselineHead: string): Promise<string[]> {
+    if (!/^[0-9a-f]{40,64}$/i.test(baselineHead)) throw new Error('The task baseline is invalid.');
+    const output = await this.run(['-C', repositoryPath, 'log', '--format=%h %s', `${baselineHead}..HEAD`]);
+    return output ? output.split('\n').filter(Boolean) : [];
+  }
+
   private async run(args: string[], allowFailure = false, maxBuffer = 2 * 1024 * 1024): Promise<string> {
     try {
       const result = await execFileAsync('git', args, {
@@ -103,6 +122,14 @@ export class GitEngine {
 
 function isSupportedRemote(remote: string): boolean {
   return /^(https?:\/\/|ssh:\/\/|git@)[^\s]+$/i.test(remote);
+}
+
+function validateBranch(value: string): string {
+  const branch = value.trim();
+  if (!/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/.test(branch) || branch.includes('..') || branch.endsWith('/')) {
+    throw new Error('Use a valid Git branch name.');
+  }
+  return branch;
 }
 
 function repositoryName(remote: string): string {

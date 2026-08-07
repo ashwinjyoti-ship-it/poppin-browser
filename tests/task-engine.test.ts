@@ -14,6 +14,7 @@ import { GitEngine } from '../src/main/project/git-engine';
 import { TaskEngine } from '../src/main/task/task-engine';
 import { TaskStore } from '../src/main/task/task-store';
 import { WorkspaceStore } from '../src/main/workspace/workspace-store';
+import type { GitHubEngine } from '../src/main/project/github-engine';
 
 const execFileAsync = promisify(execFile);
 
@@ -48,6 +49,13 @@ class FakeCodexServer extends EventEmitter {
   async close() {}
 }
 
+class FakeGitHub {
+  push = vi.fn(async () => undefined);
+  createPullRequest = vi.fn(async () => ({ number: 12, url: 'https://github.com/acme/poppin/pull/12', base: 'main', head: 'codex/delivery', state: 'OPEN', checks: '1/1 checks passing', review: 'APPROVED' }));
+  viewPullRequest = vi.fn(async () => ({ number: 12, url: 'https://github.com/acme/poppin/pull/12', base: 'main', head: 'codex/delivery', state: 'OPEN', checks: '1/1 checks passing', review: 'APPROVED' }));
+  mergePullRequest = vi.fn(async () => ({ number: 12, url: 'https://github.com/acme/poppin/pull/12', base: 'main', head: 'codex/delivery', state: 'MERGED', checks: '1/1 checks passing', review: 'APPROVED' }));
+}
+
 async function setup({ withProject = true }: { withProject?: boolean } = {}) {
   const directory = await mkdtemp(path.join(tmpdir(), 'poppin-task-engine-'));
   const repositoryPath = path.join(directory, 'repo');
@@ -55,6 +63,8 @@ async function setup({ withProject = true }: { withProject?: boolean } = {}) {
   await writeFile(path.join(repositoryPath, 'README.md'), '# Fixture\n');
   await execFileAsync('git', ['-C', repositoryPath, 'add', 'README.md']);
   await execFileAsync('git', ['-C', repositoryPath, '-c', 'user.name=Poppin Tests', '-c', 'user.email=tests@poppin.local', 'commit', '-m', 'initial']);
+  await execFileAsync('git', ['-C', repositoryPath, 'config', 'user.name', 'Poppin Tests']);
+  await execFileAsync('git', ['-C', repositoryPath, 'config', 'user.email', 'tests@poppin.local']);
   const databasePath = path.join(directory, 'poppin.sqlite');
   const workspaceStore = new WorkspaceStore(databasePath);
   workspaceStore.createWorkspace('Fixture');
@@ -64,6 +74,8 @@ async function setup({ withProject = true }: { withProject?: boolean } = {}) {
   const fake = new FakeCodexServer();
   const send = vi.fn();
   const onResultReady = vi.fn();
+  const github = new FakeGitHub();
+  const onOpenExternal = vi.fn();
   const window = { isDestroyed: () => false, webContents: { isDestroyed: () => false, send } };
   const engine = new TaskEngine(
     window as unknown as Electron.BrowserWindow,
@@ -75,10 +87,12 @@ async function setup({ withProject = true }: { withProject?: boolean } = {}) {
       createServer: () => fake as unknown as CodexAppServer,
       workDirectory: directory,
       onResultReady,
+      github: github as unknown as GitHubEngine,
+      onOpenExternal,
     },
   );
   await engine.initialize();
-  return { engine, fake, repositoryPath, taskStore, workspaceStore, onResultReady, directory };
+  return { engine, fake, repositoryPath, taskStore, workspaceStore, onResultReady, directory, github, onOpenExternal };
 }
 
 describe('task engine', () => {
@@ -164,6 +178,15 @@ describe('task engine', () => {
       result: { permissions: { network: { enabled: true }, fileSystem: null }, scope: 'turn' },
     });
 
+    fake.emit('request', {
+      id: 9,
+      method: 'item/tool/requestUserInput',
+      params: { threadId: 'thread-1', turnId: 'turn-1', itemId: 'question-1', questions: [{ id: 'base', header: 'Base branch', question: 'Which base branch should the pull request target?' }] },
+    });
+    expect(engine.getSnapshot().task?.pendingApproval).toMatchObject({ kind: 'question', detail: 'Which base branch should the pull request target?' });
+    expect(await engine.execute({ type: 'respondQuestion', answer: 'main' })).toEqual({ ok: true });
+    expect(fake.responses[2]).toEqual({ id: 9, result: { answers: { base: { answers: ['main'] } } } });
+
     await writeFile(path.join(repositoryPath, 'README.md'), '# Changed\n');
     fake.emit('notification', { method: 'item/agentMessage/delta', params: { threadId: 'thread-1', turnId: 'turn-1', itemId: 'message-1', delta: 'Done.' } });
     fake.emit('notification', { method: 'turn/completed', params: { threadId: 'thread-1', turn: { id: 'turn-1', status: 'completed', error: null } } });
@@ -171,6 +194,37 @@ describe('task engine', () => {
     expect(onResultReady).toHaveBeenCalledWith(expect.objectContaining({ result: 'Done.', kind: 'code' }));
     expect(await engine.execute({ type: 'approveResult' })).toEqual({ ok: true });
     expect(engine.getSnapshot().task?.state).toBe('Completed');
+    await engine.close();
+    taskStore.close();
+    workspaceStore.close();
+  });
+
+  it('keeps commit, push, PR creation, and merge as separately reviewed delivery steps', async () => {
+    const { engine, fake, repositoryPath, taskStore, workspaceStore, github, onOpenExternal } = await setup();
+    await engine.execute({ type: 'startTask', prompt: 'Update the fixture', model: 'gpt-test', reasoningEffort: 'high', kind: 'code' });
+    await writeFile(path.join(repositoryPath, 'README.md'), '# Ready to deliver\n');
+    fake.emit('notification', { method: 'turn/completed', params: { threadId: 'thread-1', turn: { id: 'turn-1', status: 'completed', error: null } } });
+    await vi.waitFor(() => expect(engine.getSnapshot().task?.state).toBe('Needs Approval'));
+    await engine.execute({ type: 'approveResult' });
+
+    expect(await engine.execute({ type: 'prepareCommit', branch: 'codex/delivery', message: 'feat: deliver fixture' })).toMatchObject({ ok: true, message: expect.stringMatching(/Prepared/) });
+    expect(engine.getSnapshot().task?.delivery).toMatchObject({ branch: 'codex/delivery', pushed: false });
+
+    expect(await engine.execute({ type: 'requestPush' })).toEqual({ ok: true, message: 'Approval required.' });
+    expect(engine.getSnapshot().task?.pendingApproval).toMatchObject({ kind: 'git', title: 'Push branch to GitHub', detail: expect.stringContaining('codex/delivery') });
+    await engine.execute({ type: 'respondApproval', decision: 'accept' });
+    expect(github.push).toHaveBeenCalledWith(repositoryPath, 'origin', 'codex/delivery');
+
+    await engine.execute({ type: 'requestPullRequest', base: 'main', title: 'Deliver fixture', body: 'Verified.' });
+    expect(engine.getSnapshot().task?.pendingApproval).toMatchObject({ kind: 'github', title: 'Create GitHub pull request' });
+    await engine.execute({ type: 'respondApproval', decision: 'accept' });
+    expect(onOpenExternal).toHaveBeenCalledWith('https://github.com/acme/poppin/pull/12');
+
+    await engine.execute({ type: 'requestMerge', strategy: 'squash' });
+    expect(engine.getSnapshot().task?.pendingApproval).toMatchObject({ title: 'Merge pull request #12', detail: expect.stringContaining('Strategy: squash') });
+    await engine.execute({ type: 'respondApproval', decision: 'accept' });
+    expect(github.mergePullRequest).toHaveBeenCalledWith(repositoryPath, 12, 'squash');
+    expect(engine.getSnapshot().task?.delivery?.pullRequest?.state).toBe('MERGED');
     await engine.close();
     taskStore.close();
     workspaceStore.close();

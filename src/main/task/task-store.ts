@@ -1,6 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 
-import type { TaskApprovalSnapshot, TaskKind, TaskProgressSnapshot, TaskRecordSnapshot, TaskState } from '../../shared/task';
+import type { TaskApprovalSnapshot, TaskDeliverySnapshot, TaskKind, TaskProgressSnapshot, TaskRecordSnapshot, TaskState } from '../../shared/task';
 
 interface TaskRow {
   kind: TaskKind;
@@ -16,6 +16,7 @@ interface TaskRow {
   result: string;
   diff: string;
   error: string | null;
+  delivery_json: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -42,6 +43,7 @@ export class TaskStore {
         result TEXT NOT NULL,
         diff TEXT NOT NULL,
         error TEXT,
+        delivery_json TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       ) STRICT;
@@ -50,12 +52,15 @@ export class TaskStore {
     if (!columns.some((column) => column.name === 'kind')) {
       this.database.exec("ALTER TABLE active_task ADD COLUMN kind TEXT NOT NULL DEFAULT 'code'");
     }
+    if (!columns.some((column) => column.name === 'delivery_json')) {
+      this.database.exec('ALTER TABLE active_task ADD COLUMN delivery_json TEXT');
+    }
   }
 
   load(): TaskRecordSnapshot | null {
     const row = this.database.prepare(`
       SELECT state, kind, prompt, model, reasoning_effort, thread_id, turn_id, baseline_commit,
-        progress_json, approval_json, result, diff, error, created_at, updated_at
+        progress_json, approval_json, result, diff, error, delivery_json, created_at, updated_at
       FROM active_task WHERE id = 'primary'
     `).get() as unknown as TaskRow | undefined;
     if (!row) return null;
@@ -64,6 +69,7 @@ export class TaskStore {
       const pendingApproval = row.approval_json
         ? JSON.parse(row.approval_json) as TaskApprovalSnapshot
         : null;
+      const delivery = row.delivery_json ? JSON.parse(row.delivery_json) as TaskDeliverySnapshot : undefined;
       if (!Array.isArray(progress)) throw new Error('Invalid progress');
       return {
         state: row.state,
@@ -79,6 +85,7 @@ export class TaskStore {
         result: row.result,
         diff: row.diff,
         error: row.error,
+        ...(delivery ? { delivery } : {}),
         createdAt: row.created_at,
         updatedAt: row.updated_at,
       };
@@ -92,8 +99,8 @@ export class TaskStore {
     this.database.prepare(`
       INSERT INTO active_task (
         id, state, kind, prompt, model, reasoning_effort, thread_id, turn_id, baseline_commit,
-        progress_json, approval_json, result, diff, error, created_at, updated_at
-      ) VALUES ('primary', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        progress_json, approval_json, result, diff, error, delivery_json, created_at, updated_at
+      ) VALUES ('primary', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         state = excluded.state,
         kind = excluded.kind,
@@ -108,6 +115,7 @@ export class TaskStore {
         result = excluded.result,
         diff = excluded.diff,
         error = excluded.error,
+        delivery_json = excluded.delivery_json,
         created_at = excluded.created_at,
         updated_at = excluded.updated_at
     `).run(
@@ -124,6 +132,7 @@ export class TaskStore {
       task.result,
       task.diff,
       task.error,
+      task.delivery ? JSON.stringify(task.delivery) : null,
       task.createdAt,
       task.updatedAt,
     );

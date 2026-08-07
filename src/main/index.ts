@@ -1,8 +1,8 @@
 import path from 'node:path';
 
-import { mkdir } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 
-import { app, BrowserWindow, ipcMain, Menu, screen, session } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, screen, session } from 'electron';
 
 import {
   BROWSER_CHANNELS,
@@ -23,6 +23,7 @@ import { TaskEngine } from './task/task-engine';
 import { TaskStore } from './task/task-store';
 import { BrowserAgentEngine } from './browser/browser-agent-engine';
 import { BROWSER_AGENT_CHANNELS, type BrowserAgentCommand } from '../shared/browser-agent';
+import { PreviewEngine } from './project/preview-engine';
 
 registerInternalScheme();
 
@@ -33,6 +34,7 @@ let workspaceStore: WorkspaceStore | null = null;
 let taskEngine: TaskEngine | null = null;
 let taskStore: TaskStore | null = null;
 let browserAgentEngine: BrowserAgentEngine | null = null;
+let previewEngine: PreviewEngine | null = null;
 const pendingExternalUrls: string[] = [];
 
 function openExternalUrl(url: string): void {
@@ -86,6 +88,7 @@ async function createWindow(): Promise<void> {
   browserEngine = new BrowserEngine(mainWindow, browserSession, stateStore, getWindowState);
   if (!workspaceStore) throw new Error('Workspace storage is not ready.');
   const git = new GitEngine();
+  previewEngine = new PreviewEngine();
   workspaceEngine = new WorkspaceEngine(mainWindow, workspaceStore, browserEngine, git);
   browserAgentEngine = new BrowserAgentEngine(mainWindow, browserEngine, (tabId, content) => {
     workspaceEngine?.updateTabContextFromAgent(tabId, content);
@@ -99,6 +102,23 @@ async function createWindow(): Promise<void> {
       browserEngine?.openTaskResult();
     },
     onTaskEnded: () => browserAgentEngine?.complete(),
+    onOpenPreview: async (project) => {
+      await previewEngine?.start(project.repositoryPath, project.devCommand);
+      browserEngine?.openExternalUrl(project.previewUrl);
+    },
+    onOpenExternal: (url) => browserEngine?.openExternalUrl(url),
+    onExportResult: async (task, format) => {
+      if (!mainWindow) return null;
+      const extension = format === 'markdown' ? 'md' : 'txt';
+      const result = await dialog.showSaveDialog(mainWindow, {
+        title: 'Save a new Poppin output artifact',
+        defaultPath: `poppin-${task.kind}-result.${extension}`,
+        filters: [{ name: format === 'markdown' ? 'Markdown' : 'Text', extensions: [extension] }],
+      });
+      if (result.canceled || !result.filePath) return null;
+      await writeFile(result.filePath, task.result, 'utf8');
+      return result.filePath;
+    },
   });
   browserEngine.restore(
     persisted
@@ -123,6 +143,8 @@ async function createWindow(): Promise<void> {
     workspaceEngine = null;
     taskEngine = null;
     browserAgentEngine = null;
+    void previewEngine?.stop();
+    previewEngine = null;
     void closingTaskEngine?.close();
   });
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
@@ -206,9 +228,11 @@ app.on('before-quit', (event) => {
   event.preventDefault();
   const engine = browserEngine;
   const codex = taskEngine;
+  const preview = previewEngine;
   browserEngine = null;
   taskEngine = null;
-  void Promise.all([engine?.flush(), codex?.close()]).finally(() => app.quit());
+  previewEngine = null;
+  void Promise.all([engine?.flush(), codex?.close(), preview?.stop()]).finally(() => app.quit());
 });
 
 app.on('quit', () => {

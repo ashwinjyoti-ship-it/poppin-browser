@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import type { BrowserWindow } from 'electron';
 
 import {
@@ -18,6 +20,7 @@ import { isRecord, type CodexThreadItem, type RpcNotification, type RpcServerReq
 import { GitEngine } from '../project/git-engine';
 import { WorkspaceStore } from '../workspace/workspace-store';
 import { TaskStore } from './task-store';
+import { GitHubEngine } from '../project/github-engine';
 
 const MAX_RESULT_LENGTH = 120_000;
 const MAX_DIFF_LENGTH = 1_500_000;
@@ -31,6 +34,15 @@ interface TaskEngineOptions {
   workDirectory?: string;
   onResultReady?: (task: TaskRecordSnapshot) => void;
   onTaskEnded?: () => void;
+  onOpenPreview?: (project: NonNullable<WorkspaceSnapshot['project']>) => Promise<void>;
+  github?: GitHubEngine;
+  onOpenExternal?: (url: string) => void;
+  onExportResult?: (task: TaskRecordSnapshot, format: 'markdown' | 'text') => Promise<string | null>;
+}
+
+interface PendingExternalAction {
+  requestId: string;
+  run: () => Promise<string>;
 }
 
 export class TaskEngine {
@@ -42,6 +54,8 @@ export class TaskEngine {
   private saveTimer: NodeJS.Timeout | null = null;
   private readonly notificationWork = new Set<Promise<void>>();
   private pendingPermissionProfile: Record<string, unknown> | null = null;
+  private pendingExternalAction: PendingExternalAction | null = null;
+  private pendingQuestionIds: string[] = [];
 
   constructor(
     private readonly window: BrowserWindow,
@@ -83,13 +97,29 @@ export class TaskEngine {
         case 'startTask':
           return await this.startTask(command.prompt, command.model, command.reasoningEffort, command.kind);
         case 'respondApproval':
-          return this.respondApproval(command.decision);
+          return await this.respondApproval(command.decision);
+        case 'respondQuestion':
+          return this.respondQuestion(command.answer);
         case 'cancelTask':
           return await this.cancelTask();
         case 'reviseTask':
           return await this.reviseTask(command.prompt);
         case 'approveResult':
           return this.approveResult();
+        case 'openPreview':
+          return await this.openPreview();
+        case 'prepareCommit':
+          return await this.prepareCommit(command.branch, command.message);
+        case 'requestPush':
+          return await this.requestPush();
+        case 'requestPullRequest':
+          return await this.requestPullRequest(command.base, command.title, command.body);
+        case 'refreshPullRequest':
+          return await this.refreshPullRequest();
+        case 'requestMerge':
+          return await this.requestMerge(command.strategy);
+        case 'exportResult':
+          return await this.exportResult(command.format);
       }
     } catch (error) {
       return { ok: false, message: error instanceof Error ? error.message : 'Codex could not complete that action.' };
@@ -236,9 +266,33 @@ export class TaskEngine {
     return { ok: true };
   }
 
-  private respondApproval(decision: 'accept' | 'decline' | 'cancel'): TaskCommandResult {
+  private async respondApproval(decision: 'accept' | 'decline' | 'cancel'): Promise<TaskCommandResult> {
     const task = this.task;
-    if (!task?.pendingApproval || !this.server) return { ok: false, message: 'There is no active Codex approval.' };
+    if (!task?.pendingApproval) return { ok: false, message: 'There is no active approval.' };
+    if (task.pendingApproval.kind === 'question') return { ok: false, message: 'Answer the blocking question instead.' };
+    if (this.pendingExternalAction?.requestId === task.pendingApproval.requestId) {
+      const pending = this.pendingExternalAction;
+      this.pendingExternalAction = null;
+      task.pendingApproval = null;
+      task.state = decision === 'cancel' ? 'Cancelled' : 'Completed';
+      if (decision !== 'accept') {
+        task.delivery = { ...deliveryFor(task, this.workspaceStore.getProject()), message: 'External action rejected.' };
+        this.persistAndEmit();
+        return { ok: true };
+      }
+      try {
+        const message = await pending.run();
+        task.delivery = { ...deliveryFor(task, this.workspaceStore.getProject()), message };
+        this.persistAndEmit();
+        return { ok: true, message };
+      } catch (error) {
+        task.state = 'Failed';
+        task.error = error instanceof Error ? error.message : 'The external action failed.';
+        this.persistAndEmit();
+        return { ok: false, message: task.error };
+      }
+    }
+    if (!this.server) return { ok: false, message: 'Codex is not connected for this approval.' };
     if (task.pendingApproval.kind === 'permissions') {
       this.server.respond(task.pendingApproval.requestId, {
         permissions: decision === 'accept' ? this.pendingPermissionProfile ?? {} : {},
@@ -256,6 +310,21 @@ export class TaskEngine {
     });
     this.persistAndEmit();
     if (decision === 'cancel') this.options.onTaskEnded?.();
+    return { ok: true };
+  }
+
+  private respondQuestion(rawAnswer: string): TaskCommandResult {
+    const task = this.task;
+    const answer = rawAnswer.trim();
+    if (!task?.pendingApproval || task.pendingApproval.kind !== 'question' || !this.server) return { ok: false, message: 'There is no blocking question.' };
+    if (!answer) return { ok: false, message: 'Enter an answer before continuing.' };
+    const answers = Object.fromEntries(this.pendingQuestionIds.map((id) => [id, { answers: [answer] }]));
+    this.server.respond(task.pendingApproval.requestId, { answers });
+    this.pendingQuestionIds = [];
+    task.pendingApproval = null;
+    task.state = 'Running';
+    this.appendProgress({ id: `question-${Date.now()}`, kind: 'status', title: 'Blocking question answered', detail: answer, status: 'completed' });
+    this.persistAndEmit();
     return { ok: true };
   }
 
@@ -280,6 +349,125 @@ export class TaskEngine {
     this.task.state = 'Completed';
     this.persistAndEmit();
     return { ok: true };
+  }
+
+  private async openPreview(): Promise<TaskCommandResult> {
+    const project = this.workspaceStore.getProject();
+    if (!this.task || this.task.kind !== 'code' || !project) return { ok: false, message: 'A connected Code task is required for preview.' };
+    if (!this.options.onOpenPreview) return { ok: false, message: 'Preview is not available.' };
+    await this.options.onOpenPreview(project);
+    this.appendProgress({ id: `preview-${Date.now()}`, kind: 'status', title: 'Opened localhost preview', detail: project.previewUrl, status: 'completed' });
+    this.persistAndEmit();
+    return { ok: true };
+  }
+
+  private async prepareCommit(rawBranch: string, rawMessage: string): Promise<TaskCommandResult> {
+    const task = this.task;
+    const project = this.workspaceStore.getProject();
+    if (!task || task.kind !== 'code' || task.state !== 'Completed' || !project) return { ok: false, message: 'Approve the completed Code result before preparing a commit.' };
+    const prepared = await this.git.prepareCommit(project.repositoryPath, rawBranch, rawMessage);
+    task.delivery = {
+      branch: prepared.branch, commit: prepared.commit, remote: project.remote, pushed: false, pullRequest: null,
+      message: `Prepared ${prepared.commit.slice(0, 7)} on ${prepared.branch}.`,
+    };
+    await this.captureDiff();
+    this.persistAndEmit();
+    return { ok: true, message: task.delivery.message };
+  }
+
+  private async requestPush(): Promise<TaskCommandResult> {
+    const { task, project, delivery } = this.requireDelivery();
+    if (delivery.pushed) return { ok: false, message: 'This branch is already marked as pushed.' };
+    const commits = await this.git.listCommits(project.repositoryPath, task.baselineCommit);
+    return this.requestExternalApproval(
+      'git', 'Push branch to GitHub',
+      `Repository: ${project.repositoryPath}\nRemote: ${project.remote ?? 'origin (URL unavailable)'}\nBranch: ${delivery.branch}\nCommits:\n${commits.join('\n') || delivery.commit.slice(0, 7)}`,
+      'Pushing publishes the branch to the configured remote.',
+      async () => {
+        await this.github().push(project.repositoryPath, 'origin', delivery.branch);
+        delivery.pushed = true;
+        return `Pushed ${delivery.branch} to origin.`;
+      },
+    );
+  }
+
+  private async requestPullRequest(base: string, title: string, body: string): Promise<TaskCommandResult> {
+    const { project, delivery } = this.requireDelivery();
+    if (!delivery.pushed) return { ok: false, message: 'Approve and push the branch before creating a pull request.' };
+    if (delivery.pullRequest) return { ok: false, message: `Pull request #${delivery.pullRequest.number} already exists.` };
+    return this.requestExternalApproval(
+      'github', 'Create GitHub pull request',
+      `Repository: ${project.remote ?? project.repositoryPath}\nBase: ${base}\nHead: ${delivery.branch}\nTitle: ${title}\n\n${body}`,
+      'This creates an external pull-request record on GitHub.',
+      async () => {
+        try {
+          const pullRequest = await this.github().createPullRequest(project.repositoryPath, base, delivery.branch, title, body);
+          delivery.pullRequest = pullRequest;
+          this.options.onOpenExternal?.(pullRequest.url);
+          return `Created pull request #${pullRequest.number}.`;
+        } catch (error) {
+          const compareUrl = githubCompareUrl(project.remote, base, delivery.branch);
+          if (!compareUrl) throw error;
+          this.options.onOpenExternal?.(compareUrl);
+          return 'GitHub CLI could not create the pull request. Opened the compare page for manual completion.';
+        }
+      },
+    );
+  }
+
+  private async refreshPullRequest(): Promise<TaskCommandResult> {
+    const { project, delivery } = this.requireDelivery();
+    if (!delivery.pullRequest) return { ok: false, message: 'Create a pull request first.' };
+    delivery.pullRequest = await this.github().viewPullRequest(project.repositoryPath, delivery.pullRequest.number);
+    delivery.message = `Updated pull request #${delivery.pullRequest.number}: ${delivery.pullRequest.checks}.`;
+    this.persistAndEmit();
+    return { ok: true, message: delivery.message };
+  }
+
+  private async requestMerge(strategy: 'merge' | 'squash' | 'rebase'): Promise<TaskCommandResult> {
+    const { project, delivery } = this.requireDelivery();
+    if (!delivery.pullRequest) return { ok: false, message: 'Create a pull request first.' };
+    const status = await this.github().viewPullRequest(project.repositoryPath, delivery.pullRequest.number);
+    delivery.pullRequest = status;
+    return this.requestExternalApproval(
+      'github', `Merge pull request #${status.number}`,
+      `Repository: ${project.remote ?? project.repositoryPath}\nPull request: #${status.number}\nBase: ${status.base}\nHead: ${status.head}\nChecks: ${status.checks}\nReview: ${status.review}\nStrategy: ${strategy}`,
+      'Merging changes the protected base branch and cannot be implied by prior approval.',
+      async () => {
+        delivery.pullRequest = await this.github().mergePullRequest(project.repositoryPath, status.number, strategy);
+        this.options.onOpenExternal?.(delivery.pullRequest.url);
+        return `GitHub reports pull request #${status.number} as ${delivery.pullRequest.state}.`;
+      },
+    );
+  }
+
+  private requestExternalApproval(kind: 'git' | 'github', title: string, detail: string, reason: string, run: () => Promise<string>): TaskCommandResult {
+    const task = this.task;
+    if (!task || task.pendingApproval || this.pendingExternalAction) return { ok: false, message: 'Resolve the current approval first.' };
+    const requestId = `external-${randomUUID()}`;
+    this.pendingExternalAction = { requestId, run };
+    task.pendingApproval = { requestId, kind, title, detail, reason };
+    task.state = 'Needs Approval';
+    this.persistAndEmit();
+    return { ok: true, message: 'Approval required.' };
+  }
+
+  private requireDelivery(): { task: TaskRecordSnapshot; project: NonNullable<WorkspaceSnapshot['project']>; delivery: NonNullable<TaskRecordSnapshot['delivery']> } {
+    const task = this.task;
+    const project = this.workspaceStore.getProject();
+    if (!task || task.kind !== 'code' || !project || !task.delivery?.commit) throw new Error('Prepare a commit for the approved Code result first.');
+    return { task, project, delivery: task.delivery };
+  }
+
+  private github(): GitHubEngine {
+    return this.options.github ?? new GitHubEngine();
+  }
+
+  private async exportResult(format: 'markdown' | 'text'): Promise<TaskCommandResult> {
+    if (!this.task?.result) return { ok: false, message: 'There is no result to export.' };
+    if (!this.options.onExportResult) return { ok: false, message: 'Result export is not available.' };
+    const filePath = await this.options.onExportResult(cloneTask(this.task), format);
+    return { ok: true, message: filePath ? `Saved a new output artifact to ${filePath}.` : 'Export cancelled.' };
   }
 
   private validateStart(modelId: string, effort: string, kind: TaskKind): {
@@ -317,11 +505,14 @@ export class TaskEngine {
       return;
     }
     if (request.method === 'item/tool/requestUserInput') {
-      this.server?.respond(request.id, { answers: {} });
-      this.appendProgress({
-        id: `question-${Date.now()}`, kind: 'status', title: 'Codex requested more input',
-        detail: 'Poppin v0.1 supports approval and revision, so the request continued without an answer.', status: 'completed',
-      });
+      const questions = Array.isArray(request.params.questions) ? request.params.questions.filter(isRecord) : [];
+      this.pendingQuestionIds = questions.map((question, index) => stringValue(question.id) || `question-${index + 1}`);
+      task.pendingApproval = {
+        requestId: request.id, kind: 'question', title: 'Codex needs your input to continue',
+        detail: questions.length ? questions.map((question) => stringValue(question.question) || stringValue(question.header)).filter(Boolean).join('\n\n') : 'Codex requested a blocking clarification.',
+        reason: 'Your answer will be sent only to the current task.',
+      };
+      task.state = 'Needs Approval';
       this.persistAndEmit();
       return;
     }
@@ -549,6 +740,17 @@ function selectedContextSummary(workspace: WorkspaceSnapshot): string {
   return total === 0 ? 'No selected sources' : `${total} selected source${total === 1 ? '' : 's'} (${tabs} tab${tabs === 1 ? '' : 's'}, ${documents} document${documents === 1 ? '' : 's'})`;
 }
 
+function deliveryFor(task: TaskRecordSnapshot, project: WorkspaceSnapshot['project']): NonNullable<TaskRecordSnapshot['delivery']> {
+  return task.delivery ?? { branch: project?.branch ?? '', commit: '', remote: project?.remote ?? null, pushed: false, pullRequest: null, message: '' };
+}
+
+function githubCompareUrl(remote: string | null, base: string, head: string): string | null {
+  if (!remote) return null;
+  const match = remote.match(/github\.com[/:]([^/]+)\/([^/]+?)(?:\.git)?$/i);
+  if (!match) return null;
+  return `https://github.com/${encodeURIComponent(match[1]!)}/${encodeURIComponent(match[2]!)}/compare/${encodeURIComponent(base)}...${encodeURIComponent(head)}?expand=1`;
+}
+
 function workspaceSnapshot(store: WorkspaceStore): WorkspaceSnapshot {
   return {
     workspace: store.getWorkspace(),
@@ -621,6 +823,7 @@ function cloneTask(task: TaskRecordSnapshot): TaskRecordSnapshot {
     ...task,
     progress: task.progress.map((item) => ({ ...item })),
     pendingApproval: task.pendingApproval ? { ...task.pendingApproval } : null,
+    ...(task.delivery ? { delivery: { ...task.delivery, pullRequest: task.delivery.pullRequest ? { ...task.delivery.pullRequest } : null } } : {}),
   };
 }
 

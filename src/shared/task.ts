@@ -27,10 +27,19 @@ export interface TaskProgressSnapshot {
 
 export interface TaskApprovalSnapshot {
   requestId: number | string;
-  kind: 'command' | 'files' | 'permissions';
+  kind: 'command' | 'files' | 'permissions' | 'git' | 'github' | 'question';
   title: string;
   detail: string;
   reason: string | null;
+}
+
+export interface TaskDeliverySnapshot {
+  branch: string;
+  commit: string;
+  remote: string | null;
+  pushed: boolean;
+  pullRequest: { number: number; url: string; base: string; head: string; state: string; checks: string; review: string } | null;
+  message: string;
 }
 
 export interface TaskRecordSnapshot {
@@ -47,6 +56,7 @@ export interface TaskRecordSnapshot {
   result: string;
   diff: string;
   error: string | null;
+  delivery?: TaskDeliverySnapshot;
   createdAt: string;
   updatedAt: string;
 }
@@ -65,9 +75,17 @@ export type TaskCommand =
   | { type: 'refreshConnection' }
   | { type: 'startTask'; prompt: string; model: string; reasoningEffort: string; kind: TaskKind }
   | { type: 'respondApproval'; decision: 'accept' | 'decline' | 'cancel' }
+  | { type: 'respondQuestion'; answer: string }
   | { type: 'cancelTask' }
   | { type: 'reviseTask'; prompt: string }
-  | { type: 'approveResult' };
+  | { type: 'approveResult' }
+  | { type: 'openPreview' }
+  | { type: 'prepareCommit'; branch: string; message: string }
+  | { type: 'requestPush' }
+  | { type: 'requestPullRequest'; base: string; title: string; body: string }
+  | { type: 'refreshPullRequest' }
+  | { type: 'requestMerge'; strategy: 'merge' | 'squash' | 'rebase' }
+  | { type: 'exportResult'; format: 'markdown' | 'text' };
 
 export interface TaskCommandResult {
   ok: boolean;

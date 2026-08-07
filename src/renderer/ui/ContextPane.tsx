@@ -58,7 +58,7 @@ export function ContextPane({ collapsed, snapshot, taskSnapshot, onCollapseChang
       </div>
       {activeSection === 'context' ? <ContextView snapshot={snapshot} activeTab={activeTab} onRefreshTab={onRefreshTab} onCaptureVisualSelection={onCaptureVisualSelection} onClearVisualSelection={onClearVisualSelection} /> : null}
       {activeSection === 'task' ? <TaskView snapshot={taskSnapshot} workspace={snapshot} browserAgent={browserAgentSnapshot} onCommand={onTaskCommand} onBrowserAgentCommand={onBrowserAgentCommand} /> : null}
-      {activeSection === 'result' ? <ResultView snapshot={taskSnapshot} onCommand={onTaskCommand} onOpenResult={onOpenResult} /> : null}
+      {activeSection === 'result' ? <ResultView snapshot={taskSnapshot} workspace={snapshot} onCommand={onTaskCommand} onOpenResult={onOpenResult} /> : null}
     </aside>
   );
 }
@@ -128,6 +128,7 @@ function TaskView({ snapshot, workspace, browserAgent, onCommand, onBrowserAgent
   onBrowserAgentCommand?: (command: BrowserAgentCommand) => Promise<BrowserAgentCommandResult>;
 }) {
   const task = snapshot.task;
+  const [questionAnswer, setQuestionAnswer] = useState('');
   const approvalRef = useRef<HTMLElement>(null);
   useEffect(() => {
     if (typeof approvalRef.current?.scrollIntoView === 'function') approvalRef.current.scrollIntoView({ block: 'nearest' });
@@ -143,10 +144,10 @@ function TaskView({ snapshot, workspace, browserAgent, onCommand, onBrowserAgent
           <h3>{task.pendingApproval.title}</h3>
           {task.pendingApproval.reason ? <p>{task.pendingApproval.reason}</p> : null}
           <pre>{task.pendingApproval.detail}</pre>
-          <div className="approval-actions">
-            <button type="button" className="primary-button" onClick={() => { void onCommand({ type: 'respondApproval', decision: 'accept' }); }}><Check size={14} /> Allow once</button>
+          {task.pendingApproval.kind === 'question' ? <div className="question-response"><textarea value={questionAnswer} onChange={(event) => setQuestionAnswer(event.target.value)} aria-label="Answer blocking question" placeholder="Type the missing detail…" /><button type="button" className="primary-button" disabled={!questionAnswer.trim()} onClick={() => { void onCommand({ type: 'respondQuestion', answer: questionAnswer }).then((result) => { if (result.ok) setQuestionAnswer(''); }); }}>Continue task</button></div> : <div className="approval-actions">
+            <button type="button" className="primary-button" onClick={() => { void onCommand({ type: 'respondApproval', decision: 'accept' }); }}><Check size={14} /> {task.pendingApproval.kind === 'git' || task.pendingApproval.kind === 'github' ? 'Approve' : 'Allow once'}</button>
             <button type="button" className="secondary-button" onClick={() => { void onCommand({ type: 'respondApproval', decision: 'decline' }); }}><X size={14} /> Decline</button>
-          </div>
+          </div>}
         </section>
       ) : null}
       {browserAgent?.pendingApproval && onBrowserAgentCommand ? (
@@ -188,16 +189,23 @@ function BrowserUseView({ taskId, workspace, snapshot, onCommand }: { taskId: st
   );
 }
 
-function ResultView({ snapshot, onCommand, onOpenResult }: { snapshot: TaskSnapshot; onCommand: (command: TaskCommand) => Promise<TaskCommandResult>; onOpenResult: () => void }) {
+function ResultView({ snapshot, workspace, onCommand, onOpenResult }: { snapshot: TaskSnapshot; workspace: WorkspaceSnapshot; onCommand: (command: TaskCommand) => Promise<TaskCommandResult>; onOpenResult: () => void }) {
   const task = snapshot.task;
   const [revision, setRevision] = useState('');
   const [message, setMessage] = useState('');
+  const [branch, setBranch] = useState(workspace.project?.branch ?? 'codex/poppin-task');
+  const [commitMessage, setCommitMessage] = useState('feat: complete Poppin task');
+  const [base, setBase] = useState('main');
+  const [prTitle, setPrTitle] = useState(task?.prompt.slice(0, 120) ?? 'Poppin task');
+  const [prBody, setPrBody] = useState('Completed and verified with Poppin Browser.');
+  const [mergeStrategy, setMergeStrategy] = useState<'merge' | 'squash' | 'rebase'>('squash');
   if (!task) return <div className="right-pane-content"><div className="context-empty">The Codex result and exact Git diff will appear here.</div></div>;
   const canReview = task.state === 'Needs Approval' && !task.pendingApproval;
   return (
     <div className="right-pane-content result-view">
       <div className="pane-heading"><div><span className="eyebrow">{task.kind} result</span><h2>{task.kind === 'code' ? 'Review the change' : 'Review the output'}</h2></div><span className={`task-state task-state-${slug(task.state)}`}>{task.state}</span></div>
-      {task.result ? <div className="result-toolbar"><button type="button" className="secondary-button" onClick={onOpenResult}><ExternalLink size={13} /> Open result tab</button><button type="button" className="secondary-button" onClick={() => { void navigator.clipboard.writeText(task.result).then(() => setMessage('Copied result.')); }}><Copy size={13} /> Copy</button></div> : null}
+      {task.kind === 'code' ? <button type="button" className="secondary-button preview-button" onClick={() => { void onCommand({ type: 'openPreview' }).then((result) => setMessage(result.message ?? 'Preview opened in the centre browser.')); }}>Open localhost preview</button> : null}
+      {task.result ? <div className="result-toolbar"><button type="button" className="secondary-button" onClick={onOpenResult}><ExternalLink size={13} /> Open result tab</button><button type="button" className="secondary-button" onClick={() => { void navigator.clipboard.writeText(task.result).then(() => setMessage('Copied result.')); }}><Copy size={13} /> Copy</button><button type="button" className="secondary-button" onClick={() => { void onCommand({ type: 'exportResult', format: 'markdown' }).then((result) => setMessage(result.message ?? 'Saved.')); }}>Save</button><button type="button" className="secondary-button" onClick={() => { void onCommand({ type: 'exportResult', format: 'text' }).then((result) => setMessage(result.message ?? 'Exported.')); }}>Export</button></div> : null}
       <section className="result-section"><h3>Codex summary</h3><pre>{task.result || (task.state === 'Running' ? 'Codex is working…' : 'No summary was returned.')}</pre></section>
       {task.kind === 'code' ? <section className="result-section diff-section"><h3>Git diff</h3><pre>{task.diff || 'No project diff yet.'}</pre></section> : null}
       {canReview ? (
@@ -208,6 +216,15 @@ function ResultView({ snapshot, onCommand, onOpenResult }: { snapshot: TaskSnaps
         </div>
       ) : null}
       {message ? <p className="review-message">{message}</p> : null}
+      {task.kind === 'code' && task.state === 'Completed' ? (
+        <section className="delivery-card">
+          <h3>GitHub delivery</h3>
+          {!task.delivery?.commit ? <div className="delivery-form"><label>Branch<input value={branch} onChange={(event) => setBranch(event.target.value)} /></label><label>Commit message<input value={commitMessage} onChange={(event) => setCommitMessage(event.target.value)} /></label><button type="button" className="secondary-button" onClick={() => { void onCommand({ type: 'prepareCommit', branch, message: commitMessage }).then((result) => setMessage(result.message ?? 'Commit prepared.')); }}>Prepare commit</button></div> : null}
+          {task.delivery?.commit ? <div className="delivery-status"><p><strong>{task.delivery.branch}</strong> · {task.delivery.commit.slice(0, 7)}</p><p>{task.delivery.message}</p>{!task.delivery.pushed ? <button type="button" className="primary-button" onClick={() => { void onCommand({ type: 'requestPush' }).then((result) => setMessage(result.message ?? 'Review the push approval.')); }}>Review push</button> : null}</div> : null}
+          {task.delivery?.pushed && !task.delivery.pullRequest ? <div className="delivery-form"><label>Base branch<input value={base} onChange={(event) => setBase(event.target.value)} /></label><label>PR title<input value={prTitle} onChange={(event) => setPrTitle(event.target.value)} /></label><label>PR summary<textarea value={prBody} onChange={(event) => setPrBody(event.target.value)} /></label><button type="button" className="primary-button" onClick={() => { void onCommand({ type: 'requestPullRequest', base, title: prTitle, body: prBody }).then((result) => setMessage(result.message ?? 'Review the pull-request approval.')); }}>Create Pull Request</button></div> : null}
+          {task.delivery?.pullRequest ? <div className="delivery-status"><p><strong>PR #{task.delivery.pullRequest.number}</strong> · {task.delivery.pullRequest.state}</p><p>{task.delivery.pullRequest.base} ← {task.delivery.pullRequest.head}</p><p>{task.delivery.pullRequest.checks} · {task.delivery.pullRequest.review}</p><div className="delivery-actions"><button type="button" className="secondary-button" onClick={() => { void onCommand({ type: 'refreshPullRequest' }).then((result) => setMessage(result.message ?? 'Pull request updated.')); }}>Refresh status</button><select aria-label="Merge strategy" value={mergeStrategy} onChange={(event) => setMergeStrategy(event.target.value as typeof mergeStrategy)}><option value="merge">Merge</option><option value="squash">Squash</option><option value="rebase">Rebase</option></select><button type="button" className="primary-button" onClick={() => { void onCommand({ type: 'requestMerge', strategy: mergeStrategy }).then((result) => setMessage(result.message ?? 'Review the separate merge approval.')); }}>Review Merge</button></div></div> : null}
+        </section>
+      ) : null}
     </div>
   );
 }

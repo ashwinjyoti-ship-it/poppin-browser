@@ -27,6 +27,7 @@ describe('task store', () => {
       result: 'Implemented the change.',
       diff: 'diff --git a/src/App.tsx b/src/App.tsx',
       error: null,
+      delivery: { branch: 'codex/task', commit: 'c'.repeat(40), remote: 'https://github.com/acme/repo.git', pushed: true, pullRequest: null, message: 'Pushed.' },
       createdAt: '2026-08-07T00:00:00.000Z',
       updatedAt: '2026-08-07T00:01:00.000Z',
     };
