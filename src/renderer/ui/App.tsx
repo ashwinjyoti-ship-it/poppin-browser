@@ -103,7 +103,10 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    const updateViewport = () => setViewport({ width: window.innerWidth, height: window.innerHeight });
+    const updateViewport = () => {
+      setViewport({ width: window.innerWidth, height: window.innerHeight });
+      void window.poppinBrowser.getSnapshot().then(setSnapshot);
+    };
     window.addEventListener('resize', updateViewport);
     return () => window.removeEventListener('resize', updateViewport);
   }, []);

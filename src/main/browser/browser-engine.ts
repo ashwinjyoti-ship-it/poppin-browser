@@ -62,7 +62,6 @@ export class BrowserEngine {
     this.window.on('enter-full-screen', () => {
       this.applyFullscreenTransition(this.htmlFullscreen.windowDidEnter());
       this.layoutViews();
-      this.emitSnapshot();
     });
     this.window.on('leave-full-screen', () => {
       const tabId = this.htmlFullscreen.windowDidLeave();
@@ -71,7 +70,6 @@ export class BrowserEngine {
         void tab.view.webContents.executeJavaScript('if (document.fullscreenElement) void document.exitFullscreen()').catch(() => undefined);
       }
       this.layoutViews();
-      this.emitSnapshot();
     });
     this.window.on('closed', () => {
       this.isClosing = true;

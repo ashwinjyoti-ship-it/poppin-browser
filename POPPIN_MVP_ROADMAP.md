@@ -86,7 +86,7 @@ Supported states are Running, Needs Approval, Completed, Failed, Cancelled, and 
 
 ## Phase 7 — Unified Work, Visual Selection, and Controlled Browser Use
 
-**Status:** Approved for implementation on 2026-08-07. Do not expand beyond this scope.
+**Status:** Implemented and release-verified on 2026-08-07. Do not expand beyond this scope.
 
 **Outcome:** The existing prompt box accepts arbitrary work. Poppin determines required capabilities without forcing the user through a workflow wizard, while keeping context and permissions explicit.
 
@@ -128,7 +128,7 @@ For a request such as “Give me a five-point summary”, the user selects a You
 
 ## Phase 8 — Centre-Browser Results, Preview, Review, and Delivery
 
-**Status:** Approved for implementation on 2026-08-07. Do not expand beyond this scope.
+**Status:** Implemented and release-verified on 2026-08-07. Do not expand beyond this scope.
 
 **Outcome:** Substantial Work and Code output is reviewed in the centre browser, with compact controls and metadata in the right pane.
 
@@ -195,5 +195,6 @@ The final Apple Silicon build uses Node 22 where required. Rebuild and `hdiutil`
 - **2026-08-07:** Browser feedback adds website fullscreen support, compact tabs at every window size, and standard `http`/`https` registration so the user can choose Poppin as the macOS default browser.
 - **2026-08-07:** Future Phase 7 records controlled browser use for the one active task: explicit start/pause/stop, tab-scoped actions, visible logs, user takeover, approval gates for consequential actions, and a permanent credential boundary. The roadmap is the sole source of truth for this planned work.
 - **2026-08-07:** Phases 7–8 are approved for implementation. The single prompt now routes arbitrary Work and Code capabilities; Work no longer requires Git. Approved scope adds preflight, visible task-scoped browser use, localhost visual selection, trusted centre-browser results, automatic approval attention, preview/review, and separately approved GitHub delivery and merge. No work beyond Phase 8 is authorized.
+- **2026-08-07:** Phases 7–8 are implemented through reusable capability boundaries and release-verified. Verification covers typecheck, zero-warning lint, 66 passing unit/component/integration tests with one expected live-Codex skip, repeated packaged browser smoke checks, a Node 22 arm64 package/DMG build, and `hdiutil` validation of the single stable installer.
 
 Future decisions should be added here only after an approved phase boundary or meaningful user feedback.

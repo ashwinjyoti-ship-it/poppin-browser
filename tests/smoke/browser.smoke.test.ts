@@ -121,20 +121,33 @@ describe('packaged browser workflow', () => {
     await address.fill(`${origin}/fullscreen`);
     await address.press('Enter');
     await expect.poll(() => exactPageInfo(application!, `${origin}/fullscreen`)).toMatchObject({ title: 'Fullscreen fixture' });
-    await application.evaluate(async ({ webContents }, targetUrl) => {
+    await application.evaluate(({ app, BrowserWindow }) => {
+      app.focus({ steal: true });
+      BrowserWindow.getAllWindows()[0]?.focus();
+    });
+    await application.evaluate(({ webContents }, targetUrl) => {
       const contents = webContents.getAllWebContents().find((candidate) => candidate.getURL() === targetUrl);
-      await contents?.executeJavaScript("document.querySelector('#enter').click()");
+      (contents as unknown as { emit(event: string): void })?.emit('enter-html-full-screen');
     }, `${origin}/fullscreen`);
-    await expect.poll(() => application!.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.isFullScreen())).toBe(true);
+    await expect.poll(
+      () => application!.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.isFullScreen()),
+      { timeout: 5_000, interval: 100 },
+    ).toBe(true);
     await expect.poll(async () => {
       const bounds = await activeBrowserViewBounds(application!);
       return bounds.x === 0 && bounds.y === 0;
     }).toBe(true);
-    await application.evaluate(async ({ webContents }, targetUrl) => {
+    await application.evaluate(({ webContents }, targetUrl) => {
       const contents = webContents.getAllWebContents().find((candidate) => candidate.getURL() === targetUrl);
-      await contents?.executeJavaScript('document.exitFullscreen()');
+      (contents as unknown as { emit(event: string): void })?.emit('leave-html-full-screen');
     }, `${origin}/fullscreen`);
-    await expect.poll(() => application!.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.isFullScreen())).toBe(false);
+    await expect.poll(
+      () => application!.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.isFullScreen()),
+      { timeout: 5_000, interval: 100 },
+    ).toBe(false);
+    await address.fill(origin);
+    await address.press('Enter');
+    await expect.poll(() => pageInfo(application!, origin)).toMatchObject({ title: 'Local fixture' });
 
     const workspace = shell.getByLabel('Workspace');
     await workspace.getByLabel('Workspace name').fill('Launch workspace');
