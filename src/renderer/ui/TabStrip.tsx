@@ -2,6 +2,7 @@ import { ChevronDown, ChevronRight, Globe2, Pencil, Plus, TriangleAlert, X } fro
 import { type DragEvent, useMemo, useRef, useState } from 'react';
 
 import type { BrowserTabGroup, BrowserTabSnapshot } from '../../shared/browser';
+import type { BrowserTaskSpace } from '../../shared/browser-agent';
 
 interface TabStripProps {
   tabs: BrowserTabSnapshot[];
@@ -15,6 +16,9 @@ interface TabStripProps {
   onToggleGroup: (groupId: string) => void;
   onRenameGroup: (groupId: string, name: string) => void;
   onShowGroupMenu: (groupId: string) => void;
+  agentTaskSpace?: BrowserTaskSpace | null;
+  watchingAgentTabs?: boolean;
+  onWatchAgentTabs?: () => void;
 }
 
 export function TabStrip({
@@ -29,6 +33,9 @@ export function TabStrip({
   onToggleGroup,
   onRenameGroup,
   onShowGroupMenu,
+  agentTaskSpace,
+  watchingAgentTabs,
+  onWatchAgentTabs,
 }: TabStripProps) {
   const groupsById = useMemo(() => new Map(groups.map((group) => [group.id, group])), [groups]);
   const tabCountByGroup = useMemo(() => {
@@ -69,6 +76,7 @@ export function TabStrip({
         onDragOver={(event) => event.preventDefault()}
         onDrop={(event) => dropTab(event, null, onReorder)}
       >
+        {agentTaskSpace ? <button type="button" className={`agent-tabs-entry ${watchingAgentTabs ? 'agent-tabs-entry-active' : ''}`} onClick={onWatchAgentTabs}>Agent Tabs · {agentTaskSpace.name}<span>{agentTaskSpace.tabIds.length}</span></button> : null}
         {tabs.flatMap((tab) => {
           const group = tab.groupId ? groupsById.get(tab.groupId) : undefined;
           const showGroup = Boolean(group && !renderedGroups.has(group.id));
@@ -103,8 +111,8 @@ export function TabStrip({
                 aria-selected={isActive}
                 tabIndex={isActive ? 0 : -1}
                 title={tab.title || 'Untitled'}
-                draggable
-                onDragStart={(event) => event.dataTransfer.setData('application/x-poppin-tab', tab.id)}
+                draggable={!tab.taskSpaceId}
+                onDragStart={(event) => { if (!tab.taskSpaceId) event.dataTransfer.setData('application/x-poppin-tab', tab.id); }}
                 onDragOver={(event) => event.preventDefault()}
                 onDrop={(event) => dropTab(event, tab.id, onReorder)}
                 onClick={() => onActivate(tab.id)}
@@ -121,7 +129,7 @@ export function TabStrip({
                 </span>
                 {tab.pinned ? null : <span className="tab-title">{tab.title || 'Untitled'}</span>}
                 {tab.isLoading ? <span className="tab-loading" aria-label="Loading" /> : null}
-                {tab.pinned ? null : (
+                {tab.pinned || tab.taskSpaceId ? null : (
                   <button
                     className="tab-close"
                     type="button"

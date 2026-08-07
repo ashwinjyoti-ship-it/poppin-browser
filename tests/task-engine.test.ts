@@ -80,9 +80,11 @@ async function setup({ withProject = true, withBrowserAgent = false }: { withPro
   const github = new FakeGitHub();
   const onOpenExternal = vi.fn();
   const browserSnapshot: BrowserAgentSnapshot = withBrowserAgent ? {
-    state: 'running', taskId: 'preflight-1', allowedTabIds: ['tab-1'], activeTabId: 'tab-1', currentAction: null, pendingApproval: null, log: [],
+    state: 'running', taskId: 'task-1', watching: false,
+    taskSpace: { id: 'space-1', taskId: 'task-1', name: 'Draft reply', owner: 'agent', status: 'agent-controlling', tabIds: ['tab-1'], activeTabId: 'tab-1', createdAt: '2026-08-07T00:00:00Z', updatedAt: '2026-08-07T00:00:00Z', kept: false },
+    allowedTabIds: ['tab-1'], activeTabId: 'tab-1', currentAction: null, pendingApproval: null, log: [],
   } : {
-    state: 'idle', taskId: null, allowedTabIds: [], activeTabId: null, currentAction: null, pendingApproval: null, log: [],
+    state: 'idle', taskId: null, taskSpace: null, watching: false, allowedTabIds: [], activeTabId: null, currentAction: null, pendingApproval: null, log: [],
   };
   const browserCommand = vi.fn<(command: BrowserAgentCommand) => Promise<BrowserAgentCommandResult>>(async () => ({ ok: true, data: 'Visible browser action completed.' }));
   const window = { isDestroyed: () => false, webContents: { isDestroyed: () => false, send } };
@@ -166,18 +168,29 @@ describe('task engine', () => {
     const { engine, fake, browserCommand, taskStore, workspaceStore } = await setup({ withProject: false, withBrowserAgent: true });
     await engine.execute({ type: 'startTask', prompt: 'Draft a reply and save the draft', model: 'gpt-test', reasoningEffort: 'high', kind: 'work' });
     expect(fake.dynamicTools).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'poppin_browser_action' })]));
+    expect(fake.dynamicTools).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'poppin_browser_batch' })]));
     expect(fake.prompt).toContain('"tabId": "tab-1"');
 
     fake.emit('request', {
       id: 21,
       method: 'item/tool/call',
-      params: { threadId: 'thread-1', turnId: 'turn-1', callId: 'call-1', tool: 'poppin_browser_action', arguments: { tabId: 'tab-1', action: { type: 'read' } } },
+      params: { threadId: 'thread-1', turnId: 'turn-1', callId: 'call-1', tool: 'poppin_browser_action', arguments: { taskSpaceId: 'space-1', tabId: 'tab-1', action: { type: 'read' } } },
     });
     await vi.waitFor(() => expect(fake.responses).toContainEqual({
       id: 21,
       result: { success: true, contentItems: [{ type: 'inputText', text: 'Visible browser action completed.' }] },
     }));
-    expect(browserCommand).toHaveBeenCalledWith({ type: 'act', tabId: 'tab-1', action: { type: 'read' } });
+    expect(browserCommand).toHaveBeenCalledWith({ type: 'act', taskSpaceId: 'space-1', tabId: 'tab-1', action: { type: 'read' } });
+
+    fake.emit('request', {
+      id: 23,
+      method: 'item/tool/call',
+      params: { threadId: 'thread-1', turnId: 'turn-1', callId: 'call-3', tool: 'poppin_browser_batch', arguments: { taskSpaceId: 'space-1', tabId: 'tab-1', snapshotId: 'snapshot-1', steps: [{ action: 'fill', ref: 'r2', text: 'Draft' }, { action: 'assert', condition: 'textIncludes', value: 'Saved' }] } },
+    });
+    await vi.waitFor(() => expect(browserCommand).toHaveBeenCalledWith({
+      type: 'batch', taskSpaceId: 'space-1', tabId: 'tab-1', snapshotId: 'snapshot-1',
+      steps: [{ action: 'fill', ref: 'r2', text: 'Draft' }, { action: 'assert', condition: 'textIncludes', value: 'Saved' }],
+    }));
     await engine.close();
     taskStore.close();
     workspaceStore.close();
@@ -193,7 +206,7 @@ describe('task engine', () => {
     fake.emit('request', {
       id: 22,
       method: 'item/tool/call',
-      params: { threadId: 'thread-1', turnId: 'turn-1', callId: 'call-2', tool: 'poppin_browser_action', arguments: { tabId: 'tab-1', action: { type: 'click', selector: '[data-poppin-agent-id="poppin-3"]' } } },
+      params: { threadId: 'thread-1', turnId: 'turn-1', callId: 'call-2', tool: 'poppin_browser_action', arguments: { taskSpaceId: 'space-1', tabId: 'tab-1', action: { type: 'click', ref: 'r3', snapshotId: 'snapshot-1' } } },
     });
     await vi.waitFor(() => expect(engine.getSnapshot().task?.progress).toEqual(expect.arrayContaining([
       expect.objectContaining({ title: 'Critical browser action needs approval', status: 'paused' }),

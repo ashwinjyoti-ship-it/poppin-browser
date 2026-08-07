@@ -18,6 +18,7 @@ export interface BrowserTabSnapshot {
   faviconUrls: string[];
   pinned: boolean;
   groupId: string | null;
+  taskSpaceId?: string | null;
   isLoading: boolean;
   canGoBack: boolean;
   canGoForward: boolean;
@@ -107,6 +108,7 @@ export interface PersistedTabState {
   url: string;
   pinned?: boolean;
   groupId?: string | null;
+  taskSpaceId?: string | null;
 }
 
 export interface PersistedBrowserStateV1 {

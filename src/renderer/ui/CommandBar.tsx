@@ -4,7 +4,6 @@ import { ChevronDown, ChevronUp, Send, Square } from 'lucide-react';
 import type { TaskCommand, TaskCommandResult, TaskSnapshot } from '../../shared/task';
 import type { WorkspaceSnapshot } from '../../shared/workspace';
 import { inferTaskRequirements, type TaskRequirements } from '../../shared/task-requirements';
-import type { BrowserAgentCommand, BrowserAgentCommandResult } from '../../shared/browser-agent';
 import { Brand } from './Brand';
 
 interface CommandBarProps {
@@ -13,10 +12,9 @@ interface CommandBarProps {
   collapsed: boolean;
   onCollapseChange: (collapsed: boolean) => void;
   onCommand: (command: TaskCommand) => Promise<TaskCommandResult>;
-  onBrowserAgentCommand?: (command: BrowserAgentCommand) => Promise<BrowserAgentCommandResult>;
 }
 
-export function CommandBar({ snapshot, workspace, collapsed, onCollapseChange, onCommand, onBrowserAgentCommand }: CommandBarProps) {
+export function CommandBar({ snapshot, workspace, collapsed, onCollapseChange, onCommand }: CommandBarProps) {
   const [prompt, setPrompt] = useState('');
   const [modelId, setModelId] = useState('');
   const [effort, setEffort] = useState('');
@@ -38,39 +36,15 @@ export function CommandBar({ snapshot, workspace, collapsed, onCollapseChange, o
     );
   }
 
-  const start = async (kind: 'work' | 'code', requirements: TaskRequirements | null = preflight) => {
+  const start = async (kind: 'work' | 'code') => {
     setSending(true);
     setError('');
-    if (requirements?.browserUse) {
-      const contexts = workspace.tabContexts;
-      if (contexts.length === 0 || !onBrowserAgentCommand) {
-        setSending(false);
-        setError('Select at least one browser tab before granting browser use.');
-        return;
-      }
-      const access = await onBrowserAgentCommand({ type: 'start', taskId: `preflight-${Date.now()}`, tabIds: contexts.map((item) => item.tabId) });
-      if (!access.ok) {
-        setSending(false);
-        setError(access.message ?? 'Poppin could not start controlled browser use.');
-        return;
-      }
-      for (const context of contexts) {
-        const action = /(?:youtube\.com|youtu\.be)/i.test(context.url) ? { type: 'captureTranscript' as const } : { type: 'read' as const };
-        const captured = await onBrowserAgentCommand({ type: 'act', tabId: context.tabId, action });
-        if (!captured.ok) {
-          setSending(false);
-          setError(captured.message ?? 'Poppin could not read the approved tab.');
-          return;
-        }
-      }
-    }
     const result = await onCommand({ type: 'startTask', prompt, model: selectedModelId, reasoningEffort: selectedEffort, kind });
     setSending(false);
     if (result.ok) {
       setPrompt('');
       setPreflight(null);
     } else {
-      if (requirements?.browserUse && onBrowserAgentCommand) await onBrowserAgentCommand({ type: 'stop' });
       setError(result.message ?? 'Codex could not start that task.');
     }
   };
@@ -84,7 +58,7 @@ export function CommandBar({ snapshot, workspace, collapsed, onCollapseChange, o
       setPreflight(requirements);
       return;
     }
-    await start(preflight?.kind ?? requirements.kind, preflight ?? requirements);
+    await start(preflight?.kind ?? requirements.kind);
   };
 
   return (

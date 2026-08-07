@@ -258,15 +258,14 @@ describe('Codex controls', () => {
       workspace: { id: 'primary', name: 'Fixture', createdAt: '' },
       tabContexts: [{ tabId: 'mail-tab', title: 'Inbox', url: 'https://mail.example.com', capturedText: 'A message', truncated: false, capturedAt: '' }],
     };
-    render(<CommandBar snapshot={READY_TASK} workspace={workspace} collapsed={false} onCollapseChange={vi.fn()} onCommand={onCommand} onBrowserAgentCommand={onBrowserAgentCommand} />);
+    render(<CommandBar snapshot={READY_TASK} workspace={workspace} collapsed={false} onCollapseChange={vi.fn()} onCommand={onCommand} />);
     await user.type(screen.getByRole('textbox', { name: /prompt/i }), 'Use browser use and draft and save a reply');
     await user.click(screen.getByRole('button', { name: /send to codex/i }));
     await waitFor(() => expect(onCommand).toHaveBeenCalledWith({
       type: 'startTask', prompt: 'Use browser use and draft and save a reply', model: 'gpt-test', reasoningEffort: 'high', kind: 'work',
     }));
     expect(screen.queryByRole('region', { name: /task preflight/i })).not.toBeInTheDocument();
-    expect(onBrowserAgentCommand).toHaveBeenNthCalledWith(1, { type: 'start', taskId: expect.stringMatching(/^preflight-/), tabIds: ['mail-tab'] });
-    expect(onBrowserAgentCommand).toHaveBeenNthCalledWith(2, { type: 'act', tabId: 'mail-tab', action: { type: 'read' } });
+    expect(onBrowserAgentCommand).not.toHaveBeenCalled();
   });
 
   it('shows exactly what an approval will allow', async () => {

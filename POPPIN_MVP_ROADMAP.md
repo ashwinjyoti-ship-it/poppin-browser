@@ -194,6 +194,46 @@ The final Apple Silicon build uses Node 22 where required. Rebuild and `hdiutil`
 - A top-bar Settings panel controls website link disposition, new-tab focus and placement, startup restoration, multiple-tab close warnings, and DuckDuckGo or Google address-bar search.
 - The temporary Google sign-in helper is removed; authentication remains entirely within Poppin's persistent browser session and under the permanent credential boundary.
 
+## Phase 10 — Task-Owned Agent Tabs
+
+**Status:** Implemented and packaged-smoke-verified on 2026-08-07; awaiting hands-on approval.
+
+**Outcome:** An eligible browser-use Work task receives one task-owned Agent Tabs collection seeded from the URLs of the user's explicitly selected tabs. The source tabs are never moved, closed, navigated, or operated. Agent Tabs reuse `persist:poppin-browser` without inspecting or copying cookies or credentials, remain out of the normal tab strip unless the user chooses Watch, and support only the single active task.
+
+The task space records its task, owner, status, tab IDs, active tab, and timestamps. Agent control, waiting for approval, user control, pause, completion, and failure/stopped states are explicit. Take Over is a hard stop: queued work cannot continue and only an explicit Resume agent action returns control. Login, captcha, credential, and unusual manual interactions require takeover. A restored task space is always paused and user-controlled; it never resumes automation on launch.
+
+The right Task pane exposes Watch, Pause, Resume agent, Take over, Stop, Keep tabs, and Close task tabs as applicable. Completion defaults to closing task tabs; keeping them is an explicit user choice. Keeping preserves the visible Agent Tabs collection without converting it into ordinary context or granting a future task access.
+
+**Acceptance:** user tabs remain unchanged; every action is rejected outside the active task-space ID and its tab IDs; takeover prevents the next queued action; resume is explicit; cleanup is predictable; restore cannot auto-run; one workspace and one active task remain unchanged.
+
+## Phase 11 — Semantic Snapshot V2
+
+**Status:** Implemented and packaged-smoke-verified on 2026-08-07; awaiting hands-on approval.
+
+**Outcome:** `BrowserAgentEngine` exposes a compact semantic snapshot built through a Poppin-owned CDP boundary using the accessibility tree and safe DOM geometry where Chromium provides it. Snapshot nodes contain a short ref, role, accessible name, safe state/actionability, frame identity, optional bounds, and conservative locator hints. Password and credential values, cookies, tokens, hidden secrets, arbitrary DOM, and raw CDP never cross the boundary.
+
+References are bound to task space, tab, document/navigation generation, and snapshot ID. Any new navigation or snapshot invalidates earlier references, and a mutation-sensitive action requires a fresh read before further ref-based work. Cross-frame nodes are included only when Chromium safely exposes them.
+
+**Acceptance:** common controls receive usable refs; credential fields are identified only to request takeover; stale/cross-task refs fail safely; dynamic pages can be re-read reliably; remote-page isolation is unchanged.
+
+## Phase 12 — Safe Batched Browser Actions
+
+**Status:** Implemented and packaged-smoke-verified on 2026-08-07; awaiting hands-on approval.
+
+**Outcome:** Codex receives one bounded declarative batch tool supporting reviewed click, fill, wait, read, and assert steps. Each step validates task space, ownership, tab, snapshot, and ref; is logged individually; and stops on navigation, mutation/staleness, pause, takeover, approval, failure, or assertion failure. No arbitrary JavaScript, eval, raw CDP, upload/download, or unrestricted script surface is exposed.
+
+Critical steps stop exactly before execution and use the existing sticky approval. Approval resumes only that continuation; rejection guarantees the step is not executed. Reversible unsent draft saving remains ordinary work. Completion still requires a page-state verification read or assertion.
+
+**Acceptance:** a draft workflow can act and verify with fewer tool rounds; Send pauses at the final click; rejection prevents Send; partial batches are interruptible; every executed and skipped step is inspectable.
+
+## Phase 13 — Transparent Site Recipes
+
+**Status:** Approved for design, but implementation begins only after Phases 10–12 are reliable in hands-on use.
+
+**Outcome:** Successful verified workflows may be offered as local, visible, parameterized recipes. Creation always asks first. Recipes are inspectable, editable, disableable, and deletable; fail closed when stale; and retain the same semantic validation and critical-action approvals. They never store credentials, authentication state, cookies, tokens, private message values, or private templates unless the user explicitly asks to save that template.
+
+Initial candidates are an unsent Gmail draft, a timestamped YouTube transcript summary, and approved-source research. No parallel tasks or multi-agent spaces are added.
+
 ## Decision Log
 
 - **2026-08-06:** Phase 1 begins from the supplied v0.1 brief and design assets.
@@ -215,5 +255,7 @@ The final Apple Silicon build uses Node 22 where required. Rebuild and `hdiutil`
 - **2026-08-07:** Codex integration feedback hardens Phase 8: trusted task-result URLs are accepted only when Poppin creates or restores a tab, while address-bar entry remains restricted to HTTP(S). Blocking task and browser approvals now derive the visible right-pane state directly, guaranteeing that the pane expands on Task without depending on subscription timing.
 - **2026-08-07:** Hands-on browser-use feedback narrows approval gates to exact critical actions. Selecting tabs and requesting browser use grants ordinary visible navigation/click/type and reversible draft saving; Work tasks no longer show a generic browser-use preflight. Codex browser actions are connected through task-scoped dynamic tools, critical prompts are sticky at the top of Task, and completion must be verified from page state.
 - **2026-08-07:** Hands-on grouping feedback replaces ambiguous and sometimes blank group pills with explicit named/countable controls, colored contiguous tab runs, discoverable renaming, persistent group colors, and ordering normalization that prevents tabs from splitting a group.
+- **2026-08-07:** Poppin-native ego-lite learnings are approved as Phases 10–13: task-owned Agent Tabs, generation-scoped semantic snapshots, bounded interruptible batches, and later transparent recipes. The implementation must use Poppin's existing Electron/Codex architecture, persistent partition, one-task rule, and credential boundary; it must not add ego-lite, arbitrary JavaScript/CDP tools, another profile, or parallel agent spaces.
+- **2026-08-07:** Phases 10–12 are implemented behind the existing typed browser-agent boundary. Verification covers 80 passing unit/component/integration tests with one expected live-Codex skip plus the Node 22 arm64 packaged Electron smoke flow. Phase 13 recipes remain gated on hands-on reliability feedback and are not implemented.
 
 Future decisions should be added here only after an approved phase boundary or meaningful user feedback.

@@ -746,3 +746,6 @@ body.pane-is-resizing * { cursor: col-resize !important; user-select: none !impo
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; }
 }
+.agent-tabs-entry { display: inline-flex; align-items: center; gap: 7px; flex: 0 0 auto; max-width: 220px; height: 27px; padding: 0 10px; border: 1px solid rgba(210, 136, 45, .28); border-radius: 9px; color: #7b4b16; background: #fff6e8; font: 600 11px/1 system-ui; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.agent-tabs-entry span { display: grid; place-items: center; min-width: 17px; height: 17px; border-radius: 9px; color: white; background: #d78421; font-size: 10px; }
+.agent-tabs-entry-active { box-shadow: inset 0 0 0 1px rgba(210, 132, 31, .25); background: #ffeed2; }

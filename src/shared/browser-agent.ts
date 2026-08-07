@@ -6,15 +6,62 @@ export const BROWSER_AGENT_CHANNELS = {
 
 export type BrowserAgentState = 'idle' | 'running' | 'paused' | 'needs-approval' | 'stopped' | 'completed';
 
+export type BrowserTaskSpaceOwner = 'agent' | 'user';
+export type BrowserTaskSpaceStatus = 'agent-controlling' | 'waiting-for-approval' | 'user-controlling' | 'paused' | 'completed' | 'failed-stopped';
+
+export interface BrowserTaskSpace {
+  id: string;
+  taskId: string;
+  name: string;
+  owner: BrowserTaskSpaceOwner;
+  status: BrowserTaskSpaceStatus;
+  tabIds: string[];
+  activeTabId: string | null;
+  createdAt: string;
+  updatedAt: string;
+  kept: boolean;
+}
+
 export type BrowserAgentAction =
   | { type: 'navigate'; url: string }
   | { type: 'read' }
-  | { type: 'click'; selector: string }
-  | { type: 'type'; selector: string; text: string }
+  | { type: 'click'; selector?: string; ref?: string; snapshotId?: string }
+  | { type: 'type'; selector?: string; ref?: string; snapshotId?: string; text: string }
   | { type: 'scroll'; deltaY: number }
   | { type: 'wait'; milliseconds: number }
   | { type: 'search'; text: string }
   | { type: 'captureTranscript' };
+
+export interface BrowserSemanticNode {
+  ref: string;
+  role: string;
+  name: string;
+  states: string[];
+  clickable: boolean;
+  editable: boolean;
+  credential: boolean;
+  frameId: string;
+  bounds?: { x: number; y: number; width: number; height: number };
+  locator?: string;
+}
+
+export interface BrowserSemanticSnapshot {
+  snapshotId: string;
+  taskSpaceId: string;
+  tabId: string;
+  documentId: string;
+  url: string;
+  title: string;
+  createdAt: string;
+  nodes: BrowserSemanticNode[];
+}
+
+export type BrowserBatchStep =
+  | { action: 'click'; ref: string }
+  | { action: 'fill'; ref: string; text: string }
+  | { action: 'waitFor'; condition: 'milliseconds' | 'textIncludes'; value: string; timeoutMs?: number }
+  | { action: 'read' }
+  | { action: 'assert'; condition: 'textIncludes' | 'urlIncludes'; value: string };
 
 export interface BrowserAgentLogEntry {
   id: string;
@@ -37,6 +84,8 @@ export interface BrowserAgentApproval {
 export interface BrowserAgentSnapshot {
   state: BrowserAgentState;
   taskId: string | null;
+  taskSpace: BrowserTaskSpace | null;
+  watching: boolean;
   allowedTabIds: string[];
   activeTabId: string | null;
   currentAction: string | null;
@@ -45,12 +94,16 @@ export interface BrowserAgentSnapshot {
 }
 
 export type BrowserAgentCommand =
-  | { type: 'start'; taskId: string; tabIds: string[] }
+  | { type: 'start'; taskId: string; name?: string; tabIds: string[] }
   | { type: 'pause' }
   | { type: 'resume' }
   | { type: 'stop' }
   | { type: 'takeOver' }
-  | { type: 'act'; tabId: string; action: BrowserAgentAction }
+  | { type: 'watch' }
+  | { type: 'keepTabs' }
+  | { type: 'closeTaskTabs' }
+  | { type: 'act'; taskSpaceId: string; tabId: string; action: BrowserAgentAction }
+  | { type: 'batch'; taskSpaceId: string; tabId: string; snapshotId: string; steps: BrowserBatchStep[] }
   | { type: 'respondApproval'; decision: 'approve' | 'reject' };
 
 export interface BrowserAgentCommandResult {

@@ -9,6 +9,7 @@ import {
   type MenuItemConstructorOptions,
   type Rectangle,
   type Session,
+  type WebContents,
   WebContentsView,
 } from 'electron';
 
@@ -33,7 +34,7 @@ import { displayUrl, NEW_TAB_URL, normalizeAddressInput, normalizeTabInput, TASK
 import type { CapturedTabContext } from '../../shared/workspace';
 import type { VisualSelectionSnapshot } from '../../shared/workspace';
 import { HtmlFullscreenCoordinator, type HtmlFullscreenTransition } from './html-fullscreen';
-import type { BrowserAgentAction } from '../../shared/browser-agent';
+import type { BrowserAgentAction, BrowserSemanticNode, BrowserSemanticSnapshot } from '../../shared/browser-agent';
 import { showPageContextMenu } from './context-menu';
 
 const PAGE_MARGIN = 12;
@@ -48,6 +49,13 @@ interface BrowserTabRecord {
   view: WebContentsView;
   snapshot: BrowserTabSnapshot;
   lastExternalUrl: string;
+  documentGeneration: number;
+}
+
+interface SemanticReferenceRecord {
+  tabId: string;
+  documentGeneration: number;
+  nodes: Map<string, { backendNodeId: number; credential: boolean; target: string }>;
 }
 
 type ClosedTab = PersistedTabState;
@@ -58,6 +66,7 @@ export class BrowserEngine {
   private readonly groups = new Map<string, BrowserTabGroup>();
   private readonly closedTabs: ClosedTab[] = [];
   private readonly faviconByOrigin = new Map<string, string[]>();
+  private readonly semanticReferences = new Map<string, SemanticReferenceRecord>();
   private settings: BrowserSettings = { ...DEFAULT_BROWSER_SETTINGS };
   private activeTabId = '';
   private saveTimer: NodeJS.Timeout | null = null;
@@ -120,7 +129,11 @@ export class BrowserEngine {
       ? state.tabs
       : [{ id: randomUUID(), url: NEW_TAB_URL, pinned: false, groupId: null }];
     for (const tab of tabs) this.createTab(tab.url, tab.id, false, tab, false, 'end');
-    this.activateTab(shouldRestore && state?.activeTabId && this.tabs.has(state.activeTabId) ? state.activeTabId : tabs[0]!.id);
+    const requestedActive = shouldRestore && state?.activeTabId ? this.tabs.get(state.activeTabId) : null;
+    const safeActiveId = requestedActive && !requestedActive.snapshot.taskSpaceId
+      ? requestedActive.snapshot.id
+      : tabs.find((tab) => !tab.taskSpaceId)?.id ?? tabs[0]!.id;
+    this.activateTab(safeActiveId);
   }
 
   getSnapshot(): BrowserSnapshot {
@@ -163,16 +176,159 @@ export class BrowserEngine {
     return tab ? `${tab.snapshot.title} — ${tab.snapshot.url}` : 'Selected browser tab';
   }
 
-  activateTabForAgent(tabId: string): boolean {
-    return this.activateTab(tabId).ok;
+  prepareTabForAgent(tabId: string, taskSpaceId: string): boolean {
+    const tab = this.tabs.get(tabId);
+    return Boolean(tab && !tab.view.webContents.isDestroyed() && tab.snapshot.taskSpaceId === taskSpaceId);
   }
 
-  async inspectAction(tabId: string, action: BrowserAgentAction): Promise<{ credential: boolean; consequential: string | null; target: string }> {
+  createTaskSpaceTabs(taskSpaceId: string, sourceTabIds: string[]): string[] {
+    const sourceTabs = [...new Set(sourceTabIds)].flatMap((tabId) => {
+      const tab = this.tabs.get(tabId);
+      return tab && !tab.snapshot.taskSpaceId && !tab.view.webContents.isDestroyed() ? [tab] : [];
+    }).slice(0, Math.max(0, 50 - this.tabs.size));
+    return sourceTabs.map((source) => {
+      const id = randomUUID();
+      this.createTab(source.lastExternalUrl, id, false, {
+        id, url: source.lastExternalUrl, pinned: false, groupId: null, taskSpaceId,
+      }, false, 'end');
+      return id;
+    });
+  }
+
+  watchTaskSpace(taskSpaceId: string, activeTabId: string | null): boolean {
+    const candidate = activeTabId ? this.tabs.get(activeTabId) : Array.from(this.tabs.values()).find((tab) => tab.snapshot.taskSpaceId === taskSpaceId);
+    if (!candidate || candidate.snapshot.taskSpaceId !== taskSpaceId) return false;
+    return this.activateTab(candidate.snapshot.id).ok;
+  }
+
+  closeTaskSpaceTabs(taskSpaceId: string): void {
+    const ids = this.tabOrder.filter((id) => this.tabs.get(id)?.snapshot.taskSpaceId === taskSpaceId);
+    for (const id of ids) this.closeTab(id, false);
+    this.emitSnapshot();
+    this.scheduleSave();
+  }
+
+  async createSemanticSnapshot(tabId: string, snapshotId: string, taskSpaceId: string): Promise<BrowserSemanticSnapshot> {
+    const tab = this.tabs.get(tabId);
+    if (!tab || tab.view.webContents.isDestroyed() || tab.snapshot.taskSpaceId !== taskSpaceId) throw new Error('That task-owned tab is no longer available.');
+    const contents = tab.view.webContents;
+    if (!contents.debugger.isAttached()) contents.debugger.attach('1.3');
+    await Promise.all([
+      contents.debugger.sendCommand('Accessibility.enable'),
+      contents.debugger.sendCommand('DOM.enable'),
+    ]);
+    const response = await contents.debugger.sendCommand('Accessibility.getFullAXTree') as { nodes?: CdpAxNode[] };
+    const candidates = (response.nodes ?? []).filter(isUsefulAxNode).slice(0, 300);
+    const records = await Promise.all(candidates.map(async (node, index) => this.semanticNodeFromAx(contents, node, index)));
+    const nodes = records.flatMap((record) => record ? [record.node] : []);
+    const refs = new Map<string, { backendNodeId: number; credential: boolean; target: string }>();
+    for (const record of records) if (record) refs.set(record.node.ref, { backendNodeId: record.backendNodeId, credential: record.node.credential, target: record.node.name || record.node.role });
+    this.semanticReferences.set(snapshotId, { tabId, documentGeneration: tab.documentGeneration, nodes: refs });
+    for (const [id, record] of this.semanticReferences) if (record.tabId === tabId && id !== snapshotId) this.semanticReferences.delete(id);
+    return {
+      snapshotId, taskSpaceId, tabId, documentId: `${tabId}:${tab.documentGeneration}`,
+      url: contents.getURL(), title: contents.getTitle(), createdAt: new Date().toISOString(), nodes,
+    };
+  }
+
+  isSemanticSnapshotCurrent(tabId: string, snapshotId: string): boolean {
+    const tab = this.tabs.get(tabId);
+    const snapshot = this.semanticReferences.get(snapshotId);
+    return Boolean(tab && snapshot && snapshot.tabId === tabId && snapshot.documentGeneration === tab.documentGeneration);
+  }
+
+  private async semanticNodeFromAx(contents: WebContents, axNode: CdpAxNode, index: number): Promise<{ node: BrowserSemanticNode; backendNodeId: number } | null> {
+    const backendNodeId = axNode.backendDOMNodeId;
+    if (!backendNodeId) return null;
+    let described: { node?: { attributes?: string[]; localName?: string; frameId?: string } };
+    try {
+      described = await contents.debugger.sendCommand('DOM.describeNode', { backendNodeId, depth: 0, pierce: true }) as typeof described;
+    } catch {
+      return null;
+    }
+    const attributes = attributeMap(described.node?.attributes ?? []);
+    const role = String(axNode.role?.value ?? described.node?.localName ?? 'content').toLowerCase();
+    const credential = isCredentialDescriptor([role, axNode.name?.value, attributes.id, attributes.name, attributes.type, attributes.autocomplete, attributes['aria-label']].filter(Boolean).join(' '));
+    const name = credential ? 'Credential field' : String(axNode.name?.value ?? '').replace(/\s+/g, ' ').trim().slice(0, 240);
+    const editable = !credential && (role === 'textbox' || role === 'searchbox' || role === 'combobox' || axProperty(axNode, 'editable') !== undefined);
+    const clickable = !credential && (['button', 'link', 'checkbox', 'radio', 'menuitem', 'menuitemcheckbox', 'menuitemradio', 'option', 'switch', 'tab'].includes(role) || axProperty(axNode, 'focusable') === true);
+    const states = axNode.properties?.flatMap((property) => {
+      if (!['checked', 'disabled', 'expanded', 'selected', 'required', 'pressed', 'invalid'].includes(property.name)) return [];
+      const value = property.value?.value;
+      return value === undefined || value === false ? [] : [`${property.name}:${String(value)}`];
+    }) ?? [];
+    let bounds: BrowserSemanticNode['bounds'];
+    if (clickable || editable) {
+      try {
+        const box = await contents.debugger.sendCommand('DOM.getBoxModel', { backendNodeId }) as { model?: { border?: number[] } };
+        const border = box.model?.border;
+        if (border && border.length >= 8) {
+          const xs = [border[0]!, border[2]!, border[4]!, border[6]!];
+          const ys = [border[1]!, border[3]!, border[5]!, border[7]!];
+          const x = Math.min(...xs); const y = Math.min(...ys);
+          bounds = { x, y, width: Math.max(...xs) - x, height: Math.max(...ys) - y };
+        }
+      } catch {
+        // Some AX nodes are virtual or cross-process and have no box model.
+      }
+    }
+    return {
+      backendNodeId,
+      node: {
+        ref: `r${index + 1}`, role, name, states, clickable, editable, credential,
+        frameId: axNode.frameId ?? described.node?.frameId ?? 'main',
+        ...(bounds ? { bounds } : {}),
+        ...(!credential ? safeLocator(attributes, role, name) : {}),
+      },
+    };
+  }
+
+  private resolveSemanticReference(tab: BrowserTabRecord, snapshotId: string, ref: string): { backendNodeId: number; credential: boolean; target: string } {
+    const snapshot = this.semanticReferences.get(snapshotId);
+    if (!snapshot || snapshot.tabId !== tab.snapshot.id || snapshot.documentGeneration !== tab.documentGeneration) {
+      throw new Error('That semantic reference is stale. Read the page again.');
+    }
+    const node = snapshot.nodes.get(ref);
+    if (!node) throw new Error('That semantic reference is not in the current page snapshot.');
+    return node;
+  }
+
+  private async callSemanticElement(tab: BrowserTabRecord, snapshotId: string, ref: string, functionDeclaration: string, argument?: string): Promise<unknown> {
+    const node = this.resolveSemanticReference(tab, snapshotId, ref);
+    if (node.credential) throw new Error('Poppin never reads or operates credential fields.');
+    const contents = tab.view.webContents;
+    const resolved = await contents.debugger.sendCommand('DOM.resolveNode', { backendNodeId: node.backendNodeId, objectGroup: `poppin-${snapshotId}` }) as { object?: { objectId?: string } };
+    const objectId = resolved.object?.objectId;
+    if (!objectId) throw new Error('The semantic target is no longer available.');
+    try {
+      const result = await contents.debugger.sendCommand('Runtime.callFunctionOn', {
+        objectId, functionDeclaration, returnByValue: true, awaitPromise: true,
+        arguments: argument === undefined ? [] : [{ value: argument }],
+      }) as { result?: { value?: unknown }; exceptionDetails?: unknown };
+      if (result.exceptionDetails) throw new Error('The page rejected the semantic action.');
+      return result.result?.value;
+    } finally {
+      await contents.debugger.sendCommand('Runtime.releaseObject', { objectId }).catch(() => undefined);
+    }
+  }
+
+  async inspectAction(tabId: string, action: BrowserAgentAction): Promise<{ credential: boolean; consequential: string | null; takeover?: string | null; target: string }> {
     const tab = this.tabs.get(tabId);
     if (!tab || tab.view.webContents.isDestroyed()) throw new Error('That tab is no longer available.');
     if (action.type !== 'click' && action.type !== 'type') {
       return { credential: false, consequential: null, target: agentActionTarget(action) };
     }
+    if (action.ref && action.snapshotId) {
+      const resolved = this.resolveSemanticReference(tab, action.snapshotId, action.ref);
+      if (resolved.credential) return { credential: true, consequential: null, target: 'Credential field' };
+      const signal = resolved.target;
+      const takeover = /\b(sign[- ]?in|log[- ]?in|authenticate|oauth|captcha|verify you are human|two[- ]?factor)\b/i.test(signal)
+        ? 'Authentication or unusual manual interaction must be completed by the user.' : null;
+      const consequential = !takeover && /\b(download|upload|purchase|pay|buy|delete|trash|discard|publish|send|submit|merge|create (?:pull request|record)|remove)\b/i.test(signal)
+        ? 'This action may cause an external or irreversible effect.' : null;
+      return { credential: false, consequential, takeover, target: signal };
+    }
+    if (!action.selector) throw new Error('Read the page and use a current semantic reference.');
     const selector = JSON.stringify(action.selector);
     const inspected = await tab.view.webContents.executeJavaScript(`(() => {
       const element = document.querySelector(${selector});
@@ -189,16 +345,19 @@ export class BrowserEngine {
         || input?.type === 'password';
       let consequential = null;
       const signal = [text, href, form?.action || '', descriptor].join(' ');
-      if (element.hasAttribute('download') || /\\b(download|upload|purchase|pay|buy|delete|trash|discard|publish|send|submit|sign[- ]?in|log[- ]?in|merge|create (?:pull request|record)|remove (?:account|message|draft|file|record|item))\\b/i.test(signal)) {
+      const takeover = /\\b(sign[- ]?in|log[- ]?in|authenticate|oauth|captcha|verify you are human|two[- ]?factor)\\b/i.test(signal)
+        ? 'Authentication or unusual manual interaction must be completed by the user.' : null;
+      if (!takeover && (element.hasAttribute('download') || /\\b(download|upload|purchase|pay|buy|delete|trash|discard|publish|send|submit|merge|create (?:pull request|record)|remove (?:account|message|draft|file|record|item))\\b/i.test(signal))) {
         consequential = 'This action may cause an external or irreversible effect.';
       }
-      return { credential, consequential, target: text || href || element.tagName.toLowerCase() };
+      return { credential, consequential, takeover, target: text || href || element.tagName.toLowerCase() };
     })()`.replace('actionType', JSON.stringify(action.type)), true);
     if (!inspected || typeof inspected !== 'object') throw new Error('The target element is no longer available.');
-    const value = inspected as { credential?: unknown; consequential?: unknown; target?: unknown };
+    const value = inspected as { credential?: unknown; consequential?: unknown; takeover?: unknown; target?: unknown };
     return {
       credential: value.credential === true,
       consequential: typeof value.consequential === 'string' ? value.consequential : null,
+      takeover: typeof value.takeover === 'string' ? value.takeover : null,
       target: typeof value.target === 'string' ? value.target : action.selector,
     };
   }
@@ -219,11 +378,35 @@ export class BrowserEngine {
       case 'captureTranscript':
         return String(await contents.executeJavaScript(CAPTURE_TRANSCRIPT_SCRIPT, true));
       case 'click': {
+        if (action.ref && action.snapshotId) {
+          await this.callSemanticElement(tab, action.snapshotId, action.ref, `function() { if (this instanceof HTMLElement) { this.click(); return true; } return false; }`);
+          return `Clicked ${action.ref}`;
+        }
+        if (!action.selector) throw new Error('Read the page and use a current semantic reference.');
         const clicked = await contents.executeJavaScript(`(() => { const element = document.querySelector(${JSON.stringify(action.selector)}); if (!(element instanceof HTMLElement)) return false; element.click(); return true; })()`, true);
         if (clicked !== true) throw new Error('The target element is no longer available.');
         return `Clicked ${action.selector}`;
       }
       case 'type': {
+        if (action.ref && action.snapshotId) {
+          const result = await this.callSemanticElement(tab, action.snapshotId, action.ref, `function(text) {
+            const element = this;
+            if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLElement && element.isContentEditable)) return false;
+            const descriptor = [element.id, element.getAttribute('name'), element.getAttribute('aria-label'), element.getAttribute('autocomplete'), element instanceof HTMLInputElement ? element.type : ''].filter(Boolean).join(' ');
+            if (/password|passkey|credential|one[-_ ]?time|otp|verification[-_ ]?code/i.test(descriptor)) return 'credential';
+            element.focus();
+            if (element instanceof HTMLInputElement) Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(element, text);
+            else if (element instanceof HTMLTextAreaElement) Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(element, text);
+            else element.textContent = text;
+            element.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }));
+            element.dispatchEvent(new Event('change', { bubbles: true }));
+            return true;
+          }`, action.text);
+          if (result === 'credential') throw new Error('Poppin never types into credential fields.');
+          if (result !== true) throw new Error('The editable target is no longer available.');
+          return `Typed ${action.text.length} character(s)`;
+        }
+        if (!action.selector) throw new Error('Read the page and use a current semantic reference.');
         const typed = await contents.executeJavaScript(`(() => {
           const element = document.querySelector(${JSON.stringify(action.selector)});
           if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLElement && element.isContentEditable)) return false;
@@ -395,6 +578,7 @@ export class BrowserEngine {
           url: tab.lastExternalUrl || NEW_TAB_URL,
           pinned: tab.snapshot.pinned,
           groupId: tab.snapshot.groupId,
+          taskSpaceId: tab.snapshot.taskSpaceId,
         }] : [];
       }),
       groups: Array.from(this.groups.values(), (group) => ({ ...group })),
@@ -460,12 +644,13 @@ export class BrowserEngine {
       faviconUrls: faviconForUrl(initialUrl, this.faviconByOrigin),
       pinned: persisted?.pinned === true,
       groupId: persisted?.groupId ?? null,
+      taskSpaceId: persisted?.taskSpaceId ?? null,
       isLoading: false,
       canGoBack: false,
       canGoForward: false,
       failure: null,
     };
-    const record: BrowserTabRecord = { view, snapshot, lastExternalUrl: initialUrl };
+    const record: BrowserTabRecord = { view, snapshot, lastExternalUrl: initialUrl, documentGeneration: 0 };
     this.tabs.set(id, record);
     this.insertTabId(id, position);
     this.window.contentView.addChildView(view);
@@ -484,10 +669,11 @@ export class BrowserEngine {
   private attachTabEvents(tab: BrowserTabRecord): void {
     const contents = tab.view.webContents;
     contents.setWindowOpenHandler(({ url }) => {
-      if (this.settings.linkOpening === 'same-tab') {
+      if (tab.snapshot.taskSpaceId || this.settings.linkOpening === 'same-tab') {
         void contents.loadURL(url).catch(() => undefined);
       } else {
-        this.createTab(url, randomUUID(), false, undefined, this.settings.focusNewTabs);
+        const id = randomUUID();
+        this.createTab(url, id, false, tab.snapshot.taskSpaceId ? { id, url, taskSpaceId: tab.snapshot.taskSpaceId } : undefined, tab.snapshot.taskSpaceId ? false : this.settings.focusNewTabs);
       }
       return { action: 'deny' };
     });
@@ -499,12 +685,18 @@ export class BrowserEngine {
         onForward: () => contents.navigationHistory.goForward(),
         onReload: () => this.reload(tab.snapshot.id),
         onOpenLink: (url, disposition) => {
-          if (disposition === 'current') void contents.loadURL(url).catch(() => undefined);
-          else this.createTab(url, randomUUID(), false, undefined, this.settings.focusNewTabs);
+          if (disposition === 'current' || tab.snapshot.taskSpaceId) void contents.loadURL(url).catch(() => undefined);
+          else {
+            const id = randomUUID();
+            this.createTab(url, id, false, tab.snapshot.taskSpaceId ? { id, url, taskSpaceId: tab.snapshot.taskSpaceId } : undefined, tab.snapshot.taskSpaceId ? false : this.settings.focusNewTabs);
+          }
         },
         onSearchSelection: (selection) => {
           const search = normalizeAddressInput(selection, this.settings.searchEngine);
-          if (search.kind !== 'invalid') this.createTab(search.url, randomUUID(), false, undefined, true);
+          if (search.kind !== 'invalid') {
+            if (tab.snapshot.taskSpaceId) void contents.loadURL(search.url).catch(() => undefined);
+            else this.createTab(search.url, randomUUID(), false, undefined, true);
+          }
         },
       });
     });
@@ -568,6 +760,10 @@ export class BrowserEngine {
 
   private handleNavigation(tab: BrowserTabRecord, url: string, resetFavicon: boolean): void {
     if (url.startsWith('poppin://error')) return;
+    if (resetFavicon) {
+      tab.documentGeneration += 1;
+      for (const [id, record] of this.semanticReferences) if (record.tabId === tab.snapshot.id) this.semanticReferences.delete(id);
+    }
     const isNewTab = url.startsWith('poppin://new-tab');
     const previousOrigin = safeOrigin(tab.lastExternalUrl);
     tab.lastExternalUrl = isNewTab ? NEW_TAB_URL : url;
@@ -600,12 +796,12 @@ export class BrowserEngine {
     return { ok: true };
   }
 
-  private closeTab(tabId: string): BrowserCommandResult {
+  private closeTab(tabId: string, remember = true): BrowserCommandResult {
     const tab = this.tabs.get(tabId);
     if (!tab) return { ok: false, message: 'That tab is already closed.' };
     const orderedIds = [...this.tabOrder];
     const closingIndex = orderedIds.indexOf(tabId);
-    if (tab.lastExternalUrl) {
+    if (remember && !tab.snapshot.taskSpaceId && tab.lastExternalUrl) {
       this.closedTabs.push({
         id: randomUUID(),
         url: tab.lastExternalUrl,
@@ -625,7 +821,11 @@ export class BrowserEngine {
       return { ok: true };
     }
     if (this.activeTabId === tabId) {
-      const remainingIds = [...this.tabOrder];
+      const remainingIds = this.tabOrder.filter((id) => !this.tabs.get(id)?.snapshot.taskSpaceId);
+      if (remainingIds.length === 0) {
+        this.createTab();
+        return { ok: true };
+      }
       this.activateTab(remainingIds[Math.min(closingIndex, remainingIds.length - 1)]!);
     } else {
       this.emitSnapshot();
@@ -1028,12 +1228,57 @@ function isVisualSelectionCapture(value: unknown): value is {
 }
 
 function agentActionTarget(action: BrowserAgentAction): string {
-  if ('selector' in action) return action.selector;
+  if ('ref' in action && action.ref) return action.ref;
+  if ('selector' in action && action.selector) return action.selector;
   if ('url' in action) return action.url;
   if ('text' in action) return action.text;
   if ('deltaY' in action) return `${action.deltaY}px`;
   if ('milliseconds' in action) return `${action.milliseconds}ms`;
   return 'visible page';
+}
+
+interface CdpAxNode {
+  ignored?: boolean;
+  backendDOMNodeId?: number;
+  frameId?: string;
+  role?: { value?: unknown };
+  name?: { value?: unknown };
+  properties?: Array<{ name: string; value?: { value?: unknown } }>;
+}
+
+const SEMANTIC_ROLES = new Set([
+  'button', 'link', 'textbox', 'searchbox', 'combobox', 'checkbox', 'radio', 'switch', 'tab',
+  'menuitem', 'menuitemcheckbox', 'menuitemradio', 'option', 'heading', 'listitem', 'cell',
+  'rowheader', 'columnheader', 'statictext', 'paragraph', 'article', 'region', 'dialog', 'alert',
+]);
+
+function isUsefulAxNode(node: CdpAxNode): boolean {
+  if (node.ignored || !node.backendDOMNodeId) return false;
+  const role = String(node.role?.value ?? '').toLowerCase();
+  const name = String(node.name?.value ?? '').trim();
+  return SEMANTIC_ROLES.has(role) && (name.length > 0 || !['statictext', 'paragraph', 'heading', 'listitem'].includes(role));
+}
+
+function axProperty(node: CdpAxNode, name: string): unknown {
+  return node.properties?.find((property) => property.name === name)?.value?.value;
+}
+
+function attributeMap(values: string[]): Record<string, string> {
+  const attributes: Record<string, string> = {};
+  for (let index = 0; index + 1 < values.length; index += 2) attributes[values[index]!.toLowerCase()] = values[index + 1]!;
+  return attributes;
+}
+
+function isCredentialDescriptor(value: string): boolean {
+  return /password|passkey|credential|one[-_ ]?time|otp|verification[-_ ]?code/i.test(value);
+}
+
+function safeLocator(attributes: Record<string, string>, role: string, name: string): { locator?: string } {
+  if (attributes['data-testid']) return { locator: `[data-testid=${JSON.stringify(attributes['data-testid'])}]` };
+  if (attributes.id) return { locator: `#${attributes.id.replace(/[^a-zA-Z0-9_-]/g, '')}` };
+  if (attributes['aria-label']) return { locator: `[aria-label=${JSON.stringify(attributes['aria-label'].slice(0, 160))}]` };
+  if (name && ['button', 'link', 'textbox', 'checkbox', 'radio', 'option'].includes(role)) return { locator: `role=${role};name=${name.slice(0, 160)}` };
+  return {};
 }
 
 const READ_VISIBLE_PAGE_SCRIPT = `(() => {

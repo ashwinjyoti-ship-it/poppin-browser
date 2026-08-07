@@ -213,22 +213,38 @@ describe('packaged browser workflow', () => {
     await expect.poll(() => exactPageInfo(application!, `${origin}/agent`)).toMatchObject({ title: 'Browser agent fixture' });
     const agentTabId = await shell.evaluate(async () => (await window.poppinBrowser.getSnapshot()).activeTabId);
     expect(await shell.evaluate((tabId) => window.poppinBrowserAgent.command({ type: 'start', taskId: 'smoke-browser-task', tabIds: [tabId] }), agentTabId)).toMatchObject({ ok: true });
-    const readResult = await shell.evaluate((tabId) => window.poppinBrowserAgent.command({ type: 'act', tabId, action: { type: 'read' } }), agentTabId);
-    expect(readResult).toMatchObject({ ok: true, data: expect.stringContaining('[data-poppin-agent-id=') });
-    expect(await shell.evaluate((tabId) => window.poppinBrowserAgent.command({ type: 'act', tabId, action: { type: 'type', selector: '#draft', text: 'A saved reply' } }), agentTabId)).toMatchObject({ ok: true });
-    expect(await shell.evaluate((tabId) => window.poppinBrowserAgent.command({ type: 'act', tabId, action: { type: 'click', selector: '#save' } }), agentTabId)).toMatchObject({ ok: true });
+    const agentScope = await shell.evaluate(async () => {
+      const snapshot = await window.poppinBrowserAgent.getSnapshot();
+      return { taskSpaceId: snapshot.taskSpace!.id, tabId: snapshot.taskSpace!.tabIds[0]! };
+    });
+    const readResult = await shell.evaluate((scope) => window.poppinBrowserAgent.command({ type: 'act', ...scope, action: { type: 'read' } }), agentScope);
+    expect(readResult).toMatchObject({ ok: true, data: expect.stringContaining('"snapshotId"') });
+    const firstSemantic = JSON.parse(readResult.data!) as { snapshotId: string; nodes: Array<{ ref: string; role: string; locator?: string }> };
+    const draftRef = firstSemantic.nodes.find((node) => node.locator === '#draft' || node.role === 'textbox')?.ref;
+    expect(draftRef).toBeTruthy();
+    expect(await shell.evaluate(({ scope, snapshotId, ref }) => window.poppinBrowserAgent.command({ type: 'act', ...scope, action: { type: 'type', snapshotId, ref, text: 'A saved reply' } }), { scope: agentScope, snapshotId: firstSemantic.snapshotId, ref: draftRef! })).toMatchObject({ ok: true });
+    const secondRead = await shell.evaluate((scope) => window.poppinBrowserAgent.command({ type: 'act', ...scope, action: { type: 'read' } }), agentScope);
+    const secondSemantic = JSON.parse(secondRead.data!) as { snapshotId: string; nodes: Array<{ ref: string; name: string; locator?: string }> };
+    const saveRef = secondSemantic.nodes.find((node) => node.locator === '#save' || /^save$/i.test(node.name))?.ref;
+    expect(saveRef).toBeTruthy();
+    expect(await shell.evaluate(({ scope, snapshotId, ref }) => window.poppinBrowserAgent.command({ type: 'act', ...scope, action: { type: 'click', snapshotId, ref } }), { scope: agentScope, snapshotId: secondSemantic.snapshotId, ref: saveRef! })).toMatchObject({ ok: true });
     await expect.poll(() => application!.evaluate(async ({ webContents }, targetUrl) => {
-      const contents = webContents.getAllWebContents().find((candidate) => candidate.getURL() === targetUrl);
-      return contents?.executeJavaScript(`({ draft: document.querySelector('#draft')?.value, saved: document.body.dataset.saved })`);
-    }, `${origin}/agent`)).toEqual({ draft: 'A saved reply', saved: 'true' });
-    expect(await shell.evaluate((tabId) => window.poppinBrowserAgent.command({ type: 'act', tabId, action: { type: 'click', selector: '#send' } }), agentTabId)).toEqual({ ok: false, message: 'Approval required.' });
+      const candidates = webContents.getAllWebContents().filter((candidate) => candidate.getURL() === targetUrl);
+      return await Promise.all(candidates.map((contents) => contents.executeJavaScript(`({ draft: document.querySelector('#draft')?.value, saved: document.body.dataset.saved })`)));
+    }, `${origin}/agent`)).toContainEqual({ draft: 'A saved reply', saved: 'true' });
+    const thirdRead = await shell.evaluate((scope) => window.poppinBrowserAgent.command({ type: 'act', ...scope, action: { type: 'read' } }), agentScope);
+    const thirdSemantic = JSON.parse(thirdRead.data!) as { snapshotId: string; nodes: Array<{ ref: string; name: string; locator?: string }> };
+    const sendRef = thirdSemantic.nodes.find((node) => node.locator === '#send' || /^send$/i.test(node.name))?.ref;
+    expect(sendRef).toBeTruthy();
+    expect(await shell.evaluate(({ scope, snapshotId, ref }) => window.poppinBrowserAgent.command({ type: 'act', ...scope, action: { type: 'click', snapshotId, ref } }), { scope: agentScope, snapshotId: thirdSemantic.snapshotId, ref: sendRef! })).toEqual({ ok: false, message: 'Approval required.' });
     await expect.poll(() => shell.getByLabel('Browser action approval required').isVisible()).toBe(true);
     await shell.getByLabel('Browser action approval required').getByRole('button', { name: 'Reject' }).click();
     await expect.poll(() => application!.evaluate(async ({ webContents }, targetUrl) => {
-      const contents = webContents.getAllWebContents().find((candidate) => candidate.getURL() === targetUrl);
-      return contents?.executeJavaScript('document.body.dataset.sent || null');
-    }, `${origin}/agent`)).toBeNull();
+      const candidates = webContents.getAllWebContents().filter((candidate) => candidate.getURL() === targetUrl);
+      return await Promise.all(candidates.map((contents) => contents.executeJavaScript('document.body.dataset.sent || null')));
+    }, `${origin}/agent`)).not.toContain('true');
     expect(await shell.evaluate(() => window.poppinBrowserAgent.command({ type: 'stop' }))).toMatchObject({ ok: true });
+    expect(await shell.evaluate(() => window.poppinBrowserAgent.command({ type: 'closeTaskTabs' }))).toMatchObject({ ok: true });
 
     await address.fill(`${origin}/client-redirect`);
     await address.press('Enter');
