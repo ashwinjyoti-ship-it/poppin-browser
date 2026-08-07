@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -57,6 +57,24 @@ describe('browser chrome', () => {
     expect(onActivate).toHaveBeenCalledWith(TAB.id);
     expect(onClose).toHaveBeenCalledWith(TAB.id);
     expect(onCreate).toHaveBeenCalledOnce();
+  });
+
+  it('keeps the globe fallback when a tab favicon cannot load', () => {
+    const { container } = render(
+      <TabStrip
+        tabs={[{ ...TAB, faviconUrl: 'https://example.com/missing-favicon.ico' }]}
+        activeTabId={TAB.id}
+        onActivate={vi.fn()}
+        onClose={vi.fn()}
+        onCreate={vi.fn()}
+      />,
+    );
+
+    const favicon = container.querySelector<HTMLImageElement>('.tab-favicon');
+    expect(favicon).not.toBeNull();
+    fireEvent.error(favicon!);
+    expect(favicon).toHaveAttribute('hidden');
+    expect(container.querySelector('.tab-icon svg')).not.toBeNull();
   });
 
   it('reflects navigation availability and submits the address form', async () => {

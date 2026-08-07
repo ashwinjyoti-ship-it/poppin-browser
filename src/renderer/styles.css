@@ -254,8 +254,8 @@ button { color: inherit; }
 }
 .tab-active:hover { transform: translateY(-3px); }
 .tab-active::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: var(--amber-strong); }
-.tab-icon { display: grid; place-items: center; width: 19px; height: 19px; color: #9b6b32; }
-.tab-icon img { display: block; width: 18px; height: 18px; border-radius: 4px; object-fit: contain; }
+.tab-icon { position: relative; display: grid; place-items: center; width: 19px; height: 19px; color: #9b6b32; }
+.tab-favicon { position: absolute; inset: 0; display: block; width: 18px; height: 18px; border-radius: 4px; background: var(--surface); object-fit: contain; }
 .tab-title { overflow: hidden; font-size: 12px; font-weight: 570; text-overflow: ellipsis; white-space: nowrap; }
 .tab-close { display: grid; place-items: center; width: 20px; height: 20px; padding: 0; border: 0; border-radius: 7px; color: inherit; background: transparent; opacity: .55; }
 .tab-close:hover, .tab-close:focus-visible { background: rgba(88, 58, 30, .1); opacity: 1; outline: none; }
@@ -563,7 +563,7 @@ body.pane-is-resizing * { cursor: col-resize !important; user-select: none !impo
 }
 .chrome-compact .tab-title { font-size: 12px; }
 .chrome-compact .tab-icon,
-.chrome-compact .tab-icon img { width: 17px; height: 17px; }
+.chrome-compact .tab-favicon { width: 17px; height: 17px; }
 .chrome-compact .tab-close { width: 20px; height: 20px; }
 .chrome-compact .tab-active,
 .chrome-compact .tab-active:hover { transform: translateY(-2px); }
@@ -598,7 +598,7 @@ body.pane-is-resizing * { cursor: col-resize !important; user-select: none !impo
 }
 .chrome-dense .tab-title { font-size: 11px; }
 .chrome-dense .tab-icon,
-.chrome-dense .tab-icon img { width: 16px; height: 16px; }
+.chrome-dense .tab-favicon { width: 16px; height: 16px; }
 .chrome-dense .tab-close { width: 18px; height: 18px; }
 .chrome-dense .tab-active,
 .chrome-dense .tab-active:hover { transform: translateY(-1px); }

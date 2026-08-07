@@ -32,7 +32,8 @@ export function TabStrip({ tabs, activeTabId, onActivate, onClose, onCreate }: T
               }}
             >
               <span className="tab-icon" aria-hidden="true">
-                {tab.faviconUrl ? <img src={tab.faviconUrl} alt="" /> : <Globe2 size={15} />}
+                <Globe2 size={15} />
+                {tab.faviconUrl ? <img className="tab-favicon" src={tab.faviconUrl} alt="" onError={(event) => { event.currentTarget.hidden = true; }} /> : null}
               </span>
               <span className="tab-title">{tab.title || 'Untitled'}</span>
               {tab.isLoading ? <span className="tab-loading" aria-label="Loading" /> : null}

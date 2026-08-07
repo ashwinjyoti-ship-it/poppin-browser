@@ -16,7 +16,10 @@ const config: ForgeConfig = {
   },
   makers: [
     new MakerZIP({}, ['darwin']),
-    new MakerDMG({ format: 'ULFO' }),
+    new MakerDMG({
+      format: 'ULFO',
+      icon: './src/renderer/assets/poppin-app-icon.icns',
+    }),
   ],
   plugins: [
     new WebpackPlugin({
