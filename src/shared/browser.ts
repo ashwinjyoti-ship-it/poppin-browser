@@ -25,6 +25,7 @@ export interface BrowserTabSnapshot {
 export interface BrowserSnapshot {
   tabs: BrowserTabSnapshot[];
   activeTabId: string;
+  isFullScreen: boolean;
 }
 
 export type BrowserCommand =

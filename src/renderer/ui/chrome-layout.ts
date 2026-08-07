@@ -16,3 +16,10 @@ export function getChromeLayout(viewportWidth: number, viewportHeight: number): 
   if (viewportWidth <= 1440 || viewportHeight <= 980) return CHROME_LAYOUTS.compact;
   return CHROME_LAYOUTS.roomy;
 }
+
+export function getTitlebarLeftInset(density: ChromeDensity, isFullScreen: boolean): number {
+  if (isFullScreen) return density === 'roomy' ? 16 : 12;
+  if (density === 'roomy') return 82;
+  if (density === 'compact') return 80;
+  return 76;
+}

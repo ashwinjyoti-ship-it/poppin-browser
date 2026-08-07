@@ -11,7 +11,7 @@ import { WorkspacePane } from './WorkspacePane';
 import { ContextPane } from './ContextPane';
 import { CommandBar } from './CommandBar';
 import { PaneResizer } from './PaneResizer';
-import { getChromeLayout } from './chrome-layout';
+import { getChromeLayout, getTitlebarLeftInset } from './chrome-layout';
 import { issueForCommand, visibleAddressIssue, type AddressIssue } from './address-issue';
 import {
   clampResizedPaneWidth,
@@ -22,7 +22,7 @@ import {
   type PaneSide,
 } from './pane-layout';
 
-const EMPTY_SNAPSHOT: BrowserSnapshot = { tabs: [], activeTabId: '' };
+const EMPTY_SNAPSHOT: BrowserSnapshot = { tabs: [], activeTabId: '', isFullScreen: false };
 const EMPTY_WORKSPACE: WorkspaceSnapshot = { workspace: null, documents: [], tabContexts: [], project: null };
 const EMPTY_TASK: TaskSnapshot = { connection: { state: 'checking', message: 'Connecting to Codex…', accountLabel: null, models: [] }, task: null };
 
@@ -47,6 +47,7 @@ export function App() {
   const paneWidths = normalizePaneWidths(preferredPaneWidths, viewport.width);
   const paneStyle = {
     '--chrome-height': `${chromeLayout.height}px`,
+    '--titlebar-left-inset': `${getTitlebarLeftInset(chromeLayout.density, snapshot.isFullScreen)}px`,
     '--workspace-pane-width': `${paneWidths.left}px`,
     '--context-pane-width': `${paneWidths.right}px`,
   } as CSSProperties;
@@ -147,7 +148,7 @@ export function App() {
   };
 
   return (
-    <main className={`app-shell chrome-${chromeLayout.density} ${commandCollapsed ? 'command-is-collapsed' : ''}`} style={paneStyle}>
+    <main className={`app-shell chrome-${chromeLayout.density} ${snapshot.isFullScreen ? 'window-fullscreen' : 'window-windowed'} ${commandCollapsed ? 'command-is-collapsed' : ''}`} style={paneStyle}>
       <header className="browser-chrome">
         <div className="top-row">
           <Brand />

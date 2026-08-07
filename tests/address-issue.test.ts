@@ -16,7 +16,7 @@ const GOOGLE_TAB: BrowserTabSnapshot = {
 
 describe('address issue scope', () => {
   it('shows a command failure only on the tab and URL that produced it', () => {
-    const snapshot: BrowserSnapshot = { tabs: [GOOGLE_TAB], activeTabId: GOOGLE_TAB.id };
+    const snapshot: BrowserSnapshot = { tabs: [GOOGLE_TAB], activeTabId: GOOGLE_TAB.id, isFullScreen: false };
     const issue = issueForCommand(
       { type: 'showGoogleSignInAlternatives', tabId: GOOGLE_TAB.id },
       'Choose “Try another way” directly on Google’s page.',
