@@ -77,6 +77,25 @@ async function setup() {
 }
 
 describe('task engine', () => {
+  it('restores a finished turn at the approve-or-revise gate', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'poppin-task-restore-'));
+    const databasePath = path.join(directory, 'poppin.sqlite');
+    const workspaceStore = new WorkspaceStore(databasePath);
+    const taskStore = new TaskStore(databasePath);
+    const now = new Date().toISOString();
+    taskStore.save({
+      state: 'Needs Approval', prompt: 'Review me', model: 'gpt-test', reasoningEffort: 'high',
+      threadId: 'thread-1', turnId: 'turn-1', baselineCommit: 'a'.repeat(40), progress: [],
+      pendingApproval: null, result: 'Done', diff: 'diff', error: null, createdAt: now, updatedAt: now,
+    });
+    const window = { isDestroyed: () => false, webContents: { isDestroyed: () => false, send: () => undefined } };
+    const engine = new TaskEngine(window as unknown as Electron.BrowserWindow, taskStore, workspaceStore, new GitEngine());
+    expect(engine.getSnapshot().task).toMatchObject({ state: 'Needs Approval', pendingApproval: null, result: 'Done' });
+    await engine.close();
+    taskStore.close();
+    workspaceStore.close();
+  });
+
   it('starts only from a clean baseline and clearly labels selected context as untrusted', async () => {
     const { engine, fake, taskStore, workspaceStore } = await setup();
     const result = await engine.execute({ type: 'startTask', prompt: 'Update the fixture', model: 'gpt-test', reasoningEffort: 'high' });

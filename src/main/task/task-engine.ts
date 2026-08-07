@@ -47,7 +47,7 @@ export class TaskEngine {
     private readonly options: TaskEngineOptions = {},
   ) {
     this.task = store.load();
-    if (this.task && (this.task.state === 'Running' || this.task.state === 'Needs Approval')) {
+    if (this.task && (this.task.state === 'Running' || (this.task.state === 'Needs Approval' && this.task.pendingApproval))) {
       this.task = {
         ...this.task,
         state: 'Failed',
