@@ -1,0 +1,15 @@
+---
+description: Poppin Browser architecture, product boundaries, and verification rules
+alwaysApply: true
+---
+
+Read `AGENTS.md`, `docs/DEVELOPMENT_GUIDE.md`, and `POPPIN_MVP_ROADMAP.md` before working. The roadmap is the product source of truth.
+
+- Poppin is a local-first, browser-first macOS Electron app—not a chat app or IDE.
+- `src/main` owns engines and Electron; `src/shared` owns typed IPC contracts; `src/preload/index.ts` is the only bridge; `src/renderer` is React UI only.
+- Remote pages must remain sandboxed and unprivileged. Never widen the renderer or website privilege boundary.
+- Context is explicit; automation is visible, tab-scoped, and approval-gated; one workspace and one active task are deliberate constraints.
+- Never access or import passwords, passkeys, cookies, tokens, Keychain, Apple Passwords, or another browser’s session.
+- Trace a complete change through shared contract → preload → engine → renderer → tests. Keep the work small and add regression coverage.
+- Run `npm run lint`, `npm run typecheck`, and `npm test`. For Electron/browser/visual work, also run the Node 22 packaged smoke flow in the development guide.
+- Do not push, create/merge a PR, or replace the stable DMG unless the user explicitly asks.
