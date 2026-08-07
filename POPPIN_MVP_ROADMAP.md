@@ -65,11 +65,15 @@ Support connecting an existing directory, cloning a repository, or creating a ne
 
 ## Phase 5 — Codex Command Bar
 
+**Status:** Implemented in Checkpoint B; awaiting hands-on approval.
+
 **Provisional outcome:** Submit one explicit prompt with visible provider settings and selected context.
 
 The collapsible bottom bar exposes Codex as the only provider plus explicit model, reasoning, prompt, and send controls. It does not become a chat surface and does not route models automatically.
 
 ## Phase 6 — One Task
+
+**Status:** Implemented in Checkpoint B; awaiting hands-on approval.
 
 **Provisional outcome:** Follow and control one provider task from submission through review.
 
@@ -96,5 +100,7 @@ Launch the configured preview process, open its URL in the centre browser, show 
 - **2026-08-06:** Daily-use testing approves Phase 1 after successful YouTube playback and Google sign-in; a false redirect warning is fixed separately.
 - **2026-08-06:** Remaining work is grouped into three manual checkpoints: A (Phases 2–4), B (Phases 5–6), and C (Phases 7–8), while each capability retains small commits.
 - **2026-08-06:** Checkpoint A freezes selected tab and document content so the right pane is the exact bounded context payload; Git operations use argument-safe Git CLI execution without a shell.
+- **2026-08-07:** Checkpoint B uses the locally installed Codex app-server and its existing account rather than embedding an API key. Tasks require a clean Git baseline, run inside the connected project with workspace-write sandboxing, surface approvals, and finish at an explicit approve-or-revise gate.
+- **2026-08-07:** Apple Passwords remains outside the credential boundary. Electron cannot load Apple's arbitrary browser extension, and direct Keychain password access is rejected. Signed, device-bound Touch ID WebAuthn is documented as a separate future browser capability.
 
 Future decisions should be added here only after an approved phase boundary or meaningful user feedback.
