@@ -15,15 +15,21 @@ const compiledMainPath = path.join(root, '.webpack/arm64/main/index.js');
 const outputPath = path.join(root, 'docs/screenshots/checkpoint-a-workspace-context.png');
 const userDataPath = await mkdtemp(path.join(tmpdir(), 'poppin-checkpoint-a-'));
 
-const server = createServer((_request, response) => {
+const server = createServer((request, response) => {
+  const route = request.url ?? '/';
+  const page = route === '/reference'
+    ? { title: 'Design reference', eyebrow: 'Design', heading: 'Warm, spacious, deliberate.', body: 'The browser chrome stays quiet so the work remains central.' }
+    : route === '/requirements'
+      ? { title: 'Requirements', eyebrow: 'Brief', heading: 'One workflow. Nothing else.', body: 'Browse, collect context, connect the project, and hand the result to Codex.' }
+      : { title: 'Poppin launch brief', eyebrow: 'Checkpoint A', heading: 'Browser first. Context visible.', body: 'This page is selected explicitly and frozen into the workspace context before anything is sent to Codex.' };
   response.setHeader('Content-Type', 'text/html; charset=utf-8');
-  response.end(`<!doctype html><html><head><title>Poppin launch brief</title><style>
+  response.end(`<!doctype html><html><head><title>${page.title}</title><style>
     body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #fffaf2; color: #2d251e; font-family: -apple-system, sans-serif; }
     main { width: min(620px, 80vw); padding: 56px; border: 1px solid #eadfce; border-radius: 24px; background: white; box-shadow: 0 20px 60px rgba(70, 45, 20, .09); }
     span { color: #d57610; font-size: 12px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
     h1 { margin: 16px 0 12px; font-size: 42px; letter-spacing: -.04em; }
     p { color: #756a60; font-size: 17px; line-height: 1.6; }
-  </style></head><body><main><span>Checkpoint A</span><h1>Browser first. Context visible.</h1><p>This page is selected explicitly and frozen into the workspace context before anything is sent to Codex.</p></main></body></html>`);
+  </style></head><body><main><span>${page.eyebrow}</span><h1>${page.heading}</h1><p>${page.body}</p></main></body></html>`);
 });
 await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
 const address = server.address();
@@ -47,6 +53,14 @@ try {
   await checkbox.waitFor({ timeout: 10_000 });
   await checkbox.click();
   await shell.getByLabel('Context').getByText('Poppin launch brief', { exact: true }).waitFor({ timeout: 10_000 });
+  await shell.getByRole('button', { name: 'New tab' }).click();
+  await addressInput.fill(`${origin}/reference`);
+  await addressInput.press('Enter');
+  await waitForPageTitle(application, `${origin}/reference`, 'Design reference');
+  await shell.getByRole('button', { name: 'New tab' }).click();
+  await addressInput.fill(`${origin}/requirements`);
+  await addressInput.press('Enter');
+  await waitForPageTitle(application, `${origin}/requirements`, 'Requirements');
   await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.focus());
   await delay(500);
 

@@ -24,7 +24,7 @@ import { displayUrl, NEW_TAB_URL, normalizeAddressInput } from './url-input';
 import type { CapturedTabContext } from '../../shared/workspace';
 
 const PAGE_MARGIN = 12;
-const CHROME_HEIGHT = 140;
+const CHROME_HEIGHT = 152;
 const SAVE_DELAY_MS = 250;
 const MAX_LAYOUT_INSET = 520;
 const MAX_TAB_CONTEXT_CHARACTERS = 60_000;
@@ -242,8 +242,8 @@ export class BrowserEngine {
       this.syncNavigationState(tab);
       this.updateTab(tab, { isLoading: false });
     });
-    contents.on('did-navigate', (_event, url) => this.handleNavigation(tab, url));
-    contents.on('did-navigate-in-page', (_event, url) => this.handleNavigation(tab, url));
+    contents.on('did-navigate', (_event, url) => this.handleNavigation(tab, url, true));
+    contents.on('did-navigate-in-page', (_event, url) => this.handleNavigation(tab, url, false));
     contents.on('page-title-updated', (_event, title) => {
       if (!contents.getURL().startsWith('poppin://error')) this.updateTab(tab, { title: title || 'Untitled' });
     });
@@ -273,7 +273,7 @@ export class BrowserEngine {
     });
   }
 
-  private handleNavigation(tab: BrowserTabRecord, url: string): void {
+  private handleNavigation(tab: BrowserTabRecord, url: string, resetFavicon: boolean): void {
     if (url.startsWith('poppin://error')) return;
     const isNewTab = url.startsWith('poppin://new-tab');
     tab.lastExternalUrl = isNewTab ? NEW_TAB_URL : url;
@@ -282,6 +282,7 @@ export class BrowserEngine {
       url: displayUrl(url),
       title: isNewTab ? 'New Tab' : tab.snapshot.title,
       failure: null,
+      ...(resetFavicon ? { faviconUrl: null } : {}),
     });
     this.scheduleSave();
   }
