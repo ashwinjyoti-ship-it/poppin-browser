@@ -81,15 +81,45 @@ Supported states are Running, Needs Approval, Completed, Failed, Cancelled, and 
 
 ## Phase 7 — Visual Selection
 
+**Status:** Planned only. Do not implement until the user explicitly approves Phases 7–8.
+
 **Provisional outcome:** Select an element in a localhost application as the task target.
 
 Capture the selected element's HTML, relevant CSS, DOM context, screenshot, and bounding box. The resulting target is visible inside the context package before submission.
+
+### Controlled browser use
+
+Phase 7 also adds a controlled way for the active Codex task to use the page already open in Poppin. This is not unrestricted computer control.
+
+- The user explicitly starts browser use for the active task and can pause or stop it at any time.
+- The task can inspect and act only in the selected Poppin tab or a user-approved tab opened from it. It cannot silently switch to unrelated tabs, workspaces, profiles, or native applications.
+- The browser surface stays visible while the task is operating. Poppin shows the current target tab, requested action, and an append-only action log.
+- Navigation, typing, clicking, scrolling, and reading rendered page text are allowed only for the active task's stated goal.
+- Actions with material external effects—including sign-in, password or passkey prompts, payments, purchases, submissions, publishing, deletion, downloads, permission prompts, and sending messages—pause for explicit user approval.
+- The user may take over the tab at any time. Taking over pauses browser use until the user explicitly resumes it.
+
+### Credential and privacy boundary
+
+- Browser use must never read, copy, scrape, export, or store passwords, passkeys, Keychain records, cookies, or authenticated-session tokens.
+- It must not import authentication from another browser or native application.
+- Login pages may be navigated to, but credential entry and passkey/biometric prompts remain user-operated and require an approval pause.
+- Task context remains explicit: only user-selected page content, visual-selection artifacts, and approved action-log records can be sent to Codex.
+
+### Architecture and verification
+
+`BrowserAgentEngine` will be a reusable main-process engine behind a narrow IPC contract. It owns the task-scoped browser-use lifecycle, validates the target tab and allowed actions, records actions, and tears down access when the task ends. It must use the existing `BrowserEngine` tab model rather than creating a hidden browser, a second profile, or a second workspace.
+
+The renderer will expose a small task control surface in the existing right pane: start, pause, resume, stop, current action, approval request, and action log. It must not become a chat surface or permit more than one task.
+
+Verification before release requires unit coverage for tab scope, pause/stop behavior, approval gates, and credential-boundary rejection; integration coverage proving that browser use cannot access an unapproved tab or privileged Electron/Node APIs; a localhost fixture covering visual selection, navigation, typing, click, explicit approval, user takeover, and task teardown; and hands-on local-site testing before any general web browsing is enabled.
 
 ## Phase 8 — In-Browser Preview and Review
 
 **Provisional outcome:** See Codex's project modification running inside the centre browser and approve or revise it.
 
 Launch the configured preview process, open its URL in the centre browser, show the code diff in the right pane, and preserve the browser as the main review surface. Acceptance ends the workflow; revision sends a scoped follow-up against the same task.
+
+Phase 8 may consume Phase 7's selected-element and browser-use records, but it does not expand browser use into unrestricted computer control.
 
 ## Decision Log
 
@@ -105,5 +135,6 @@ Launch the configured preview process, open its URL in the centre browser, show 
 - **2026-08-07:** Hands-on testing adds persistent resizing for both workspace panes and a Google Accounts sign-in fallback. Poppin never imports authenticated sessions from other browsers or applications; it helps the user choose Google's alternate method and then preserves the successful login in its own browser session.
 - **2026-08-07:** Laptop testing makes browser chrome responsive to usable window dimensions. Roomy, compact, and dense modes keep the native page viewport aligned while reducing logo, toolbar, and tab height on constrained screens.
 - **2026-08-07:** Browser feedback adds website fullscreen support, compact tabs at every window size, and standard `http`/`https` registration so the user can choose Poppin as the macOS default browser.
+- **2026-08-07:** Future Phase 7 records controlled browser use for the one active task: explicit start/pause/stop, tab-scoped actions, visible logs, user takeover, approval gates for consequential actions, and a permanent credential boundary. The roadmap is the sole source of truth for this planned work.
 
 Future decisions should be added here only after an approved phase boundary or meaningful user feedback.
