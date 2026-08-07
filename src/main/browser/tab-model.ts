@@ -1,10 +1,10 @@
 import { randomUUID } from 'node:crypto';
 
 import type { PersistedTabState } from '../../shared/browser';
-import { NEW_TAB_URL, normalizeAddressInput } from './url-input';
+import { NEW_TAB_URL, normalizeTabInput } from './url-input';
 
 export function createRestorableTab(input?: string, id: string = randomUUID()): PersistedTabState {
-  const normalized = normalizeAddressInput(input ?? '');
+  const normalized = normalizeTabInput(input ?? '');
   return {
     id,
     url: normalized.kind === 'invalid' ? NEW_TAB_URL : normalized.url,

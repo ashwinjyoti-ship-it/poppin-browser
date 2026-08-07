@@ -26,9 +26,9 @@ import {
   type PersistedTabState,
   type WindowState,
 } from '../../shared/browser';
-import { errorPageUrl, TASK_RESULT_URL } from './internal-pages';
+import { errorPageUrl } from './internal-pages';
 import { BrowserStateStore } from './state-store';
-import { displayUrl, NEW_TAB_URL, normalizeAddressInput } from './url-input';
+import { displayUrl, NEW_TAB_URL, normalizeAddressInput, normalizeTabInput, TASK_RESULT_URL } from './url-input';
 import type { CapturedTabContext } from '../../shared/workspace';
 import type { VisualSelectionSnapshot } from '../../shared/workspace';
 import { HtmlFullscreenCoordinator, type HtmlFullscreenTransition } from './html-fullscreen';
@@ -419,7 +419,7 @@ export class BrowserEngine {
     activate = true,
     position: 'preferred' | 'end' = 'preferred',
   ): string {
-    const normalized = normalizeAddressInput(input, this.settings.searchEngine);
+    const normalized = normalizeTabInput(input, this.settings.searchEngine);
     const initialUrl = normalized.kind === 'invalid' ? NEW_TAB_URL : normalized.url;
     const view = new WebContentsView({
       webPreferences: {

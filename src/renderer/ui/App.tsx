@@ -13,6 +13,7 @@ import { CommandBar } from './CommandBar';
 import { PaneResizer } from './PaneResizer';
 import { getChromeLayout, getTitlebarLeftInset } from './chrome-layout';
 import { issueForCommand, visibleAddressIssue, type AddressIssue } from './address-issue';
+import { browserApprovalAttentionKey, taskAttentionKey } from './task-attention';
 import {
   clampResizedPaneWidth,
   getPaneWidthRange,
@@ -58,6 +59,11 @@ export function App() {
     '--workspace-pane-width': `${paneWidths.left}px`,
     '--context-pane-width': `${paneWidths.right}px`,
   } as CSSProperties;
+  const taskAttention = taskAttentionKey(taskSnapshot);
+  const browserApprovalAttention = browserApprovalAttentionKey(browserAgentSnapshot);
+  const attentionRequired = Boolean(taskAttention || browserApprovalAttention);
+  const visibleContextCollapsed = attentionRequired ? false : contextCollapsed;
+  const visibleContextSection: PaneSection = attentionRequired ? 'task' : contextSection;
 
   useEffect(() => {
     let mounted = true;
@@ -72,10 +78,6 @@ export function App() {
     const receiveTaskSnapshot = (nextSnapshot: TaskSnapshot) => {
       if (!mounted) return;
       setTaskSnapshot(nextSnapshot);
-      if (nextSnapshot.task?.pendingApproval || nextSnapshot.task?.state === 'Failed') {
-        setContextCollapsed(false);
-        setContextSection('task');
-      }
     };
     void window.poppinTask.getSnapshot().then((initialSnapshot) => {
       receiveTaskSnapshot(initialSnapshot);
@@ -84,10 +86,6 @@ export function App() {
     const receiveBrowserAgentSnapshot = (nextSnapshot: BrowserAgentSnapshot) => {
       if (!mounted) return;
       setBrowserAgentSnapshot(nextSnapshot);
-      if (nextSnapshot.pendingApproval) {
-        setContextCollapsed(false);
-        setContextSection('task');
-      }
     };
     void window.poppinBrowserAgent.getSnapshot().then(receiveBrowserAgentSnapshot);
     const unsubscribeBrowserAgent = window.poppinBrowserAgent.subscribe(receiveBrowserAgentSnapshot);
@@ -123,11 +121,11 @@ export function App() {
       type: 'setLayout',
       topInset: chromeLayout.height,
       leftInset: workspaceCollapsed ? 46 : paneWidths.left + 14,
-      rightInset: contextCollapsed ? 46 : paneWidths.right + 14,
-      ...(settingsOpen ? { rightInset: Math.max(contextCollapsed ? 46 : paneWidths.right + 14, 350) } : {}),
+      rightInset: visibleContextCollapsed ? 46 : paneWidths.right + 14,
+      ...(settingsOpen ? { rightInset: Math.max(visibleContextCollapsed ? 46 : paneWidths.right + 14, 350) } : {}),
       bottomInset: commandCollapsed ? 0 : 94,
     });
-  }, [chromeLayout.height, commandCollapsed, contextCollapsed, paneWidths.left, paneWidths.right, settingsOpen, workspaceCollapsed]);
+  }, [chromeLayout.height, commandCollapsed, paneWidths.left, paneWidths.right, settingsOpen, visibleContextCollapsed, workspaceCollapsed]);
 
   const resizePane = (side: PaneSide, requestedWidth: number) => {
     const otherSide = side === 'left' ? 'right' : 'left';
@@ -241,7 +239,7 @@ export function App() {
         onCommand={sendWorkspaceCommand}
       />
       <ContextPane
-        collapsed={contextCollapsed}
+        collapsed={visibleContextCollapsed}
         snapshot={workspaceSnapshot}
         taskSnapshot={taskSnapshot}
         onCollapseChange={setContextCollapsed}
@@ -256,7 +254,7 @@ export function App() {
         onOpenResult={() => { void sendCommand({ type: 'openTaskResult' }); }}
         browserAgentSnapshot={browserAgentSnapshot}
         onBrowserAgentCommand={sendBrowserAgentCommand}
-        section={contextSection}
+        section={visibleContextSection}
         onSectionChange={setContextSection}
       />
       {!workspaceCollapsed ? (
@@ -267,7 +265,7 @@ export function App() {
           onResize={(width) => resizePane('left', width)}
         />
       ) : null}
-      {!contextCollapsed ? (
+      {!visibleContextCollapsed ? (
         <PaneResizer
           side="right"
           width={paneWidths.right}
@@ -275,7 +273,7 @@ export function App() {
           onResize={(width) => resizePane('right', width)}
         />
       ) : null}
-      <div className={`browser-stage ${workspaceCollapsed ? 'workspace-collapsed' : ''} ${contextCollapsed ? 'context-collapsed' : ''}`} aria-hidden="true" />
+      <div className={`browser-stage ${workspaceCollapsed ? 'workspace-collapsed' : ''} ${visibleContextCollapsed ? 'context-collapsed' : ''}`} aria-hidden="true" />
       <CommandBar snapshot={taskSnapshot} workspace={workspaceSnapshot} collapsed={commandCollapsed} onCollapseChange={setCommandCollapsed} onCommand={sendTaskCommand} onBrowserAgentCommand={sendBrowserAgentCommand} />
     </main>
   );

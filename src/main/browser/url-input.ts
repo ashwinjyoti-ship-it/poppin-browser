@@ -1,4 +1,5 @@
 export const NEW_TAB_URL = 'poppin://new-tab/';
+export const TASK_RESULT_URL = 'poppin://task/current/result';
 
 const EXPLICIT_PROTOCOL = /^[a-z][a-z\d+.-]*:/i;
 const LOCALHOST = /^(localhost|127(?:\.\d{1,3}){3}|\[?::1\]?)(:\d+)?(?:\/|$)/i;
@@ -43,6 +44,13 @@ export function normalizeAddressInput(input: string, searchEngine: 'duckduckgo' 
       ? `https://www.google.com/search?q=${encodeURIComponent(value)}`
       : `https://duckduckgo.com/?q=${encodeURIComponent(value)}`,
   };
+}
+
+export function normalizeTabInput(input: string, searchEngine: 'duckduckgo' | 'google' = 'duckduckgo'): NormalizedInput {
+  const value = input.trim();
+  if (value === NEW_TAB_URL) return { kind: 'empty', url: NEW_TAB_URL };
+  if (value === TASK_RESULT_URL) return { kind: 'url', url: TASK_RESULT_URL };
+  return normalizeAddressInput(value, searchEngine);
 }
 
 function parseCandidate(value: string): NormalizedInput {

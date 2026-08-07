@@ -4,8 +4,6 @@ import { escapeHtml } from './safe-html';
 import type { TaskRecordSnapshot } from '../../shared/task';
 import type { WorkspaceSnapshot } from '../../shared/workspace';
 
-export const TASK_RESULT_URL = 'poppin://task/current/result';
-
 interface InternalPageData {
   getTask: () => TaskRecordSnapshot | null;
   getWorkspace: () => WorkspaceSnapshot | null;
