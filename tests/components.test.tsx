@@ -91,14 +91,16 @@ describe('browser chrome', () => {
     expect(container.querySelector('.tab-icon svg')).not.toBeNull();
   });
 
-  it('renders pinned tabs compactly and collapses named groups', async () => {
+  it('renders, renames, and collapses visually connected tab groups', async () => {
     const user = userEvent.setup();
     const onToggleGroup = vi.fn();
+    const onRenameGroup = vi.fn();
     render(
       <TabStrip
         tabs={[
           { ...TAB, pinned: true },
           { ...TAB, id: 'grouped', title: 'Grouped page', groupId: 'group-one' },
+          { ...TAB, id: 'grouped-two', title: 'Second grouped page', groupId: 'group-one' },
         ]}
         groups={[{ id: 'group-one', name: 'Research', color: 'blue', collapsed: false }]}
         activeTabId={TAB.id}
@@ -108,15 +110,51 @@ describe('browser chrome', () => {
         onReorder={vi.fn()}
         onShowTabMenu={vi.fn()}
         onToggleGroup={onToggleGroup}
-        onRenameGroup={vi.fn()}
+        onRenameGroup={onRenameGroup}
         onShowGroupMenu={vi.fn()}
       />,
     );
 
     expect(screen.getByRole('tab', { name: /poppin, pinned/i })).toBeVisible();
     expect(screen.queryByRole('button', { name: /close poppin/i })).not.toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: /research tab group/i }));
+    expect(screen.getByRole('group', { name: /research tab group, 2 tabs/i })).toBeVisible();
+    expect(screen.getAllByRole('tab', { name: /research group/i })).toHaveLength(2);
+    await user.click(screen.getByRole('button', { name: /rename research tab group/i }));
+    const groupName = screen.getByRole('textbox', { name: /rename research tab group/i });
+    await user.clear(groupName);
+    await user.type(groupName, 'Launch{Enter}');
+    expect(onRenameGroup).toHaveBeenCalledWith('group-one', 'Launch');
+    await user.click(screen.getByRole('button', { name: /rename research tab group/i }));
+    await user.clear(screen.getByRole('textbox', { name: /rename research tab group/i }));
+    await user.type(screen.getByRole('textbox', { name: /rename research tab group/i }), 'Cancelled{Escape}');
+    expect(onRenameGroup).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByRole('button', { name: /collapse research tab group/i }));
     expect(onToggleGroup).toHaveBeenCalledWith('group-one');
+  });
+
+  it('keeps a collapsed group named and counted instead of rendering a blank chip', () => {
+    render(
+      <TabStrip
+        tabs={[
+          { ...TAB, id: 'grouped', title: 'Grouped page', groupId: 'group-one' },
+          { ...TAB, id: 'grouped-two', title: 'Second grouped page', groupId: 'group-one' },
+        ]}
+        groups={[{ id: 'group-one', name: 'Research', color: 'green', collapsed: true }]}
+        activeTabId="grouped"
+        onActivate={vi.fn()}
+        onClose={vi.fn()}
+        onCreate={vi.fn()}
+        onReorder={vi.fn()}
+        onShowTabMenu={vi.fn()}
+        onToggleGroup={vi.fn()}
+        onRenameGroup={vi.fn()}
+        onShowGroupMenu={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('group', { name: /research tab group, 2 tabs/i })).toHaveTextContent('Research2');
+    expect(screen.queryByRole('tab')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /expand research tab group/i })).toHaveAttribute('aria-expanded', 'false');
   });
 
   it('reflects navigation availability and submits the address form', async () => {

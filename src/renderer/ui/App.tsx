@@ -184,7 +184,7 @@ export function App() {
   };
 
   return (
-    <main className={`app-shell chrome-${chromeLayout.density} ${snapshot.isFullScreen ? 'window-fullscreen' : 'window-windowed'} ${commandCollapsed ? 'command-is-collapsed' : ''}`} style={paneStyle}>
+    <main className={`app-shell chrome-${chromeLayout.density} ${snapshot.isFullScreen ? 'window-fullscreen' : 'window-windowed'} ${commandCollapsed ? 'command-is-collapsed' : ''} ${settingsOpen ? 'settings-open' : ''}`} style={paneStyle}>
       <header className="browser-chrome">
         <div className="top-row">
           <Brand />

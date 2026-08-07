@@ -162,9 +162,21 @@ describe('packaged browser workflow', () => {
     await address.press('Enter');
     await expect.poll(() => pageInfo(application!, origin)).toMatchObject({ title: 'Local fixture' });
 
+    await shell.getByRole('button', { name: 'Collapse right pane' }).click();
+    const collapsedRightPane = shell.getByLabel('Right pane collapsed');
+    await expect.poll(() => collapsedRightPane.isVisible()).toBe(true);
     await shell.getByRole('button', { name: 'Browser settings' }).click();
+    const settingsPanel = shell.getByRole('complementary', { name: 'Browser settings' });
+    const railBox = await collapsedRightPane.boundingBox();
+    const settingsBox = await settingsPanel.boundingBox();
+    expect(railBox).not.toBeNull();
+    expect(settingsBox).not.toBeNull();
+    await expect.poll(() => shell.evaluate(({ x, y }) => {
+      return document.elementFromPoint(x, y)?.closest('.browser-settings-panel')?.getAttribute('aria-label') ?? null;
+    }, { x: railBox!.x + railBox!.width / 2, y: Math.max(railBox!.y + 10, settingsBox!.y + 10) })).toBe('Browser settings');
     await shell.getByLabel('Links open in').selectOption('same-tab');
     await shell.getByRole('button', { name: 'Close browser settings' }).click();
+    await shell.getByRole('button', { name: 'Open context and task pane' }).click();
     await application.evaluate(async ({ webContents }, prefix) => {
       const contents = webContents.getAllWebContents().find((candidate) => candidate.getURL().startsWith(prefix));
       await contents?.executeJavaScript("document.querySelector('#popup').click()");
@@ -203,6 +215,33 @@ describe('packaged browser workflow', () => {
     }, origin);
     await expect.poll(() => shell.getByRole('tab').count()).toBe(2);
     await expect.poll(() => pageInfo(application!, `${origin}/popup`)).toMatchObject({ title: 'Popup page' });
+
+    const groupedTabIds = await shell.evaluate(async () => {
+      const before = await window.poppinBrowser.getSnapshot();
+      const [first, second] = before.tabs;
+      if (!first || !second) throw new Error('Grouping fixture requires two tabs.');
+      await window.poppinBrowser.command({ type: 'createGroup', tabId: first.id });
+      const grouped = await window.poppinBrowser.getSnapshot();
+      const groupId = grouped.tabs.find((tab) => tab.id === first.id)?.groupId;
+      if (!groupId) throw new Error('Group was not created.');
+      await window.poppinBrowser.command({ type: 'moveToGroup', tabId: second.id, groupId });
+      await window.poppinBrowser.command({ type: 'setGroupColor', groupId, color: 'green' });
+      return [first.id, second.id];
+    });
+    await expect.poll(() => shell.getByRole('group', { name: /group 1 tab group, 2 tabs/i }).isVisible()).toBe(true);
+    await expect.poll(() => shell.locator('.tab-grouped-green').count()).toBe(2);
+    await shell.getByRole('button', { name: /rename group 1 tab group/i }).click();
+    const renameGroup = shell.getByRole('textbox', { name: /rename group 1 tab group/i });
+    await renameGroup.fill('Launch');
+    await renameGroup.press('Enter');
+    await shell.getByRole('button', { name: /collapse launch tab group/i }).click();
+    await expect.poll(() => shell.getByRole('group', { name: /launch tab group, 2 tabs/i }).isVisible()).toBe(true);
+    await expect.poll(() => shell.getByRole('tab').count()).toBe(0);
+    await shell.getByRole('button', { name: /expand launch tab group/i }).click();
+    await expect.poll(() => shell.getByRole('tab').count()).toBe(2);
+    await shell.evaluate(async (tabIds) => {
+      for (const tabId of tabIds) await window.poppinBrowser.command({ type: 'moveToGroup', tabId, groupId: null });
+    }, groupedTabIds);
 
     await shell.getByRole('tab').first().click();
     await address.fill(`${origin}/second`);

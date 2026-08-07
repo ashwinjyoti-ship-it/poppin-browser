@@ -1,5 +1,5 @@
-import { Globe2, Plus, TriangleAlert, X } from 'lucide-react';
-import { type DragEvent, useMemo, useState } from 'react';
+import { ChevronDown, ChevronRight, Globe2, Pencil, Plus, TriangleAlert, X } from 'lucide-react';
+import { type DragEvent, useMemo, useRef, useState } from 'react';
 
 import type { BrowserTabGroup, BrowserTabSnapshot } from '../../shared/browser';
 
@@ -31,18 +31,33 @@ export function TabStrip({
   onShowGroupMenu,
 }: TabStripProps) {
   const groupsById = useMemo(() => new Map(groups.map((group) => [group.id, group])), [groups]);
+  const tabCountByGroup = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const tab of tabs) if (tab.groupId) counts.set(tab.groupId, (counts.get(tab.groupId) ?? 0) + 1);
+    return counts;
+  }, [tabs]);
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
   const [groupName, setGroupName] = useState('');
+  const cancelRenameRef = useRef(false);
   const renderedGroups = new Set<string>();
 
   const startRename = (group: BrowserTabGroup) => {
+    cancelRenameRef.current = false;
     setEditingGroupId(group.id);
     setGroupName(group.name);
   };
 
   const finishRename = () => {
-    if (editingGroupId && groupName.trim()) onRenameGroup(editingGroupId, groupName);
+    if (!cancelRenameRef.current && editingGroupId && groupName.trim()) onRenameGroup(editingGroupId, groupName);
+    cancelRenameRef.current = false;
     setEditingGroupId(null);
+    setGroupName('');
+  };
+
+  const cancelRename = () => {
+    cancelRenameRef.current = true;
+    setEditingGroupId(null);
+    setGroupName('');
   };
 
   return (
@@ -60,41 +75,31 @@ export function TabStrip({
           if (group) renderedGroups.add(group.id);
           const hideTab = Boolean(group?.collapsed);
           const isActive = tab.id === activeTabId;
+          const groupClasses = group
+            ? ` tab-grouped tab-grouped-${group.color}`
+            : '';
           return [
             showGroup && group ? (
-              editingGroupId === group.id ? (
-                <form className={`tab-group tab-group-${group.color} tab-group-editing`} key={`group-${group.id}`} onSubmit={(event) => { event.preventDefault(); finishRename(); }}>
-                  <input
-                    aria-label="Tab group name"
-                    autoFocus
-                    value={groupName}
-                    maxLength={32}
-                    onChange={(event) => setGroupName(event.target.value)}
-                    onBlur={finishRename}
-                  />
-                </form>
-              ) : (
-                <button
-                  className={`tab-group tab-group-${group.color}`}
-                  key={`group-${group.id}`}
-                  type="button"
-                  aria-label={`${group.name} tab group`}
-                  aria-expanded={!group.collapsed}
-                  title="Click to collapse or expand. Double-click to rename."
-                  onClick={() => onToggleGroup(group.id)}
-                  onDoubleClick={() => startRename(group)}
-                  onContextMenu={(event) => { event.preventDefault(); onShowGroupMenu(group.id); }}
-                >
-                  <span />{group.name}
-                </button>
-              )
+              <TabGroupChip
+                key={`group-${group.id}`}
+                group={group}
+                count={tabCountByGroup.get(group.id) ?? 0}
+                editing={editingGroupId === group.id}
+                draftName={groupName}
+                onDraftNameChange={setGroupName}
+                onFinishRename={finishRename}
+                onCancelRename={cancelRename}
+                onStartRename={() => startRename(group)}
+                onToggle={() => onToggleGroup(group.id)}
+                onShowMenu={() => onShowGroupMenu(group.id)}
+              />
             ) : null,
             hideTab ? null : (
               <div
-                className={`tab ${isActive ? 'tab-active' : ''} ${tab.pinned ? 'tab-pinned' : ''}`}
+                className={`tab ${isActive ? 'tab-active' : ''} ${tab.pinned ? 'tab-pinned' : ''}${groupClasses}`}
                 key={tab.id}
                 role="tab"
-                aria-label={tab.pinned ? `${tab.title || 'Untitled'}, pinned` : undefined}
+                aria-label={tab.pinned ? `${tab.title || 'Untitled'}, pinned` : group ? `${tab.title || 'Untitled'}, ${group.name} group` : undefined}
                 aria-selected={isActive}
                 tabIndex={isActive ? 0 : -1}
                 title={tab.title || 'Untitled'}
@@ -140,6 +145,69 @@ export function TabStrip({
       </div>
       <button className="new-tab-button" type="button" aria-label="New tab" onClick={onCreate}>
         <Plus size={18} />
+      </button>
+    </div>
+  );
+}
+
+interface TabGroupChipProps {
+  group: BrowserTabGroup;
+  count: number;
+  editing: boolean;
+  draftName: string;
+  onDraftNameChange: (name: string) => void;
+  onFinishRename: () => void;
+  onCancelRename: () => void;
+  onStartRename: () => void;
+  onToggle: () => void;
+  onShowMenu: () => void;
+}
+
+function TabGroupChip({ group, count, editing, draftName, onDraftNameChange, onFinishRename, onCancelRename, onStartRename, onToggle, onShowMenu }: TabGroupChipProps) {
+  if (editing) {
+    return (
+      <form className={`tab-group tab-group-${group.color} tab-group-editing`} onSubmit={(event) => { event.preventDefault(); onFinishRename(); }}>
+        <span className="tab-group-marker" aria-hidden="true" />
+        <input
+          aria-label={`Rename ${group.name} tab group`}
+          autoFocus
+          value={draftName}
+          maxLength={32}
+          onChange={(event) => onDraftNameChange(event.target.value)}
+          onBlur={onFinishRename}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') {
+              event.preventDefault();
+              onCancelRename();
+            }
+          }}
+        />
+      </form>
+    );
+  }
+
+  return (
+    <div
+      className={`tab-group tab-group-${group.color} ${group.collapsed ? 'tab-group-collapsed' : ''}`}
+      role="group"
+      aria-label={`${group.name} tab group, ${count} ${count === 1 ? 'tab' : 'tabs'}`}
+      onContextMenu={(event) => { event.preventDefault(); onShowMenu(); }}
+    >
+      <button
+        className="tab-group-toggle"
+        type="button"
+        aria-label={`${group.collapsed ? 'Expand' : 'Collapse'} ${group.name} tab group`}
+        aria-expanded={!group.collapsed}
+        title={`${group.collapsed ? 'Expand' : 'Collapse'} ${group.name}`}
+        onClick={onToggle}
+      >
+        {group.collapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
+        <span className="tab-group-marker" aria-hidden="true" />
+        <span className="tab-group-name">{group.name}</span>
+        <span className="tab-group-count" aria-hidden="true">{count}</span>
+      </button>
+      <button className="tab-group-rename" type="button" aria-label={`Rename ${group.name} tab group`} title={`Rename ${group.name}`} onClick={onStartRename}>
+        <Pencil size={11} />
       </button>
     </div>
   );
