@@ -1,8 +1,9 @@
-import { type CSSProperties, type FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { type CSSProperties, type FormEvent, useEffect, useRef, useState } from 'react';
 
 import type { BrowserCommand, BrowserSnapshot } from '../../shared/browser';
 import type { WorkspaceCommand, WorkspaceSnapshot } from '../../shared/workspace';
 import type { TaskCommand, TaskCommandResult, TaskSnapshot } from '../../shared/task';
+import { isGoogleAccountsUrl } from '../../shared/google-auth';
 import { Brand } from './Brand';
 import { BrowserToolbar } from './BrowserToolbar';
 import { TabStrip } from './TabStrip';
@@ -39,10 +40,7 @@ export function App() {
 
   const activeTab = snapshot.tabs.find((tab) => tab.id === snapshot.activeTabId) ?? null;
   const address = isEditingAddress ? addressDraft : activeTab?.url ?? '';
-  const paneWidths = useMemo(
-    () => normalizePaneWidths(preferredPaneWidths, viewportWidth),
-    [preferredPaneWidths, viewportWidth],
-  );
+  const paneWidths = normalizePaneWidths(preferredPaneWidths, viewportWidth);
   const paneStyle = {
     '--workspace-pane-width': `${paneWidths.left}px`,
     '--context-pane-width': `${paneWidths.right}px`,
@@ -147,6 +145,7 @@ export function App() {
             activeTab={activeTab}
             address={address}
             addressError={addressError}
+            googleSignInHelp={Boolean(activeTab && isGoogleAccountsUrl(activeTab.url))}
             addressInputRef={addressInputRef}
             onAddressChange={(value) => {
               setAddressDraft(value);
@@ -162,6 +161,9 @@ export function App() {
             onBack={() => withActiveTab('back')}
             onForward={() => withActiveTab('forward')}
             onReload={() => withActiveTab('reload')}
+            onShowGoogleSignInAlternatives={() => {
+              if (activeTab) void sendCommand({ type: 'showGoogleSignInAlternatives', tabId: activeTab.id });
+            }}
             onSubmit={submitAddress}
           />
         </div>

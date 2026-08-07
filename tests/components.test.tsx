@@ -68,6 +68,7 @@ describe('browser chrome', () => {
         activeTab={TAB}
         address={TAB.url}
         addressError=""
+        googleSignInHelp={false}
         addressInputRef={ref}
         onAddressChange={vi.fn()}
         onAddressFocus={vi.fn()}
@@ -75,6 +76,7 @@ describe('browser chrome', () => {
         onBack={vi.fn()}
         onForward={vi.fn()}
         onReload={vi.fn()}
+        onShowGoogleSignInAlternatives={vi.fn()}
         onSubmit={onSubmit}
       />,
     );
@@ -83,6 +85,33 @@ describe('browser chrome', () => {
     expect(screen.getByRole('button', { name: /go forward/i })).toBeEnabled();
     await user.type(screen.getByRole('textbox', { name: /address and search/i }), '{enter}');
     expect(onSubmit).toHaveBeenCalledOnce();
+  });
+
+  it('offers a safe fallback when Google selects an unavailable passkey flow', async () => {
+    const user = userEvent.setup();
+    const onShowGoogleSignInAlternatives = vi.fn();
+    render(
+      <BrowserToolbar
+        activeTab={{ ...TAB, url: 'https://accounts.google.com/v3/signin/challenge/pk' }}
+        address="https://accounts.google.com/v3/signin/challenge/pk"
+        addressError=""
+        googleSignInHelp
+        addressInputRef={{ current: null }}
+        onAddressChange={vi.fn()}
+        onAddressFocus={vi.fn()}
+        onAddressBlur={vi.fn()}
+        onBack={vi.fn()}
+        onForward={vi.fn()}
+        onReload={vi.fn()}
+        onShowGoogleSignInAlternatives={onShowGoogleSignInAlternatives}
+        onSubmit={vi.fn()}
+      />,
+    );
+
+    expect(await screen.findByRole('complementary', { name: /google sign-in guidance/i })).toBeVisible();
+    expect(screen.getByText(/separate secure browser session/i)).toBeVisible();
+    await user.click(screen.getByRole('button', { name: /show other methods/i }));
+    expect(onShowGoogleSignInAlternatives).toHaveBeenCalledOnce();
   });
 });
 

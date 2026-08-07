@@ -1,4 +1,4 @@
-import { type KeyboardEvent, type PointerEvent, useRef, useState } from 'react';
+import { type KeyboardEvent, type PointerEvent, useEffect, useRef, useState } from 'react';
 
 import { DEFAULT_PANE_WIDTHS, type PaneSide } from './pane-layout';
 
@@ -14,6 +14,10 @@ export function PaneResizer({ side, width, minimum, maximum, onResize }: PaneRes
   const drag = useRef<{ pointerId: number; startX: number; startWidth: number } | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const label = side === 'left' ? 'Resize workspace pane' : 'Resize context and task pane';
+
+  useEffect(() => () => {
+    document.body.classList.remove('pane-is-resizing');
+  }, []);
 
   const finishDrag = (event: PointerEvent<HTMLButtonElement>) => {
     if (drag.current?.pointerId !== event.pointerId) return;

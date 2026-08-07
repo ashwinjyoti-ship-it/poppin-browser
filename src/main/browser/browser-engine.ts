@@ -22,6 +22,7 @@ import { errorPageUrl } from './internal-pages';
 import { BrowserStateStore } from './state-store';
 import { displayUrl, NEW_TAB_URL, normalizeAddressInput } from './url-input';
 import type { CapturedTabContext } from '../../shared/workspace';
+import { GOOGLE_SIGN_IN_FALLBACK_SCRIPT, isGoogleAccountsUrl } from '../../shared/google-auth';
 
 const PAGE_MARGIN = 12;
 const CHROME_HEIGHT = 152;
@@ -123,6 +124,8 @@ export class BrowserEngine {
         return this.goForward(command.tabId);
       case 'reload':
         return this.reload(command.tabId);
+      case 'showGoogleSignInAlternatives':
+        return this.showGoogleSignInAlternatives(command.tabId);
       case 'setLayout':
         this.viewInsets = {
           left: clampInset(command.leftInset),
@@ -359,6 +362,25 @@ export class BrowserEngine {
       tab.view.webContents.reload();
     }
     return { ok: true };
+  }
+
+  private async showGoogleSignInAlternatives(tabId: string): Promise<BrowserCommandResult> {
+    const tab = this.tabs.get(tabId);
+    if (!tab || tab.view.webContents.isDestroyed()) {
+      return { ok: false, message: 'That tab is no longer available.' };
+    }
+    if (!isGoogleAccountsUrl(tab.view.webContents.getURL())) {
+      return { ok: false, message: 'Sign-in assistance is only available on Google Accounts.' };
+    }
+
+    try {
+      const activated = await tab.view.webContents.executeJavaScript(GOOGLE_SIGN_IN_FALLBACK_SCRIPT, true);
+      return activated === true
+        ? { ok: true }
+        : { ok: false, message: 'Choose “Try another way” directly on Google’s page.' };
+    } catch {
+      return { ok: false, message: 'Choose “Try another way” directly on Google’s page.' };
+    }
   }
 
   private updateTab(tab: BrowserTabRecord, updates: Partial<BrowserTabSnapshot>): void {
