@@ -33,6 +33,7 @@ export class WorkspaceEngine {
       documents: this.store.listDocuments(),
       tabContexts: this.store.listTabContexts(),
       project: this.store.getProject(),
+      visualSelection: this.store.getVisualSelection(),
     };
   }
 
@@ -70,6 +71,11 @@ export class WorkspaceEngine {
         break;
       case 'refreshTabContext':
         return this.captureTab(command.tabId);
+      case 'captureVisualSelection':
+        return this.captureVisualSelection(command.tabId);
+      case 'clearVisualSelection':
+        this.store.clearVisualSelection();
+        break;
       case 'connectExistingProject':
         return this.connectExistingProject();
       case 'cloneRepository':
@@ -147,6 +153,18 @@ export class WorkspaceEngine {
     });
     this.emitSnapshot();
     return { ok: true };
+  }
+
+  private async captureVisualSelection(tabId: string): Promise<WorkspaceCommandResult> {
+    try {
+      const selection = await this.browser.captureVisualSelection(tabId);
+      if (!selection) return { ok: false, message: 'Visual selection was cancelled or timed out.' };
+      this.store.saveVisualSelection(selection);
+      this.emitSnapshot();
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, message: error instanceof Error ? error.message : 'Poppin could not capture that element.' };
+    }
   }
 
   private async connectExistingProject(): Promise<WorkspaceCommandResult> {

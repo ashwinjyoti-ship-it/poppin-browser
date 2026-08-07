@@ -4,6 +4,8 @@ import { Check, ChevronLeft, ChevronRight, Copy, ExternalLink, FileText, Globe2,
 import type { TaskCommand, TaskCommandResult, TaskSnapshot } from '../../shared/task';
 import type { WorkspaceSnapshot } from '../../shared/workspace';
 import type { BrowserAgentCommand, BrowserAgentCommandResult, BrowserAgentSnapshot } from '../../shared/browser-agent';
+import type { BrowserTabSnapshot } from '../../shared/browser';
+import type { WorkspaceCommandResult } from '../../shared/workspace';
 
 interface ContextPaneProps {
   collapsed: boolean;
@@ -17,15 +19,18 @@ interface ContextPaneProps {
   onSectionChange?: (section: PaneSection) => void;
   browserAgentSnapshot?: BrowserAgentSnapshot;
   onBrowserAgentCommand?: (command: BrowserAgentCommand) => Promise<BrowserAgentCommandResult>;
+  activeTab?: BrowserTabSnapshot | null;
+  onCaptureVisualSelection?: (tabId: string) => Promise<WorkspaceCommandResult>;
+  onClearVisualSelection?: () => void;
 }
 
 export type PaneSection = 'context' | 'task' | 'result';
 
-export function ContextPane({ collapsed, snapshot, taskSnapshot, onCollapseChange, onRefreshTab, onTaskCommand, onOpenResult, section, onSectionChange, browserAgentSnapshot, onBrowserAgentCommand }: ContextPaneProps) {
+export function ContextPane({ collapsed, snapshot, taskSnapshot, onCollapseChange, onRefreshTab, onTaskCommand, onOpenResult, section, onSectionChange, browserAgentSnapshot, onBrowserAgentCommand, activeTab, onCaptureVisualSelection, onClearVisualSelection }: ContextPaneProps) {
   const [internalSection, setInternalSection] = useState<PaneSection>('context');
   const activeSection = section ?? internalSection;
   const selectedDocuments = snapshot.documents.filter((document) => document.selected);
-  const itemCount = snapshot.tabContexts.length + selectedDocuments.length;
+  const itemCount = snapshot.tabContexts.length + selectedDocuments.length + (snapshot.visualSelection ? 1 : 0);
 
   if (collapsed) {
     return (
@@ -51,20 +56,38 @@ export function ContextPane({ collapsed, snapshot, taskSnapshot, onCollapseChang
         </nav>
         <button type="button" className="pane-toggle" onClick={() => onCollapseChange(true)} aria-label="Collapse right pane"><ChevronRight size={17} /></button>
       </div>
-      {activeSection === 'context' ? <ContextView snapshot={snapshot} onRefreshTab={onRefreshTab} /> : null}
+      {activeSection === 'context' ? <ContextView snapshot={snapshot} activeTab={activeTab} onRefreshTab={onRefreshTab} onCaptureVisualSelection={onCaptureVisualSelection} onClearVisualSelection={onClearVisualSelection} /> : null}
       {activeSection === 'task' ? <TaskView snapshot={taskSnapshot} workspace={snapshot} browserAgent={browserAgentSnapshot} onCommand={onTaskCommand} onBrowserAgentCommand={onBrowserAgentCommand} /> : null}
       {activeSection === 'result' ? <ResultView snapshot={taskSnapshot} onCommand={onTaskCommand} onOpenResult={onOpenResult} /> : null}
     </aside>
   );
 }
 
-function ContextView({ snapshot, onRefreshTab }: { snapshot: WorkspaceSnapshot; onRefreshTab: (tabId: string) => void }) {
+function ContextView({ snapshot, activeTab, onRefreshTab, onCaptureVisualSelection, onClearVisualSelection }: {
+  snapshot: WorkspaceSnapshot;
+  activeTab?: BrowserTabSnapshot | null;
+  onRefreshTab: (tabId: string) => void;
+  onCaptureVisualSelection?: (tabId: string) => Promise<WorkspaceCommandResult>;
+  onClearVisualSelection?: () => void;
+}) {
+  const [selectionMessage, setSelectionMessage] = useState('');
+  const [selecting, setSelecting] = useState(false);
   const documents = snapshot.documents.filter((document) => document.selected);
-  const itemCount = snapshot.tabContexts.length + documents.length;
+  const itemCount = snapshot.tabContexts.length + documents.length + (snapshot.visualSelection ? 1 : 0);
+  const activeIsLocalhost = Boolean(activeTab && /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?(?:\/|$)/i.test(activeTab.url));
+  const capture = async () => {
+    if (!activeTab || !onCaptureVisualSelection) return;
+    setSelecting(true);
+    setSelectionMessage('Click an element in the visible localhost preview. Press Escape to cancel.');
+    const result = await onCaptureVisualSelection(activeTab.id);
+    setSelecting(false);
+    setSelectionMessage(result.ok ? 'Element captured in explicit context.' : result.message ?? 'Selection was not captured.');
+  };
   return (
     <div className="right-pane-content">
       <div className="pane-heading"><div><span className="eyebrow">Context</span><h2>What Codex will see</h2></div></div>
       <p className="context-explainer">Only checked items appear here. Captured content is frozen until you refresh it.</p>
+      {activeIsLocalhost ? <div className="visual-selection-tools"><button type="button" className="secondary-button" disabled={selecting} onClick={() => { void capture(); }}>{selecting ? 'Pick an element…' : 'Select UI from preview'}</button>{selectionMessage ? <p>{selectionMessage}</p> : null}</div> : null}
       <div className="context-list">
         {itemCount === 0 ? <div className="context-empty">Nothing selected. Check a tab or document in the workspace.</div> : null}
         {snapshot.tabContexts.map((context) => (
@@ -83,6 +106,15 @@ function ContextView({ snapshot, onRefreshTab }: { snapshot: WorkspaceSnapshot; 
             {document.truncated ? <span className="context-note">Captured at the 60,000-character limit.</span> : null}
           </article>
         ))}
+        {snapshot.visualSelection ? (
+          <article className="context-card visual-selection-card">
+            <div className="context-card-heading"><strong>Selected localhost UI</strong><button type="button" onClick={onClearVisualSelection} aria-label="Clear visual selection"><X size={13} /></button></div>
+            <span className="context-source">{snapshot.visualSelection.selector}</span>
+            <img src={snapshot.visualSelection.screenshotDataUrl} alt="Captured localhost element" />
+            <pre>{snapshot.visualSelection.html}</pre>
+            <span className="context-note">{Math.round(snapshot.visualSelection.boundingBox.width)} × {Math.round(snapshot.visualSelection.boundingBox.height)} px · HTML, CSS, DOM context, and screenshot captured.</span>
+          </article>
+        ) : null}
       </div>
     </div>
   );

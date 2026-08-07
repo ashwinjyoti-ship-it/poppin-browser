@@ -544,6 +544,9 @@ body.pane-is-resizing * { cursor: col-resize !important; user-select: none !impo
 .browser-action-log { max-height: 180px; margin: 9px 0 0; padding: 0; overflow: auto; list-style: none; }
 .browser-action-log li { display: flex; flex-direction: column; gap: 2px; padding: 6px 0; border-top: 1px solid var(--divider); font-size: 9px; }
 .browser-action-log small { color: var(--text-muted); font-size: 8px; line-height: 1.35; }
+.visual-selection-tools { margin: 0 0 12px; padding: 10px; border: 1px dashed #dfc6a7; border-radius: 10px; background: #fffaf2; }
+.visual-selection-tools p { margin: 7px 0 0; color: #826e57; font-size: 9px; line-height: 1.4; }
+.visual-selection-card img { display: block; max-width: 100%; max-height: 180px; margin: 8px 0; border: 1px solid var(--divider); border-radius: 8px; object-fit: contain; background: white; }
 
 @media (max-width: 1080px) {
   .top-row { grid-template-columns: 150px 1fr; gap: 12px; }

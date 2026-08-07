@@ -5,6 +5,7 @@ import type {
   WorkspaceDocumentSnapshot,
   WorkspaceRecordSnapshot,
   WorkspaceProjectSnapshot,
+  VisualSelectionSnapshot,
 } from '../../shared/workspace';
 
 interface WorkspaceRow {
@@ -79,6 +80,10 @@ export class WorkspaceStore {
         install_command TEXT NOT NULL DEFAULT '',
         dev_command TEXT NOT NULL DEFAULT '',
         preview_url TEXT NOT NULL DEFAULT 'http://localhost:3000'
+      ) STRICT;
+      CREATE TABLE IF NOT EXISTS visual_selection (
+        id TEXT PRIMARY KEY CHECK (id = 'primary'),
+        selection_json TEXT NOT NULL
       ) STRICT;
     `);
   }
@@ -225,7 +230,43 @@ export class WorkspaceStore {
     );
   }
 
+  getVisualSelection(): VisualSelectionSnapshot | null {
+    const row = this.database.prepare("SELECT selection_json FROM visual_selection WHERE id = 'primary'").get() as { selection_json: string } | undefined;
+    if (!row) return null;
+    try {
+      const value = JSON.parse(row.selection_json) as VisualSelectionSnapshot;
+      return isVisualSelection(value) ? value : null;
+    } catch {
+      return null;
+    }
+  }
+
+  saveVisualSelection(selection: VisualSelectionSnapshot): void {
+    this.database.prepare(`
+      INSERT INTO visual_selection (id, selection_json) VALUES ('primary', ?)
+      ON CONFLICT(id) DO UPDATE SET selection_json = excluded.selection_json
+    `).run(JSON.stringify(selection));
+  }
+
+  clearVisualSelection(): void {
+    this.database.prepare("DELETE FROM visual_selection WHERE id = 'primary'").run();
+  }
+
   close(): void {
     this.database.close();
   }
+}
+
+function isVisualSelection(value: unknown): value is VisualSelectionSnapshot {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as Record<string, unknown>;
+  return typeof candidate.tabId === 'string'
+    && typeof candidate.url === 'string'
+    && typeof candidate.selector === 'string'
+    && typeof candidate.html === 'string'
+    && typeof candidate.css === 'object'
+    && typeof candidate.domContext === 'string'
+    && typeof candidate.boundingBox === 'object'
+    && typeof candidate.screenshotDataUrl === 'string'
+    && typeof candidate.capturedAt === 'string';
 }

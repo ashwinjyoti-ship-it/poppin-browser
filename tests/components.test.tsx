@@ -141,7 +141,7 @@ const READY_TASK: TaskSnapshot = {
   task: null,
 };
 
-const EMPTY_WORKSPACE: WorkspaceSnapshot = { workspace: null, documents: [], tabContexts: [], project: null };
+const EMPTY_WORKSPACE: WorkspaceSnapshot = { workspace: null, documents: [], tabContexts: [], project: null, visualSelection: null };
 const PROJECT_WORKSPACE: WorkspaceSnapshot = {
   ...EMPTY_WORKSPACE,
   workspace: { id: 'primary', name: 'Fixture', createdAt: '' },

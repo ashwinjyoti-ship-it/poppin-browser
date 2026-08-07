@@ -24,7 +24,7 @@ import {
 } from './pane-layout';
 
 const EMPTY_SNAPSHOT: BrowserSnapshot = { tabs: [], activeTabId: '', isFullScreen: false };
-const EMPTY_WORKSPACE: WorkspaceSnapshot = { workspace: null, documents: [], tabContexts: [], project: null };
+const EMPTY_WORKSPACE: WorkspaceSnapshot = { workspace: null, documents: [], tabContexts: [], project: null, visualSelection: null };
 const EMPTY_TASK: TaskSnapshot = { connection: { state: 'checking', message: 'Connecting to Codex…', accountLabel: null, models: [] }, task: null };
 const EMPTY_BROWSER_AGENT: BrowserAgentSnapshot = { state: 'idle', taskId: null, allowedTabIds: [], activeTabId: null, currentAction: null, pendingApproval: null, log: [] };
 
@@ -231,6 +231,12 @@ export function App() {
         taskSnapshot={taskSnapshot}
         onCollapseChange={setContextCollapsed}
         onRefreshTab={(tabId) => { void sendWorkspaceCommand({ type: 'refreshTabContext', tabId }); }}
+        activeTab={activeTab}
+        onCaptureVisualSelection={async (tabId) => {
+          const message = await sendWorkspaceCommand({ type: 'captureVisualSelection', tabId });
+          return { ok: message === null, ...(message ? { message } : {}) };
+        }}
+        onClearVisualSelection={() => { void sendWorkspaceCommand({ type: 'clearVisualSelection' }); }}
         onTaskCommand={sendTaskCommand}
         onOpenResult={() => { void sendCommand({ type: 'openTaskResult' }); }}
         browserAgentSnapshot={browserAgentSnapshot}

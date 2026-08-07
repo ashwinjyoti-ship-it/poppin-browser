@@ -156,7 +156,7 @@ app.whenReady().then(async () => {
   });
   ipcMain.handle(WORKSPACE_CHANNELS.getSnapshot, (event) => {
     if (!isTrustedShellSender(event.sender)) throw new Error('Untrusted workspace snapshot request.');
-    return workspaceEngine?.getSnapshot() ?? { workspace: null, documents: [], tabContexts: [], project: null };
+    return workspaceEngine?.getSnapshot() ?? { workspace: null, documents: [], tabContexts: [], project: null, visualSelection: null };
   });
   ipcMain.handle(WORKSPACE_CHANNELS.command, (event, command: WorkspaceCommand) => {
     if (!isTrustedShellSender(event.sender)) throw new Error('Untrusted workspace command.');

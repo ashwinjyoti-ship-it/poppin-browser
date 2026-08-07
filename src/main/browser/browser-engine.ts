@@ -22,6 +22,7 @@ import { errorPageUrl, TASK_RESULT_URL } from './internal-pages';
 import { BrowserStateStore } from './state-store';
 import { displayUrl, NEW_TAB_URL, normalizeAddressInput } from './url-input';
 import type { CapturedTabContext } from '../../shared/workspace';
+import type { VisualSelectionSnapshot } from '../../shared/workspace';
 import { GOOGLE_SIGN_IN_FALLBACK_SCRIPT, isGoogleAccountsUrl } from '../../shared/google-auth';
 import { HtmlFullscreenCoordinator, type HtmlFullscreenTransition } from './html-fullscreen';
 import type { BrowserAgentAction } from '../../shared/browser-agent';
@@ -233,6 +234,37 @@ export class BrowserEngine {
     } catch {
       return null;
     }
+  }
+
+  async captureVisualSelection(tabId: string): Promise<VisualSelectionSnapshot | null> {
+    const tab = this.tabs.get(tabId);
+    if (!tab || tab.view.webContents.isDestroyed()) return null;
+    const currentUrl = tab.view.webContents.getURL();
+    if (!isLocalhostUrl(currentUrl)) throw new Error('Visual selection is limited to localhost previews.');
+    this.activateTab(tabId);
+    const captured = await tab.view.webContents.executeJavaScript(VISUAL_SELECTION_SCRIPT, true) as unknown;
+    if (!isVisualSelectionCapture(captured)) return null;
+    const viewBounds = tab.view.getBounds();
+    const x = Math.max(0, Math.min(viewBounds.width - 1, Math.floor(captured.boundingBox.x)));
+    const y = Math.max(0, Math.min(viewBounds.height - 1, Math.floor(captured.boundingBox.y)));
+    const box = {
+      x,
+      y,
+      width: Math.max(1, Math.min(viewBounds.width - x, Math.ceil(captured.boundingBox.width))),
+      height: Math.max(1, Math.min(viewBounds.height - y, Math.ceil(captured.boundingBox.height))),
+    };
+    const screenshot = await tab.view.webContents.capturePage(box);
+    return {
+      tabId,
+      url: currentUrl,
+      selector: captured.selector.slice(0, 500),
+      html: captured.html.slice(0, 20_000),
+      css: Object.fromEntries(Object.entries(captured.css).slice(0, 80).map(([key, value]) => [key.slice(0, 100), value.slice(0, 500)])),
+      domContext: captured.domContext.slice(0, 30_000),
+      boundingBox: captured.boundingBox,
+      screenshotDataUrl: screenshot.toDataURL(),
+      capturedAt: new Date().toISOString(),
+    };
   }
 
   async execute(command: BrowserCommand): Promise<BrowserCommandResult> {
@@ -580,6 +612,28 @@ function safeProtocol(value: string): string {
   }
 }
 
+export function isLocalhostUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return (url.protocol === 'http:' || url.protocol === 'https:')
+      && (url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '::1' || url.hostname === '[::1]');
+  } catch {
+    return false;
+  }
+}
+
+function isVisualSelectionCapture(value: unknown): value is {
+  selector: string; html: string; css: Record<string, string>; domContext: string;
+  boundingBox: { x: number; y: number; width: number; height: number };
+} {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as Record<string, unknown>;
+  const box = candidate.boundingBox as Record<string, unknown> | undefined;
+  return typeof candidate.selector === 'string' && typeof candidate.html === 'string'
+    && Boolean(candidate.css && typeof candidate.css === 'object') && typeof candidate.domContext === 'string'
+    && Boolean(box && ['x', 'y', 'width', 'height'].every((key) => typeof box[key] === 'number'));
+}
+
 function agentActionTarget(action: BrowserAgentAction): string {
   if ('selector' in action) return action.selector;
   if ('url' in action) return action.url;
@@ -611,3 +665,46 @@ const CAPTURE_TRANSCRIPT_SCRIPT = `(async () => {
     .map((element) => textOf(element)).filter(Boolean);
   return captions.join('\\n').slice(0, 60000);
 })()`;
+
+const VISUAL_SELECTION_SCRIPT = `new Promise((resolve) => {
+  const marker = document.createElement('div');
+  marker.setAttribute('data-poppin-selector', 'true');
+  Object.assign(marker.style, { position: 'fixed', zIndex: '2147483647', pointerEvents: 'none', border: '2px solid #e8820b', borderRadius: '4px', background: 'rgba(232,130,11,.08)', boxShadow: '0 0 0 9999px rgba(24,18,12,.14)' });
+  document.documentElement.appendChild(marker);
+  const move = (event) => {
+    const target = event.target;
+    if (!(target instanceof Element) || target === marker) return;
+    const rect = target.getBoundingClientRect();
+    Object.assign(marker.style, { left: rect.left + 'px', top: rect.top + 'px', width: rect.width + 'px', height: rect.height + 'px' });
+  };
+  let timeout;
+  const cleanup = () => { clearTimeout(timeout); marker.remove(); document.removeEventListener('mousemove', move, true); document.removeEventListener('click', pick, true); document.removeEventListener('keydown', cancel, true); };
+  const selectorFor = (element) => {
+    if (element.id) return '#' + CSS.escape(element.id);
+    const testId = element.getAttribute('data-testid');
+    if (testId) return '[data-testid="' + CSS.escape(testId) + '"]';
+    const parts = [];
+    let current = element;
+    while (current && current !== document.body && parts.length < 5) {
+      const siblings = current.parentElement ? Array.from(current.parentElement.children).filter((child) => child.tagName === current.tagName) : [];
+      const position = siblings.length > 1 ? ':nth-of-type(' + (siblings.indexOf(current) + 1) + ')' : '';
+      parts.unshift(current.tagName.toLowerCase() + position);
+      current = current.parentElement;
+    }
+    return parts.join(' > ');
+  };
+  const pick = (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement) || target === marker) return;
+    event.preventDefault(); event.stopPropagation();
+    const rect = target.getBoundingClientRect();
+    const computed = getComputedStyle(target);
+    const properties = ['display','position','box-sizing','width','height','margin','padding','border','border-radius','background','color','font','font-size','font-weight','line-height','letter-spacing','text-align','opacity','box-shadow','flex','flex-direction','align-items','justify-content','gap','grid-template-columns','overflow','z-index','transform'];
+    const css = Object.fromEntries(properties.map((name) => [name, computed.getPropertyValue(name)]).filter((entry) => entry[1]));
+    const result = { selector: selectorFor(target), html: target.outerHTML, css, domContext: target.parentElement?.outerHTML || target.outerHTML, boundingBox: { x: rect.x, y: rect.y, width: rect.width, height: rect.height } };
+    cleanup(); resolve(result);
+  };
+  const cancel = (event) => { if (event.key === 'Escape') { cleanup(); resolve(null); } };
+  document.addEventListener('mousemove', move, true); document.addEventListener('click', pick, true); document.addEventListener('keydown', cancel, true);
+  timeout = setTimeout(() => { cleanup(); resolve(null); }, 120000);
+})`;
