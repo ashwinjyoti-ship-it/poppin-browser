@@ -20,4 +20,9 @@ npm run package
 
 The browser shell is React. Remote pages run in sandboxed `WebContentsView` instances with Node integration disabled and a shared persistent Electron session. Browser structure is saved as versioned JSON; workspace, document-context, and project metadata are stored in SQLite under Electron's application data directory. Local documents and repositories remain on disk.
 
-See [POPPIN_MVP_ROADMAP.md](./POPPIN_MVP_ROADMAP.md) for the living product guide and phase gates.
+## Documentation
+
+- [Development guide](./docs/DEVELOPMENT_GUIDE.md) — architecture, implemented features, security boundaries, test strategy, release workflow, and a ready-to-paste Cursor/Codex handoff.
+- [Agent operating guide](./AGENTS.md) — concise repository rules for a fresh Codex session.
+- [Poppin Browser Cursor rule](./.cursor/rules/poppin-browser.mdc) — automatically applied project context for Cursor.
+- [Living product roadmap](./POPPIN_MVP_ROADMAP.md) — approved product phases and decision log; this is the source of truth for scope.
