@@ -238,7 +238,11 @@ export function App() {
           tabs={visibleTabs}
           groups={snapshot.groups}
           activeTabId={snapshot.activeTabId}
-          onActivate={(tabId) => void sendCommand({ type: 'activate', tabId })}
+          onActivate={(tabId) => {
+            const tab = snapshot.tabs.find((candidate) => candidate.id === tabId);
+            if (browserAgentSnapshot.watching && !tab?.taskSpaceId) void sendBrowserAgentCommand({ type: 'leaveWatch' });
+            void sendCommand({ type: 'activate', tabId });
+          }}
           onClose={(tabId) => void sendCommand({ type: 'close', tabId })}
           onCreate={() => void sendCommand({ type: 'create' })}
           onReorder={(tabId, beforeTabId) => void sendCommand({ type: 'reorder', tabId, beforeTabId })}
