@@ -318,15 +318,13 @@ export class TaskEngine {
     const workspace = workspaceSnapshot(this.workspaceStore, this.options.getPageContexts);
     const priorBrowserSession = this.options.getBrowserAgentSnapshot?.();
     const priorTaskSpace = priorBrowserSession?.taskSpace;
-    const resumesCompletedBrowserWork = task.kind === 'work'
-      && priorBrowserSession?.state === 'completed'
-      && Boolean(priorTaskSpace)
-      && !priorTaskSpace!.kept;
+    const continuesBrowserWork = isImplicitBrowserContinuation(prompt);
     const inheritsBrowserRequirement = task.kind === 'work'
       && task.browserRun.required
-      && !priorTaskSpace?.kept;
+      && !priorTaskSpace?.kept
+      && continuesBrowserWork;
     const wantsBrowserUse = task.kind === 'work' && (
-      inferTaskRequirements(prompt, Boolean(project)).browserUse || inheritsBrowserRequirement || resumesCompletedBrowserWork
+      inferTaskRequirements(prompt, Boolean(project)).browserUse || inheritsBrowserRequirement
     );
     if (wantsBrowserUse) {
       if (!this.options.executeBrowserAgentCommand) return { ok: false, message: 'Controlled browser use is not available.' };
@@ -679,12 +677,13 @@ export class TaskEngine {
     }
     const tool = stringValue(request.params.tool);
     if (tool === DATABASE_QUERY_TOOL_NAME) {
-      if (!this.options.querySelectedDatabase || !isRecord(request.params.arguments)) {
+      const argumentsValue = parseDynamicToolArguments(request.params.arguments);
+      if (!this.options.querySelectedDatabase || !argumentsValue) {
         this.respondToBrowserTool(request.id, { ok: false, message: 'Database query is not available.' });
         return;
       }
-      const databaseId = stringValue(request.params.arguments.databaseId);
-      const limitValue = request.params.arguments.limit;
+      const databaseId = stringValue(argumentsValue.databaseId);
+      const limitValue = argumentsValue.limit;
       const limit = typeof limitValue === 'number' && Number.isFinite(limitValue) ? limitValue : 50;
       if (!databaseId) {
         this.respondToBrowserTool(request.id, { ok: false, message: 'databaseId is required.' });
@@ -698,12 +697,13 @@ export class TaskEngine {
       return;
     }
     if (tool === PAGE_COMMENT_APPLY_TOOL_NAME) {
-      if (!this.options.applyPageComment || !isRecord(request.params.arguments)) {
+      const argumentsValue = parseDynamicToolArguments(request.params.arguments);
+      if (!this.options.applyPageComment || !argumentsValue) {
         this.respondToBrowserTool(request.id, { ok: false, message: 'Page comment resolution is not available.' });
         return;
       }
-      const commentId = stringValue(request.params.arguments.commentId);
-      const replacement = typeof request.params.arguments.replacement === 'string' ? request.params.arguments.replacement : null;
+      const commentId = stringValue(argumentsValue.commentId);
+      const replacement = typeof argumentsValue.replacement === 'string' ? argumentsValue.replacement : null;
       if (!commentId || replacement === null) {
         this.respondToBrowserTool(request.id, { ok: false, message: 'commentId and replacement are required.' });
         return;
@@ -874,6 +874,7 @@ export class TaskEngine {
     task.browserRun.successfulActionCount += count;
     task.browserRun.state = 'action-observed';
     task.browserRun.lastActionAt = new Date().toISOString();
+    task.browserRun.sources = mergeBrowserSources(task.browserRun.sources, browserSourcesFromAction(command, result));
     this.touchAndSchedule();
   }
 
@@ -1219,7 +1220,73 @@ function createBrowserRun(required: boolean, browserSnapshot?: BrowserAgentSnaps
     successfulActionCount: 0,
     retryCount: 0,
     lastActionAt: null,
+    sources: [],
   };
+}
+
+function isImplicitBrowserContinuation(prompt: string): boolean {
+  const normalized = prompt.trim().toLowerCase().replace(/[.!?]+$/u, '').trim();
+  if (!normalized || normalized.length > 80) return false;
+  return /^(?:continue|go on|keep going|more|find more|show more|next|retry|try again|check another|what else|do that|do it)(?:\s+(?:please|with that|from there|the search|the research|the task))?$/u.test(normalized);
+}
+
+function parseDynamicToolArguments(value: unknown): Record<string, unknown> | null {
+  if (typeof value === 'string') {
+    try { value = JSON.parse(value) as unknown; } catch { return null; }
+  }
+  return isRecord(value) ? value : null;
+}
+
+function browserSourcesFromAction(
+  command: Extract<BrowserAgentCommand, { type: 'act' | 'batch' }>,
+  result: BrowserAgentCommandResult,
+): TaskBrowserRunSnapshot['sources'] {
+  if (!result.ok) return [];
+  if (command.type === 'act') {
+    if (command.action.type === 'navigate') return sourceForUrl(command.action.url);
+    if (command.action.type === 'read' && result.data) return semanticSource(result.data);
+    return [];
+  }
+  if (!result.data) return [];
+  try {
+    const data = JSON.parse(result.data) as unknown;
+    if (!isRecord(data) || !Array.isArray(data.steps)) return [];
+    return data.steps.flatMap((step) => {
+      if (!isRecord(step) || step.ok !== true || typeof step.detail !== 'string') return [];
+      return semanticSource(step.detail);
+    });
+  } catch {
+    return [];
+  }
+}
+
+function semanticSource(data: string): TaskBrowserRunSnapshot['sources'] {
+  try {
+    const value = JSON.parse(data) as unknown;
+    if (!isRecord(value)) return [];
+    return sourceForUrl(stringValue(value.url), stringValue(value.title));
+  } catch {
+    return [];
+  }
+}
+
+function sourceForUrl(url: string, title = ''): TaskBrowserRunSnapshot['sources'] {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return [];
+    return [{ title: title.trim().slice(0, 300) || parsed.hostname, url: parsed.toString().slice(0, 8_000) }];
+  } catch {
+    return [];
+  }
+}
+
+function mergeBrowserSources(
+  current: TaskBrowserRunSnapshot['sources'],
+  additions: TaskBrowserRunSnapshot['sources'],
+): TaskBrowserRunSnapshot['sources'] {
+  const sources = new Map(current.map((source) => [source.url, source]));
+  for (const source of additions) sources.set(source.url, source);
+  return [...sources.values()].slice(-100);
 }
 
 function conversationHistoryItems(thread: CodexThread, task: TaskRecordSnapshot): JsonObject[] {
@@ -1407,6 +1474,7 @@ function cloneTask(task: TaskRecordSnapshot): TaskRecordSnapshot {
     ...task,
     progress: task.progress.map((item) => ({ ...item })),
     pendingApproval: task.pendingApproval ? { ...task.pendingApproval } : null,
+    browserRun: { ...task.browserRun, sources: task.browserRun.sources.map((source) => ({ ...source })) },
     ...(task.delivery ? { delivery: { ...task.delivery, pullRequest: task.delivery.pullRequest ? { ...task.delivery.pullRequest } : null } } : {}),
   };
 }

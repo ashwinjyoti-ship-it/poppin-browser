@@ -166,6 +166,7 @@ function emptyBrowserRun(): TaskBrowserRunSnapshot {
     successfulActionCount: 0,
     retryCount: 0,
     lastActionAt: null,
+    sources: [],
   };
 }
 
@@ -178,5 +179,8 @@ function parseBrowserRun(value: unknown): TaskBrowserRunSnapshot {
   if (!Number.isInteger(candidate.successfulActionCount) || candidate.successfulActionCount! < 0) throw new Error('Invalid browser run');
   if (!Number.isInteger(candidate.retryCount) || candidate.retryCount! < 0) throw new Error('Invalid browser run');
   if (candidate.lastActionAt !== null && typeof candidate.lastActionAt !== 'string') throw new Error('Invalid browser run');
-  return candidate as TaskBrowserRunSnapshot;
+  const sources = candidate.sources === undefined ? [] : candidate.sources;
+  if (!Array.isArray(sources) || !sources.every((source) => source && typeof source === 'object'
+    && typeof source.title === 'string' && typeof source.url === 'string')) throw new Error('Invalid browser run');
+  return { ...(candidate as TaskBrowserRunSnapshot), sources: sources.slice(0, 100) };
 }

@@ -32,15 +32,18 @@ export function handleInternalPages(browserSession: Session, data?: InternalPage
   });
 }
 
-function renderTaskResult(task: TaskRecordSnapshot | null, workspace: WorkspaceSnapshot | null): string {
+export function renderTaskResult(task: TaskRecordSnapshot | null, workspace: WorkspaceSnapshot | null): string {
   if (!task) {
     return pageShell('<main class="result-page"><p class="eyebrow">TASK RESULT</p><h1>No result yet</h1><p>Start a Work or Code task from the Poppin prompt box.</p></main>', 'Task result');
   }
-  const sources = [
+  const sources = uniqueSources([
+    ...task.browserRun.sources,
+    ...resultUrlSources(task.result),
     ...(workspace?.tabContexts.map((item) => ({ title: item.title, url: item.url })) ?? []),
     ...(workspace?.documents.filter((item) => item.selected).map((item) => ({ title: item.name, url: '' })) ?? []),
-  ];
-  const sourceList = sources.length === 0 ? '<p class="empty">No sources were selected.</p>' : `<ul>${sources.map((source) => {
+    ...(workspace?.pageContexts?.map((item) => ({ title: item.title, url: '' })) ?? []),
+  ]);
+  const sourceList = sources.length === 0 ? '<p class="empty">No research sources were captured.</p>' : `<ul>${sources.map((source) => {
     const title = escapeHtml(source.title);
     return source.url ? `<li><a href="${escapeHtml(source.url)}">${title}</a></li>` : `<li>${title}</li>`;
   }).join('')}</ul>`;
@@ -53,6 +56,28 @@ function renderTaskResult(task: TaskRecordSnapshot | null, workspace: WorkspaceS
       <aside class="sources"><h2>Sources</h2>${sourceList}</aside>
     </main>
   `, `${task.kind === 'code' ? 'Code' : 'Work'} result`);
+}
+
+function resultUrlSources(result: string): Array<{ title: string; url: string }> {
+  const matches = result.match(/https?:\/\/[^\s<>()[\]{}"']+/gi) ?? [];
+  return matches.flatMap((raw) => {
+    const url = raw.replace(/[.,;:!?]+$/u, '');
+    try {
+      const parsed = new URL(url);
+      return [{ title: parsed.hostname, url: parsed.toString() }];
+    } catch {
+      return [];
+    }
+  });
+}
+
+function uniqueSources(sources: Array<{ title: string; url: string }>): Array<{ title: string; url: string }> {
+  const unique = new Map<string, { title: string; url: string }>();
+  for (const source of sources) {
+    const key = source.url || `title:${source.title}`;
+    if (!unique.has(key)) unique.set(key, source);
+  }
+  return [...unique.values()];
 }
 
 export function errorPageUrl(url: string, code: number, description: string): string {

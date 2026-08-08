@@ -50,6 +50,12 @@ export interface TaskBrowserRunSnapshot {
   successfulActionCount: number;
   retryCount: number;
   lastActionAt: string | null;
+  sources: TaskBrowserSourceSnapshot[];
+}
+
+export interface TaskBrowserSourceSnapshot {
+  title: string;
+  url: string;
 }
 
 export interface TaskRecordSnapshot {

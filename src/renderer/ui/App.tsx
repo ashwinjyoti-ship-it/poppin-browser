@@ -351,7 +351,7 @@ export function App() {
         <div className={`native-stage ${workspaceCollapsed ? 'workspace-collapsed' : ''} ${visibleContextCollapsed ? 'context-collapsed' : ''}`}>
           {activeNativeTab.kind === 'database'
             ? <NativeDatabaseView pageId={activeNativeTab.pageId} revision={pagesRevision} onCommand={sendPagesCommand} />
-            : <NativePageView pageId={activeNativeTab.pageId} revision={pagesRevision} onCommand={sendPagesCommand} taskSnapshot={taskSnapshot} onTaskCommand={sendTaskCommand} />}
+            : <NativePageView pageId={activeNativeTab.pageId} revision={pagesRevision} onCommand={sendPagesCommand} taskSnapshot={taskSnapshot} onTaskCommand={sendTaskCommand} onTaskStarted={() => { setContextCollapsed(false); setContextSection('task'); }} />}
         </div>
       ) : <div className={`browser-stage ${workspaceCollapsed ? 'workspace-collapsed' : ''} ${visibleContextCollapsed ? 'context-collapsed' : ''}`} aria-hidden="true" />}
       <CommandBar snapshot={taskSnapshot} workspace={workspaceSnapshot} collapsed={commandCollapsed} onCollapseChange={setCommandCollapsed} onCommand={sendTaskCommand} onOverlayHeightChange={setCommandOverlayHeight} />

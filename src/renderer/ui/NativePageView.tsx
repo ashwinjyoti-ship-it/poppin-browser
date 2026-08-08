@@ -4,12 +4,13 @@ import { useEffect, useRef, useState } from 'react';
 import type { PageBlockSnapshot, PageDocumentSnapshot, PagesCommand } from '../../shared/pages';
 import type { TaskCommand, TaskCommandResult, TaskSnapshot } from '../../shared/task';
 
-export function NativePageView({ pageId, revision, onCommand, taskSnapshot, onTaskCommand }: {
+export function NativePageView({ pageId, revision, onCommand, taskSnapshot, onTaskCommand, onTaskStarted }: {
   pageId: string;
   revision: number;
   onCommand: (command: PagesCommand) => Promise<string | null>;
   taskSnapshot: TaskSnapshot;
   onTaskCommand: (command: TaskCommand) => Promise<TaskCommandResult>;
+  onTaskStarted: () => void;
 }) {
   const [document, setDocument] = useState<PageDocumentSnapshot | null>(null);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
@@ -61,10 +62,16 @@ export function NativePageView({ pageId, revision, onCommand, taskSnapshot, onTa
     if (!model || taskSnapshot.connection.state !== 'ready') { setMessage(taskSnapshot.connection.message); return; }
     const selectedError = await onCommand({ type: 'setPageSelected', pageId, selected: true });
     if (selectedError) { setMessage(selectedError); return; }
-    const result = await onTaskCommand({
-      type: 'startTask', kind: 'work', model: model.id, reasoningEffort: model.defaultReasoningEffort,
-      prompt: `Resolve native Page comment ${commentId}. Follow its anchored instruction, then call page_comment_apply with only the precise replacement text. Do not rewrite the full page.`,
-    });
+    const prompt = `Resolve native Page comment ${commentId}. Follow its anchored instruction, then call page_comment_apply with only the precise replacement text. Do not rewrite the full page.`;
+    const existingTask = taskSnapshot.task;
+    if (existingTask && ['Running', 'Needs Approval'].includes(existingTask.state)) {
+      setMessage('Finish or cancel the current Codex task before resolving this instruction.');
+      return;
+    }
+    const result = await onTaskCommand(existingTask
+      ? { type: 'continueTask', prompt }
+      : { type: 'startTask', kind: 'work', model: model.id, reasoningEffort: model.defaultReasoningEffort, prompt });
+    if (result.ok) onTaskStarted();
     setMessage(result.ok ? 'Codex is resolving this instruction in the Task pane.' : result.message ?? 'Codex could not start.');
   };
 

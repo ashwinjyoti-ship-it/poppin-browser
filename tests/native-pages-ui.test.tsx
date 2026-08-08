@@ -12,6 +12,16 @@ const READY_TASK: TaskSnapshot = {
   connection: { state: 'ready', message: 'Ready', accountLabel: 'Test', models: [{ id: 'gpt', name: 'GPT', description: '', reasoningEfforts: ['medium'], defaultReasoningEffort: 'medium', isDefault: true }] },
   task: null,
 };
+const COMPLETED_TASK: TaskSnapshot = {
+  ...READY_TASK,
+  task: {
+    state: 'Completed', kind: 'work', prompt: 'Earlier work', model: 'gpt', reasoningEffort: 'medium',
+    threadId: 'thread-1', turnId: 'turn-1', baselineCommit: '', progress: [], pendingApproval: null,
+    result: 'Done', diff: '', error: null,
+    browserRun: { required: false, state: 'not-required', taskSpaceId: null, successfulActionCount: 0, retryCount: 0, lastActionAt: null, sources: [] },
+    createdAt: '', updatedAt: '',
+  },
+};
 
 describe('native Pages UI', () => {
   beforeEach(() => {
@@ -49,7 +59,8 @@ describe('native Pages UI', () => {
     Object.assign(window.poppinPages, { getPage: vi.fn().mockResolvedValue(page) });
     const pageCommand = vi.fn().mockResolvedValue(null);
     const taskCommand = vi.fn().mockResolvedValue({ ok: true });
-    render(<NativePageView pageId="page-1" revision={0} onCommand={pageCommand} taskSnapshot={READY_TASK} onTaskCommand={taskCommand} />);
+    const onTaskStarted = vi.fn();
+    render(<NativePageView pageId="page-1" revision={0} onCommand={pageCommand} taskSnapshot={READY_TASK} onTaskCommand={taskCommand} onTaskStarted={onTaskStarted} />);
     const editor = await screen.findByRole('textbox', { name: 'Page text block' });
     await user.clear(editor);
     await user.type(editor, 'Ship on Tuesday.');
@@ -58,6 +69,7 @@ describe('native Pages UI', () => {
     await user.click(screen.getByRole('button', { name: /Ask Codex/i }));
     expect(pageCommand).toHaveBeenCalledWith({ type: 'setPageSelected', pageId: 'page-1', selected: true });
     expect(taskCommand).toHaveBeenCalledWith(expect.objectContaining({ type: 'startTask', kind: 'work', prompt: expect.stringContaining('comment-1') }));
+    expect(onTaskStarted).toHaveBeenCalledOnce();
   });
 
   it('adds Database columns and rows and edits a cell', async () => {
@@ -84,5 +96,20 @@ describe('native Pages UI', () => {
     expect(command).toHaveBeenCalledWith(expect.objectContaining({ type: 'addDatabaseProperty', databaseId: 'db-1', name: 'Price' }));
     await user.click(screen.getByRole('button', { name: /Add row/i }));
     expect(command).toHaveBeenCalledWith({ type: 'addDatabaseRow', databaseId: 'db-1', properties: {} });
+  });
+
+  it('resolves a Page instruction in the existing completed Codex conversation', async () => {
+    const user = userEvent.setup();
+    const page: PageDocumentSnapshot = {
+      page: { id: 'page-1', title: 'Plan', kind: 'page', parentId: null, createdAt: '', updatedAt: '' },
+      blocks: [{ id: 'block-1', pageId: 'page-1', type: 'paragraph', content: { text: 'Ship Monday.' }, position: 0, version: 1, createdAt: '', updatedAt: '' }],
+      comments: [{ id: 'comment-1', pageId: 'page-1', blockId: 'block-1', instruction: 'Move it', status: 'open', createdAt: '', updatedAt: '', resolvedAt: null, selection: { quote: 'Monday', hash: 'hash', blockVersion: 1, start: 5, end: 11 } }],
+      viewState: null, database: null,
+    };
+    Object.assign(window.poppinPages, { getPage: vi.fn().mockResolvedValue(page) });
+    const taskCommand = vi.fn().mockResolvedValue({ ok: true });
+    render(<NativePageView pageId="page-1" revision={0} onCommand={vi.fn().mockResolvedValue(null)} taskSnapshot={COMPLETED_TASK} onTaskCommand={taskCommand} onTaskStarted={vi.fn()} />);
+    await user.click(await screen.findByRole('button', { name: /Ask Codex/i }));
+    expect(taskCommand).toHaveBeenCalledWith({ type: 'continueTask', prompt: expect.stringContaining('comment-1') });
   });
 });
