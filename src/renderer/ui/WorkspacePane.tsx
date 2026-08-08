@@ -83,7 +83,7 @@ export function WorkspacePane({ collapsed, snapshot, tabs, pages, onCollapseChan
                     <FileText size={14} />
                     <span>{document.name}</span>
                   </label>
-                  {/\.(?:xlsx|xls)$/i.test(document.name) ? <button type="button" className="document-open-database" onClick={() => { void onCommand({ type: 'openDocumentAsDatabase', documentId: document.id }); }} aria-label={`Open ${document.name} as Database`}>DB</button> : <span />}
+                  {/\.xlsx$/i.test(document.name) ? <button type="button" className="document-open-database" onClick={() => { void onCommand({ type: 'openDocumentAsDatabase', documentId: document.id }); }} aria-label={`Open ${document.name} as Database`}>DB</button> : <span />}
                   <button type="button" onClick={() => { void onCommand({ type: 'removeDocument', documentId: document.id }); }} aria-label={`Remove ${document.name}`}><X size={13} /></button>
                 </div>
               ))}

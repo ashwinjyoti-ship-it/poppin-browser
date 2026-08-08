@@ -2,7 +2,7 @@ import { writeFile } from 'node:fs/promises';
 
 import { BrowserWindow, dialog } from 'electron';
 import { Document, Packer, Paragraph, TextRun } from 'docx';
-import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
 
 import type { PageDocumentSnapshot, PageJsonValue } from '../../shared/pages';
 
@@ -16,21 +16,22 @@ export async function exportNativePage(parent: BrowserWindow, document: PageDocu
     filters: [{ name: exportLabel(format), extensions: [extension] }],
   });
   if (result.canceled || !result.filePath) return null;
-  if (format === 'xlsx') await exportDatabase(document, result.filePath);
+  if (format === 'xlsx') await exportDatabaseWorkbook(document, result.filePath);
   if (format === 'docx') await exportWord(document, result.filePath);
   if (format === 'pdf') await exportPdf(document, result.filePath);
   return result.filePath;
 }
 
-async function exportDatabase(document: PageDocumentSnapshot, filePath: string): Promise<void> {
+export async function exportDatabaseWorkbook(document: PageDocumentSnapshot, filePath: string): Promise<void> {
   const database = document.database!;
   const values = [
     database.properties.map((property) => property.name),
     ...database.rows.map((row) => database.properties.map((property) => cellValue(row.properties[property.id]))),
   ];
-  const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(values), 'Database');
-  await writeFile(filePath, XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }) as Buffer);
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = 'Poppin Browser';
+  workbook.addWorksheet('Database').addRows(values);
+  await workbook.xlsx.writeFile(filePath);
 }
 
 async function exportWord(document: PageDocumentSnapshot, filePath: string): Promise<void> {

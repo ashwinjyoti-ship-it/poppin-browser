@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
-import { open, readFile, stat } from 'node:fs/promises';
+import { open, stat } from 'node:fs/promises';
 import path from 'node:path';
 
 import { dialog, type BrowserWindow } from 'electron';
+import ExcelJS from 'exceljs';
 
 import {
   WORKSPACE_CHANNELS,
@@ -15,13 +16,12 @@ import { BrowserEngine } from '../browser/browser-engine';
 import { GitEngine } from '../project/git-engine';
 import { PagesStore } from '../pages/pages-store';
 import { selectedPageContexts } from '../pages/page-context';
-import * as XLSX from 'xlsx';
 
 const MAX_DOCUMENT_BYTES = 60_000;
 const TEXT_DOCUMENT_EXTENSIONS = new Set([
   '.css', '.csv', '.html', '.htm', '.js', '.json', '.jsx', '.md', '.mjs', '.scss', '.text', '.ts', '.tsx', '.txt', '.xml', '.yaml', '.yml',
 ]);
-const EXCEL_DOCUMENT_EXTENSIONS = new Set(['.xlsx', '.xls']);
+const EXCEL_DOCUMENT_EXTENSIONS = new Set(['.xlsx']);
 const MAX_WORKBOOK_BYTES = 20 * 1024 * 1024;
 const MAX_DATABASE_IMPORT_ROWS = 5_000;
 const MAX_DATABASE_IMPORT_COLUMNS = 100;
@@ -156,7 +156,7 @@ export class WorkspaceEngine {
     if (!this.pagesStore) return { ok: false, message: 'Native Databases are not ready.' };
     const document = this.store.listDocuments().find((candidate) => candidate.id === documentId);
     if (!document) return { ok: false, message: 'Document not found.' };
-    if (!EXCEL_DOCUMENT_EXTENSIONS.has(path.extname(document.path).toLowerCase())) return { ok: false, message: 'Only .xlsx and .xls documents can open as Databases.' };
+    if (!EXCEL_DOCUMENT_EXTENSIONS.has(path.extname(document.path).toLowerCase())) return { ok: false, message: 'Only .xlsx workbooks can open as Databases.' };
     try {
       const matrix = await readWorkbookMatrix(document.path, document.sizeBytes);
       const title = path.basename(document.name, path.extname(document.name));
@@ -281,9 +281,9 @@ async function captureDocument(filePath: string, sizeBytes: number): Promise<{ t
   const extension = path.extname(filePath).toLowerCase();
   if (EXCEL_DOCUMENT_EXTENSIONS.has(extension)) {
     const workbook = await readWorkbook(filePath, sizeBytes);
-    const text = workbook.SheetNames.map((name) => {
-      const sheet = workbook.Sheets[name];
-      return sheet ? `# Sheet: ${name}\n${XLSX.utils.sheet_to_csv(sheet, { blankrows: false })}` : '';
+    const text = workbook.worksheets.map((sheet) => {
+      const csv = worksheetMatrix(sheet).map((row) => row.map(csvCell).join(',')).join('\n');
+      return `# Sheet: ${sheet.name}\n${csv}`;
     }).join('\n\n').trim();
     return { text: text.slice(0, MAX_DOCUMENT_BYTES), truncated: text.length > MAX_DOCUMENT_BYTES };
   }
@@ -299,18 +299,39 @@ async function captureDocument(filePath: string, sizeBytes: number): Promise<{ t
   }
 }
 
-async function readWorkbook(filePath: string, sizeBytes: number): Promise<XLSX.WorkBook> {
+async function readWorkbook(filePath: string, sizeBytes: number): Promise<ExcelJS.Workbook> {
   if (sizeBytes > MAX_WORKBOOK_BYTES) throw new Error('Workbook is larger than the 20 MB local import limit.');
-  return XLSX.read(await readFile(filePath), { type: 'buffer', cellDates: true, dense: true });
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.readFile(filePath);
+  return workbook;
 }
 
 async function readWorkbookMatrix(filePath: string, sizeBytes: number): Promise<string[][]> {
   const workbook = await readWorkbook(filePath, sizeBytes);
-  const first = workbook.SheetNames[0];
-  if (!first || !workbook.Sheets[first]) throw new Error('Workbook has no readable worksheets.');
-  return (XLSX.utils.sheet_to_json(workbook.Sheets[first], { header: 1, raw: false, blankrows: false }) as unknown[][])
-    .slice(0, MAX_DATABASE_IMPORT_ROWS + 1)
-    .map((row) => row.slice(0, MAX_DATABASE_IMPORT_COLUMNS).map((value) => String(value ?? '')));
+  const first = workbook.worksheets[0];
+  if (!first) throw new Error('Workbook has no readable worksheets.');
+  return worksheetMatrix(first);
+}
+
+function worksheetMatrix(worksheet: ExcelJS.Worksheet): string[][] {
+  const matrix: string[][] = [];
+  const lastRow = Math.min(worksheet.rowCount, MAX_DATABASE_IMPORT_ROWS + 1);
+  for (let rowIndex = 1; rowIndex <= lastRow; rowIndex += 1) {
+    const row = worksheet.getRow(rowIndex);
+    const width = Math.min(row.cellCount, MAX_DATABASE_IMPORT_COLUMNS);
+    const values = Array.from({ length: width }, (_, index) => excelCellText(row.getCell(index + 1)));
+    if (values.some(Boolean)) matrix.push(values);
+  }
+  return matrix;
+}
+
+function excelCellText(cell: ExcelJS.Cell): string {
+  if (typeof cell.value === 'boolean') return cell.value ? 'TRUE' : 'FALSE';
+  return cell.text;
+}
+
+function csvCell(value: string): string {
+  return /[",\r\n]/u.test(value) ? `"${value.replaceAll('"', '""')}"` : value;
 }
 
 function uniqueHeaders(values: string[]): string[] {

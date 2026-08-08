@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { describe, expect, it, vi } from 'vitest';
-import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
 
 import { PagesStore } from '../src/main/pages/pages-store';
 import { WorkspaceEngine } from '../src/main/workspace/workspace-engine';
@@ -15,13 +15,13 @@ describe('Excel documents', () => {
   it('captures workbook text and opens the same file as an editable native Database', async () => {
     const directory = await mkdtemp(path.join(tmpdir(), 'poppin-excel-'));
     const filePath = path.join(directory, 'inventory.xlsx');
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([
+    const workbook = new ExcelJS.Workbook();
+    workbook.addWorksheet('Stock').addRows([
       ['Product', 'Price', 'Available'],
       ['Acoustic guitar', 9999, true],
       ['Capo', 799, false],
-    ]), 'Stock');
-    XLSX.writeFile(workbook, filePath);
+    ]);
+    await workbook.xlsx.writeFile(filePath);
     const file = await stat(filePath);
     const databasePath = path.join(directory, 'poppin.sqlite');
     const workspace = new WorkspaceStore(databasePath);
