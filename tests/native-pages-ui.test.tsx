@@ -16,7 +16,7 @@ const COMPLETED_TASK: TaskSnapshot = {
   ...READY_TASK,
   task: {
     state: 'Completed', kind: 'work', prompt: 'Earlier work', model: 'gpt', reasoningEffort: 'medium',
-    threadId: 'thread-1', turnId: 'turn-1', baselineCommit: '', progress: [], pendingApproval: null,
+    documentId: 'document-1', threadId: 'thread-1', turnId: 'turn-1', baselineCommit: '', progress: [], pendingApproval: null,
     result: 'Done', diff: '', error: null,
     browserRun: { required: false, state: 'not-required', taskSpaceId: null, successfulActionCount: 0, retryCount: 0, lastActionAt: null, sources: [] },
     createdAt: '', updatedAt: '',
@@ -70,6 +70,23 @@ describe('native Pages UI', () => {
     expect(pageCommand).toHaveBeenCalledWith({ type: 'setPageSelected', pageId: 'page-1', selected: true });
     expect(taskCommand).toHaveBeenCalledWith(expect.objectContaining({ type: 'startTask', kind: 'work', prompt: expect.stringContaining('comment-1') }));
     expect(onTaskStarted).toHaveBeenCalledOnce();
+  });
+
+  it('renders a Work turn as a formatted Tandem document instead of raw Markdown', async () => {
+    const page: PageDocumentSnapshot = {
+      page: { id: 'task-page', title: 'Acoustic guitars under ₹10,000', kind: 'page', parentId: null, createdAt: '', updatedAt: '' },
+      blocks: [
+        { id: 'prompt-1', pageId: 'task-page', type: 'task-prompt', content: { text: 'Search for acoustic guitars under ₹10,000.', createdAt: '2026-08-08T12:00:00Z' }, position: 0, version: 1, createdAt: '', updatedAt: '' },
+        { id: 'result-1', pageId: 'task-page', type: 'task-result', content: { text: '**Top choices**\n\n| Guitar | Price |\n| --- | --- |\n| Model A | ₹9,999 |', sources: [{ title: 'Shop', url: 'https://shop.example/guitar' }] }, position: 1, version: 1, createdAt: '', updatedAt: '' },
+      ],
+      comments: [], viewState: null, database: null,
+    };
+    Object.assign(window.poppinPages, { getPage: vi.fn().mockResolvedValue(page) });
+    render(<NativePageView pageId="task-page" revision={0} onCommand={vi.fn().mockResolvedValue(null)} taskSnapshot={COMPLETED_TASK} onTaskCommand={vi.fn()} onTaskStarted={vi.fn()} />);
+    expect(await screen.findByText('Top choices')).toHaveProperty('tagName', 'STRONG');
+    expect(screen.getByRole('table')).toBeVisible();
+    expect(screen.getByRole('link', { name: 'Shop' })).toHaveAttribute('href', 'https://shop.example/guitar');
+    expect(screen.queryByText('| Guitar | Price |')).not.toBeInTheDocument();
   });
 
   it('adds Database columns and rows and edits a cell', async () => {

@@ -79,10 +79,7 @@ async function createWindow(): Promise<void> {
   });
 
   const browserSession = session.fromPartition('persist:poppin-browser', { cache: true });
-  handleInternalPages(browserSession, {
-    getTask: () => taskEngine?.getSnapshot().task ?? null,
-    getWorkspace: () => workspaceEngine?.getSnapshot() ?? null,
-  });
+  handleInternalPages(browserSession);
   const getWindowState = (): WindowState => {
     if (!mainWindow) return windowState;
     const normalBounds = mainWindow.getNormalBounds();
@@ -108,10 +105,16 @@ async function createWindow(): Promise<void> {
   await mkdir(workDirectory, { recursive: true });
   taskEngine = new TaskEngine(mainWindow, taskStore, workspaceStore, git, {
     workDirectory,
-    onResultReady: () => {
-      pagesStore?.deactivateTabs();
+    onResultReady: (task) => {
+      pagesStore?.appendTaskTurn({
+        threadId: task.documentId,
+        turnId: task.turnId,
+        prompt: task.prompt,
+        result: task.result,
+        createdAt: task.updatedAt,
+        sources: task.browserRun.sources,
+      });
       pagesEngine?.refresh();
-      browserEngine?.openTaskResult();
     },
     onTaskEnded: (outcome) => {
       if (outcome === 'completed') browserAgentEngine?.complete();
@@ -158,6 +161,18 @@ async function createWindow(): Promise<void> {
       return `Applied the anchored replacement and resolved comment ${comment.id}.`;
     },
   });
+  const restoredTask = taskEngine.getSnapshot().task;
+  if (restoredTask?.result && ['Completed', 'Needs Approval'].includes(restoredTask.state)) {
+    pagesStore.appendTaskTurn({
+      threadId: restoredTask.documentId,
+      turnId: restoredTask.turnId,
+      prompt: restoredTask.prompt,
+      result: restoredTask.result,
+      createdAt: restoredTask.updatedAt,
+      sources: restoredTask.browserRun.sources,
+    });
+    pagesEngine.refresh();
+  }
   browserEngine.restore(persisted);
   await browserAgentEngine.restore();
   for (const url of pendingExternalUrls.splice(0)) openExternalUrl(url);

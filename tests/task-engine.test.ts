@@ -147,7 +147,7 @@ describe('task engine', () => {
     const now = new Date().toISOString();
     taskStore.save({
       state: 'Needs Approval', kind: 'code', prompt: 'Review me', model: 'gpt-test', reasoningEffort: 'high',
-      threadId: 'thread-1', turnId: 'turn-1', baselineCommit: 'a'.repeat(40), progress: [],
+      documentId: 'document-1', threadId: 'thread-1', turnId: 'turn-1', baselineCommit: 'a'.repeat(40), progress: [],
       pendingApproval: null, result: 'Done', diff: 'diff', error: null,
       browserRun: { required: false, state: 'not-required', taskSpaceId: null, successfulActionCount: 0, retryCount: 0, lastActionAt: null, sources: [] },
       createdAt: now, updatedAt: now,
@@ -250,6 +250,7 @@ describe('task engine', () => {
     expect(engine.getSnapshot().task?.browserRun.sources).toEqual([{
       title: 'duckduckgo.com', url: 'https://duckduckgo.com/?q=acoustic+guitars+under+10000',
     }]);
+    fake.emit('notification', { method: 'item/agentMessage/delta', params: { threadId: 'thread-1', turnId: 'turn-1', itemId: 'preamble', delta: 'I am researching live sources now.' } });
     fake.emit('notification', { method: 'item/agentMessage/delta', params: { threadId: 'thread-1', turnId: 'turn-1', itemId: 'message-1', delta: 'Comparison with sources: https://example.com/guitars' } });
     fake.emit('notification', { method: 'turn/completed', params: { threadId: 'thread-1', turn: { id: 'turn-1', status: 'completed', error: null } } });
     await vi.waitFor(() => expect(onResultReady).toHaveBeenCalledWith(expect.objectContaining({

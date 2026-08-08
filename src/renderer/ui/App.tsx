@@ -325,7 +325,7 @@ export function App() {
         }}
         onClearVisualSelection={() => { void sendWorkspaceCommand({ type: 'clearVisualSelection' }); }}
         onTaskCommand={sendTaskCommand}
-        onOpenResult={() => { void sendPagesCommand({ type: 'deactivateTabs' }); void sendCommand({ type: 'openTaskResult' }); }}
+        onOpenResult={() => { if (taskSnapshot.task) void sendPagesCommand({ type: 'openTaskDocument', threadId: taskSnapshot.task.documentId }); }}
         browserAgentSnapshot={browserAgentSnapshot}
         onBrowserAgentCommand={sendBrowserAgentCommand}
         section={visibleContextSection}

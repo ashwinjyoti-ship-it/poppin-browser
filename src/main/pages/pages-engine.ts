@@ -69,6 +69,9 @@ export class PagesEngine {
         case 'openPage':
           id = this.store.openPage(command.pageId).id;
           break;
+        case 'openTaskDocument':
+          id = this.store.openTaskDocument(command.threadId).id;
+          break;
         case 'activateTab':
           this.store.activateTab(command.tabId);
           id = command.tabId;

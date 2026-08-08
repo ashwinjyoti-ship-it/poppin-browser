@@ -30,7 +30,7 @@ import {
 import { errorPageUrl } from './internal-pages';
 import { BrowserStateStore } from './state-store';
 import { normalizeTabOrder } from './tab-model';
-import { displayUrl, NEW_TAB_URL, normalizeAddressInput, normalizeTabInput, TASK_RESULT_URL } from './url-input';
+import { displayUrl, NEW_TAB_URL, normalizeAddressInput, normalizeTabInput } from './url-input';
 import type { CapturedTabContext } from '../../shared/workspace';
 import type { VisualSelectionSnapshot } from '../../shared/workspace';
 import { HtmlFullscreenCoordinator, type HtmlFullscreenTransition } from './html-fullscreen';
@@ -170,16 +170,6 @@ export class BrowserEngine {
     const normalized = normalizeAddressInput(url);
     if (normalized.kind !== 'url') return;
     this.createTab(normalized.url, randomUUID(), false, undefined, true, 'end');
-  }
-
-  openTaskResult(): void {
-    const existing = this.tabOrder.map((id) => this.tabs.get(id)).find((tab) => tab?.lastExternalUrl === TASK_RESULT_URL);
-    if (existing) {
-      this.activateTab(existing.snapshot.id);
-      existing.view.webContents.reloadIgnoringCache();
-      return;
-    }
-    this.createTab(TASK_RESULT_URL, randomUUID(), false);
   }
 
   hasTab(tabId: string): boolean {
@@ -583,9 +573,6 @@ export class BrowserEngine {
         return this.closeLinkPreview();
       case 'openLinkPreviewInTab':
         return this.openLinkPreviewInTab();
-      case 'openTaskResult':
-        this.openTaskResult();
-        return { ok: true };
       case 'setContentVisible':
         this.contentVisible = command.visible;
         this.layoutViews();

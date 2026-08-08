@@ -124,6 +124,7 @@ export type PagesCommand =
   | { type: 'movePage'; pageId: string; parentId: string | null }
   | { type: 'deletePage'; pageId: string }
   | { type: 'openPage'; pageId: string }
+  | { type: 'openTaskDocument'; threadId: string }
   | { type: 'activateTab'; tabId: string }
   | { type: 'deactivateTabs' }
   | { type: 'closeTab'; tabId: string }

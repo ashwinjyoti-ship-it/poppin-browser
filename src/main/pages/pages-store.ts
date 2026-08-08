@@ -116,6 +116,15 @@ export interface AddCommentInput {
   end?: number | null;
 }
 
+export interface AppendTaskTurnInput {
+  threadId: string;
+  turnId: string;
+  prompt: string;
+  result: string;
+  createdAt: string;
+  sources: Array<{ title: string; url: string }>;
+}
+
 export interface PageContentProtector {
   available: () => boolean;
   encrypt: (text: string) => Buffer;
@@ -222,6 +231,10 @@ export class PagesStore {
         page_id TEXT PRIMARY KEY REFERENCES pages(id) ON DELETE CASCADE,
         purpose TEXT NOT NULL UNIQUE CHECK (purpose IN ('memory'))
       ) STRICT;
+      CREATE TABLE IF NOT EXISTS task_documents (
+        thread_id TEXT PRIMARY KEY,
+        page_id TEXT NOT NULL UNIQUE REFERENCES pages(id) ON DELETE CASCADE
+      ) STRICT;
       CREATE TABLE IF NOT EXISTS page_block_secrets (
         block_id TEXT PRIMARY KEY REFERENCES page_blocks(id) ON DELETE CASCADE,
         ciphertext BLOB NOT NULL
@@ -324,6 +337,49 @@ export class PagesStore {
       this.activateTab(id);
       return { id, pageId, kind: page.kind, title: page.title, position: this.tabPosition(id) };
     });
+  }
+
+  appendTaskTurn(input: AppendTaskTurnInput): NativePageTabSnapshot {
+    return this.transaction(() => {
+      const existing = this.database.prepare('SELECT page_id FROM task_documents WHERE thread_id = ?')
+        .get(input.threadId) as { page_id: string } | undefined;
+      const pageId = existing?.page_id ?? this.createPage({ title: taskDocumentTitle(input.prompt), kind: 'page' }).id;
+      if (!existing) {
+        this.database.prepare('INSERT INTO task_documents (thread_id, page_id) VALUES (?, ?)')
+          .run(input.threadId, pageId);
+      }
+
+      const turnKey = createHash('sha256').update(`${input.threadId}:${input.turnId}`).digest('hex').slice(0, 24);
+      const resultBlockId = `task-result-${turnKey}`;
+      const alreadyRecorded = this.database.prepare('SELECT 1 AS present FROM page_blocks WHERE id = ?')
+        .get(resultBlockId);
+      if (!alreadyRecorded) {
+        this.addBlock({
+          id: `task-prompt-${turnKey}`,
+          pageId,
+          type: 'task-prompt',
+          content: { text: input.prompt, turnId: input.turnId, createdAt: input.createdAt },
+        });
+        this.addBlock({
+          id: resultBlockId,
+          pageId,
+          type: 'task-result',
+          content: { text: input.result, turnId: input.turnId, createdAt: input.createdAt, sources: input.sources },
+        });
+      }
+      return this.openPage(pageId);
+    });
+  }
+
+  openTaskDocument(threadId: string): NativePageTabSnapshot {
+    const row = this.database.prepare('SELECT page_id FROM task_documents WHERE thread_id = ?')
+      .get(threadId) as { page_id: string } | undefined;
+    if (!row) throw new Error('This task does not have a Tandem document yet.');
+    return this.openPage(row.page_id);
+  }
+
+  isTaskDocument(pageId: string): boolean {
+    return Boolean(this.database.prepare('SELECT 1 AS present FROM task_documents WHERE page_id = ?').get(pageId));
   }
 
   activateTab(tabId: string): void {
@@ -781,6 +837,11 @@ function requiredText(value: string, label: string): string {
   const text = value.trim();
   if (!text) throw new Error(`${label} is required.`);
   return text;
+}
+
+function taskDocumentTitle(prompt: string): string {
+  const oneLine = prompt.replace(/\s+/gu, ' ').trim();
+  return oneLine.length > 72 ? `${oneLine.slice(0, 69).trimEnd()}…` : oneLine;
 }
 
 function json(value: unknown): string {

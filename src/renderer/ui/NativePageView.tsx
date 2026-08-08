@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 
 import type { PageBlockSnapshot, PageDocumentSnapshot, PagesCommand } from '../../shared/pages';
 import type { TaskCommand, TaskCommandResult, TaskSnapshot } from '../../shared/task';
+import { TandemMarkdown } from './TandemMarkdown';
 
 export function NativePageView({ pageId, revision, onCommand, taskSnapshot, onTaskCommand, onTaskStarted }: {
   pageId: string;
@@ -15,7 +16,7 @@ export function NativePageView({ pageId, revision, onCommand, taskSnapshot, onTa
   const [document, setDocument] = useState<PageDocumentSnapshot | null>(null);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [message, setMessage] = useState('');
-  const [selection, setSelection] = useState<{ block: PageBlockSnapshot; quote: string; start: number; end: number } | null>(null);
+  const [selection, setSelection] = useState<{ block: PageBlockSnapshot; quote: string; start: number | null; end: number | null } | null>(null);
   const [instruction, setInstruction] = useState('');
   const [replacements, setReplacements] = useState<Record<string, string>>({});
   const titleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -57,6 +58,13 @@ export function NativePageView({ pageId, revision, onCommand, taskSnapshot, onTa
     if (!error) { setSelection(null); setInstruction(''); await reload(); }
   };
 
+  const captureRenderedSelection = (block: PageBlockSnapshot, root: HTMLElement) => {
+    const selected = window.getSelection();
+    const quote = selected?.toString().trim() ?? '';
+    if (!quote || !selected?.anchorNode || !selected.focusNode || !root.contains(selected.anchorNode) || !root.contains(selected.focusNode)) return;
+    setSelection({ block, quote, start: null, end: null });
+  };
+
   const askCodex = async (commentId: string) => {
     const model = taskSnapshot.connection.models.find((candidate) => candidate.isDefault) ?? taskSnapshot.connection.models[0];
     if (!model || taskSnapshot.connection.state !== 'ready') { setMessage(taskSnapshot.connection.message); return; }
@@ -75,6 +83,8 @@ export function NativePageView({ pageId, revision, onCommand, taskSnapshot, onTa
     setMessage(result.ok ? 'Codex is resolving this instruction in the Task pane.' : result.message ?? 'Codex could not start.');
   };
 
+  const taskDocument = document.blocks.some((block) => block.type === 'task-result');
+
   return (
     <section className="native-page-view" aria-label={`Page ${document.page.title}`}>
       <header className="native-document-header">
@@ -89,12 +99,26 @@ export function NativePageView({ pageId, revision, onCommand, taskSnapshot, onTa
           }}
           onBlur={(event) => { if (titleTimer.current) clearTimeout(titleTimer.current); void onCommand({ type: 'renamePage', pageId, title: event.target.value }); }}
         />
-        <div className="native-document-meta"><span>Local Page</span><span className="native-header-actions"><button type="button" onClick={() => { void window.poppinPages.exportPage(pageId, 'pdf').then((result) => setMessage(result.message ?? 'Exported PDF.')); }}><Download size={12} /> PDF</button><button type="button" onClick={() => { void window.poppinPages.exportPage(pageId, 'docx').then((result) => setMessage(result.message ?? 'Exported Word document.')); }}><Download size={12} /> Word</button>{message ? <em>{message}</em> : null}</span></div>
+        <div className="native-document-meta"><span>{taskDocument ? 'Tandem task document' : 'Local Page'}</span><span className="native-header-actions"><button type="button" onClick={() => { void window.poppinPages.exportPage(pageId, 'pdf').then((result) => setMessage(result.message ?? 'Exported PDF.')); }}><Download size={12} /> PDF</button><button type="button" onClick={() => { void window.poppinPages.exportPage(pageId, 'docx').then((result) => setMessage(result.message ?? 'Exported Word document.')); }}><Download size={12} /> Word</button>{message ? <em>{message}</em> : null}</span></div>
       </header>
       <div className="native-page-layout">
-        <div className="block-editor" aria-label="Page blocks">
+        <div className={`block-editor ${taskDocument ? 'task-document' : ''}`} aria-label="Page blocks">
           {document.blocks.length === 0 ? <p className="native-empty-copy">This page is empty. Add your first text block.</p> : null}
-          {document.blocks.map((block) => (
+          {document.blocks.map((block) => block.type === 'task-prompt' ? (
+            <section className="task-document-prompt" key={block.id}>
+              <span>You asked</span>
+              <p>{textOf(block)}</p>
+              <time>{formatTaskTime(block)}</time>
+            </section>
+          ) : block.type === 'task-result' ? (
+            <section className="task-document-result" key={block.id}>
+              <div className="task-document-result-meta"><span>Work result</span><span>Rendered with Tandem</span></div>
+              <div onMouseUp={(event) => captureRenderedSelection(block, event.currentTarget)}>
+                <TandemMarkdown markdown={textOf(block)} title={document.page.title} />
+              </div>
+              <TaskSources block={block} />
+            </section>
+          ) : (
             <article className="native-block" key={block.id}>
               <textarea
                 aria-label="Page text block"
@@ -142,4 +166,20 @@ function textOf(block: PageBlockSnapshot): string {
   if (typeof block.content === 'string') return block.content;
   if (block.content && typeof block.content === 'object' && !Array.isArray(block.content) && typeof block.content.text === 'string') return block.content.text;
   return '';
+}
+
+function formatTaskTime(block: PageBlockSnapshot): string {
+  if (!block.content || typeof block.content !== 'object' || Array.isArray(block.content) || typeof block.content.createdAt !== 'string') return '';
+  const date = new Date(block.content.createdAt);
+  return Number.isNaN(date.getTime()) ? '' : date.toLocaleString();
+}
+
+function TaskSources({ block }: { block: PageBlockSnapshot }) {
+  if (!block.content || typeof block.content !== 'object' || Array.isArray(block.content) || !Array.isArray(block.content.sources)) return null;
+  const sources = block.content.sources.flatMap((value) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
+    return typeof value.title === 'string' && typeof value.url === 'string' ? [{ title: value.title, url: value.url }] : [];
+  });
+  if (sources.length === 0) return null;
+  return <aside className="task-document-sources"><h3>Sources</h3><ol>{sources.map((source) => <li key={source.url}><a href={source.url} onClick={(event) => { event.preventDefault(); void window.poppinBrowser.command({ type: 'create', input: source.url }); }}>{source.title || source.url}</a></li>)}</ol></aside>;
 }

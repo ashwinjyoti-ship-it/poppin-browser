@@ -82,6 +82,7 @@ export class TaskEngine {
   private pendingQuestionIds: string[] = [];
   private pendingBrowserToolRequest: { requestId: number | string; command: Extract<BrowserAgentCommand, { type: 'act' | 'batch' }> } | null = null;
   private browserToolsAvailableInCurrentThread = false;
+  private readonly agentMessages = new Map<string, string>();
 
   constructor(
     private readonly window: BrowserWindow,
@@ -267,8 +268,9 @@ export class TaskEngine {
     });
     this.browserToolsAvailableInCurrentThread = kind === 'work' && Boolean(this.options.executeBrowserAgentCommand);
     const now = new Date().toISOString();
+    this.agentMessages.clear();
     this.task = {
-      state: 'Running', kind, prompt, model: model.id, reasoningEffort: effort,
+      state: 'Running', kind, prompt, model: model.id, reasoningEffort: effort, documentId: randomUUID(),
       threadId: thread.id, turnId: '', baselineCommit,
       progress: [{
         id: 'starting', kind: 'status', title: kind === 'code' ? 'Starting Code task' : 'Starting Work task',
@@ -341,6 +343,7 @@ export class TaskEngine {
     task.pendingApproval = null;
     task.error = null;
     task.result = '';
+    this.agentMessages.clear();
     task.browserRun = createBrowserRun(wantsBrowserUse, browserSnapshot);
     task.progress = [{
       id: `continuation-${Date.now()}`, kind: 'status',
@@ -786,7 +789,12 @@ export class TaskEngine {
       }
       case 'item/agentMessage/delta': {
         const delta = stringValue(params.delta);
-        if (delta) task.result = `${task.result}${delta}`.slice(-MAX_RESULT_LENGTH);
+        if (delta) {
+          const itemId = stringValue(params.itemId) || 'agent-message';
+          const message = `${this.agentMessages.get(itemId) ?? ''}${delta}`.slice(-MAX_RESULT_LENGTH);
+          this.agentMessages.set(itemId, message);
+          task.result = message;
+        }
         break;
       }
       case 'item/commandExecution/outputDelta': {
@@ -889,6 +897,7 @@ export class TaskEngine {
     task.pendingApproval = null;
     task.error = null;
     task.result = '';
+    this.agentMessages.clear();
     this.appendProgress({
       id: `browser-retry-${task.browserRun.retryCount}`,
       kind: 'status',

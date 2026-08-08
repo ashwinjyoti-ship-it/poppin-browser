@@ -277,7 +277,7 @@ describe('Codex controls', () => {
       ...READY_TASK,
       task: {
         state: 'Completed', kind: 'work', prompt: 'First question', model: 'gpt-test', reasoningEffort: 'high',
-        threadId: 'thread-1', turnId: 'turn-1', baselineCommit: '', progress: [], pendingApproval: null,
+        documentId: 'document-1', threadId: 'thread-1', turnId: 'turn-1', baselineCommit: '', progress: [], pendingApproval: null,
         result: 'First answer', diff: '', error: null,
         browserRun: { required: false, state: 'not-required', taskSpaceId: null, successfulActionCount: 0, retryCount: 0, lastActionAt: null, sources: [] },
         createdAt: '', updatedAt: '',
@@ -298,7 +298,7 @@ describe('Codex controls', () => {
       ...READY_TASK,
       task: {
         state: 'Needs Approval', kind: 'code', prompt: 'Change it', model: 'gpt-test', reasoningEffort: 'high',
-        threadId: 'thread-1', turnId: 'turn-1', baselineCommit: 'a'.repeat(40), progress: [],
+        documentId: 'document-1', threadId: 'thread-1', turnId: 'turn-1', baselineCommit: 'a'.repeat(40), progress: [],
         pendingApproval: { requestId: 9, kind: 'command', title: 'Codex wants to run a command', detail: 'npm test\n/tmp/project', reason: 'Verify the change' },
         result: '', diff: '', error: null,
         browserRun: { required: false, state: 'not-required', taskSpaceId: null, successfulActionCount: 0, retryCount: 0, lastActionAt: null, sources: [] },

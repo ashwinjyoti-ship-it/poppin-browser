@@ -21,8 +21,10 @@
   },
   "dependencies": {
     "docx": "^9.7.1",
+    "dompurify": "3.4.13",
     "exceljs": "4.4.0",
     "lucide-react": "^0.468.0",
+    "marked": "18.0.5",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
   },

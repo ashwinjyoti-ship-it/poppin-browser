@@ -64,6 +64,7 @@ export interface TaskRecordSnapshot {
   prompt: string;
   model: string;
   reasoningEffort: string;
+  documentId: string;
   threadId: string;
   turnId: string;
   baselineCommit: string;

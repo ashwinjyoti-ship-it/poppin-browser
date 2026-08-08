@@ -127,12 +127,6 @@ describe('packaged browser workflow', () => {
     expect(newTabPage).toBeDefined();
     await expect.poll(() => newTabPage!.getByRole('heading', { name: /where would you like to go/i }).isVisible()).toBe(true);
 
-    expect(await shell.evaluate(() => window.poppinBrowser.command({ type: 'openTaskResult' }))).toMatchObject({ ok: true });
-    await expect.poll(() => exactPageInfo(application!, 'poppin://task/current/result')).toMatchObject({ title: 'Task result' });
-    await expect.poll(() => shell.getByRole('tab').count()).toBe(2);
-    await shell.getByRole('button', { name: 'Close Task result' }).click();
-    await expect.poll(() => shell.getByRole('tab').count()).toBe(1);
-
     const address = shell.getByLabel('Address and search');
     const workspaceDivider = shell.getByRole('separator', { name: 'Resize workspace pane' });
     const initialWorkspaceWidth = Number(await workspaceDivider.getAttribute('aria-valuenow'));

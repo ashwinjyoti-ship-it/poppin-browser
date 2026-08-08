@@ -19,6 +19,7 @@ describe('task store', () => {
       prompt: 'Change the button',
       model: 'gpt-5.6-sol',
       reasoningEffort: 'high',
+      documentId: 'document-1',
       threadId: 'thread-1',
       turnId: 'turn-1',
       baselineCommit: 'a'.repeat(40),
@@ -45,7 +46,7 @@ describe('task store', () => {
     const store = new TaskStore(databasePath);
     const now = new Date().toISOString();
     store.save({
-      state: 'Running', kind: 'code', prompt: 'Test', model: 'model', reasoningEffort: 'low', threadId: '', turnId: '',
+      state: 'Running', kind: 'code', prompt: 'Test', model: 'model', reasoningEffort: 'low', documentId: 'document-1', threadId: '', turnId: '',
       baselineCommit: 'b'.repeat(40), progress: [], pendingApproval: null, result: '', diff: '', error: null,
       browserRun: { required: false, state: 'not-required', taskSpaceId: null, successfulActionCount: 0, retryCount: 0, lastActionAt: null, sources: [] },
       createdAt: now, updatedAt: now,

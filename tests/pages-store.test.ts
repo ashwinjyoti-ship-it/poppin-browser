@@ -117,6 +117,31 @@ describe('pages store', () => {
     restored.close();
   });
 
+  it('keeps every completed Work turn in one persistent Tandem task document', async () => {
+    const { store, filePath } = await createStore();
+    const firstTab = store.appendTaskTurn({
+      threadId: 'thread-guitars', turnId: 'turn-1', prompt: 'Search for acoustic guitars under ₹10,000 and tell me where I can buy them.',
+      result: '| Guitar | Price |\n| --- | --- |\n| A | ₹9,999 |', createdAt: '2026-08-08T12:00:00.000Z',
+      sources: [{ title: 'Guitar shop', url: 'https://shop.example/guitars' }],
+    });
+    const secondTab = store.appendTaskTurn({
+      threadId: 'thread-guitars', turnId: 'turn-2', prompt: 'continue', result: 'Added two more verified options.',
+      createdAt: '2026-08-08T12:05:00.000Z', sources: [{ title: 'Second shop', url: 'https://two.example/guitars' }],
+    });
+    expect(secondTab.pageId).toBe(firstTab.pageId);
+    expect(store.getPage(firstTab.pageId)?.blocks.map((block) => block.type)).toEqual([
+      'task-prompt', 'task-result', 'task-prompt', 'task-result',
+    ]);
+    store.close();
+
+    const restored = new PagesStore(filePath);
+    expect(restored.openTaskDocument('thread-guitars').pageId).toBe(firstTab.pageId);
+    expect(restored.getPage(firstTab.pageId)?.blocks[1]?.content).toMatchObject({
+      text: expect.stringContaining('| Guitar |'), sources: [{ url: 'https://shop.example/guitars' }],
+    });
+    restored.close();
+  });
+
   it('applies anchored comments atomically and rejects stale block selections', async () => {
     const { store } = await createStore();
     const page = store.createPage({ title: 'Brief' });
