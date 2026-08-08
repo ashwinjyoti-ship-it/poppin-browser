@@ -1,13 +1,17 @@
-# Phase 1 Roadmap — Poppin absorbs Tandem + Memory
+# Tandem + Memory Integration Roadmap
 
-**Status**: ready to start
+**Status**: ready to start — build all sections below as one continuous push, not gated one at a time
 **Date**: 2026-08-08
 **This repo is the target** — all file paths below are relative to `poppin-browser`, right here.
+**Naming note**: this is a separate track from `POPPIN_MVP_ROADMAP.md`'s own Phase 1–13 (the browser/
+workspace/Codex/Agent-Tabs work already shipped there). Deliberately not numbered "Phase 1" to avoid
+colliding with that document's numbering — if the two ever need reconciling into one document, that's a
+separate decision, not implied by this file existing.
 **Companion design docs** (in `ashwinjyoti-ship-it/personal-ai-assistant`, `docs/`): `successor-app-design.md`, `cloudflare-compute-integration.md`
 
 This is the execution plan for the direction agreed across several planning sessions: **Poppin is the
 trunk.** Tandem's document/database engine and Karna's memory get built *into* Poppin as native
-features — not connected to as a separate app, not loaded in a webview. Phase 2 (Google/Gmail, digests,
+features — not connected to as a separate app, not loaded in a webview. Track B (Google/Gmail, digests,
 Telegram/voice capture, the approval-taxonomy merge, and any multi-device sync) is explicitly **not** in
 this document. Don't let it creep in here.
 
@@ -17,9 +21,9 @@ this document. Don't let it creep in here.
 
 - **Trunk = Poppin** (Electron, local-first), not Tandem. Reverses the earlier assumption in
   `successor-app-design.md`.
-- **Local-only for Phase 1.** No Cloudflare sync, no multi-device access. `poppin.sqlite` is the only
+- **Local-only for this track.** No Cloudflare sync, no multi-device access. `poppin.sqlite` is the only
   store. Revisit if that assumption changes — don't design around it happening.
-- **Memory moves up from Phase 2 into Phase 1** — it uses the exact substrate this phase builds anyway.
+- **Memory moves up from Track B into this track** — it uses the exact substrate this build already creates.
 - **No new UI framework, no new local DB engine.** Everything here extends patterns Poppin already has.
 - **Pages and Databases are native tab kinds**, rendered directly in Poppin's renderer — never a webview
   pointed at a hosted URL.
@@ -158,7 +162,7 @@ semantic recall. There's no local equivalent bundled yet. Options, cheapest firs
 1. Skip semantic search for v1 — keyword search only, via SQLite's FTS5 extension (bundled with
    `node:sqlite`, zero new dependencies).
 2. Bundle a local vector index (e.g. `sqlite-vec`) plus a small local embedding model.
-3. Defer semantic recall entirely to whenever Phase 2's sync question gets revisited.
+3. Defer semantic recall entirely to whenever Track B's sync question gets revisited.
 
 **Recommendation: start with (1).** Don't build (2) speculatively — FTS5 keyword search covers most
 "did I already write this down" recall, and semantic search is a discrete upgrade you can bolt on later
@@ -175,7 +179,7 @@ only held browser-tab scratch context; it matters once Memory is in there.
 - Use Electron's `safeStorage` API (OS-keychain-backed, no login UI needed) to encrypt the Memory page's
   content at rest. While touching this, encrypt the existing Codex account token storage the same way —
   it's the same gap, already present, not a scope add.
-- **Do not** build a PIN/login screen for Phase 1 — that's real multi-account separation, and it's only
+- **Do not** build a PIN/login screen for this track — that's real multi-account separation, and it's only
   worth the cost once this app is shared across people or devices, neither of which is true yet.
 
 ---
@@ -191,7 +195,7 @@ only held browser-tab scratch context; it matters once Memory is in there.
 
 ---
 
-## 11. Explicitly out of scope here (Phase 2)
+## 11. Explicitly out of scope here (Track B)
 
 Google/Gmail OAuth + MCP wrapping, digests-as-living-pages, Telegram/voice capture, the
 `toolTiers.ts`/Poppin approval-taxonomy merge, Workers Cron for anything, and any multi-device sync or
@@ -200,9 +204,11 @@ actually required for the item above it — it probably isn't.
 
 ---
 
-## 12. Suggested build order
+## 12. Build order
 
-Sized to land something real early, matching how the last few phases in this project have gone.
+Sequencing only, not a gate — build straight through §2–§10 in one push rather than pausing for
+hands-on approval between steps. That gated, one-phase-at-a-time discipline is `POPPIN_MVP_ROADMAP.md`'s
+process for its own numbered phases; this track is explicitly being run differently, end to end.
 
 1. **Data layer.** §2 only. Provable with Vitest, no UI.
 2. **Page tab, read/write.** §3 (page half only) + §4. You can write and reopen a note.
@@ -214,7 +220,7 @@ Sized to land something real early, matching how the last few phases in this pro
 
 ---
 
-## 13. Definition of done for Phase 1
+## 13. Definition of done for this track
 
 - [ ] Pages and Databases are native tabs, backed by `poppin.sqlite`, survive app restart
 - [ ] Left pane shows a Pages tree alongside the existing Tabs/Documents/Project sections
