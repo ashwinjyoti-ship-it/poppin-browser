@@ -91,6 +91,31 @@ describe('browser chrome', () => {
     expect(container.querySelector('.tab-icon svg')).not.toBeNull();
   });
 
+  it('keeps a long Agent Tabs title intentionally truncated without clipping its count', () => {
+    const { container } = render(
+      <TabStrip
+        tabs={[TAB]}
+        groups={[]}
+        activeTabId={TAB.id}
+        onActivate={vi.fn()}
+        onClose={vi.fn()}
+        onCreate={vi.fn()}
+        onReorder={vi.fn()}
+        onShowTabMenu={vi.fn()}
+        onToggleGroup={vi.fn()}
+        onRenameGroup={vi.fn()}
+        onShowGroupMenu={vi.fn()}
+        agentTaskSpace={{ id: 'space-1', taskId: 'task-1', name: 'Search for acoustic guitars under ₹10,000 and tell me where I can buy them.', mode: 'browser-only', owner: 'agent', status: 'agent-controlling', tabIds: ['agent-tab'], contextTabIds: [], explorationTabIds: ['agent-tab'], activeTabId: 'agent-tab', createdAt: '', updatedAt: '', kept: false }}
+        watchingAgentTabs
+        onWatchAgentTabs={vi.fn()}
+      />,
+    );
+    const entry = screen.getByRole('button', { name: /Agent Tabs · Search for acoustic guitars/i });
+    expect(entry).toHaveAttribute('title', 'Agent Tabs · Search for acoustic guitars under ₹10,000 and tell me where I can buy them.');
+    expect(container.querySelector('.agent-tabs-entry-label')).toHaveTextContent('Search for acoustic guitars under ₹10,000');
+    expect(container.querySelector('.agent-tabs-entry-count')).toHaveTextContent('1');
+  });
+
   it('renders, renames, and collapses visually connected tab groups', async () => {
     const user = userEvent.setup();
     const onToggleGroup = vi.fn();

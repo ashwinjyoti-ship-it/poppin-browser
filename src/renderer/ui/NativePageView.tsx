@@ -91,6 +91,7 @@ export function NativePageView({ pageId, revision, onCommand, taskSnapshot, onTa
         <input
           className="native-title-input"
           aria-label="Page title"
+          title={document.page.title}
           defaultValue={document.page.title}
           onChange={(event) => {
             const title = event.target.value;

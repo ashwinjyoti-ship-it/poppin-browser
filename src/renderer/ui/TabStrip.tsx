@@ -88,7 +88,18 @@ export function TabStrip({
         onDragOver={(event) => event.preventDefault()}
         onDrop={(event) => dropTab(event, null, onReorder)}
       >
-        {agentTaskSpace ? <button type="button" className={`agent-tabs-entry ${watchingAgentTabs ? 'agent-tabs-entry-active' : ''}`} onClick={onWatchAgentTabs}>Agent Tabs · {agentTaskSpace.name}<span>{agentTaskSpace.tabIds.length}</span></button> : null}
+        {agentTaskSpace ? (
+          <button
+            type="button"
+            className={`agent-tabs-entry ${watchingAgentTabs ? 'agent-tabs-entry-active' : ''}`}
+            aria-label={`Agent Tabs · ${agentTaskSpace.name}. Return to live view.`}
+            title={`Agent Tabs · ${agentTaskSpace.name}`}
+            onClick={onWatchAgentTabs}
+          >
+            <span className="agent-tabs-entry-label">Agent Tabs · {agentTaskSpace.name}</span>
+            <span className="agent-tabs-entry-count" aria-hidden="true">{agentTaskSpace.tabIds.length}</span>
+          </button>
+        ) : null}
         {tabs.flatMap((tab) => {
           const group = tab.groupId ? groupsById.get(tab.groupId) : undefined;
           const showGroup = Boolean(group && !renderedGroups.has(group.id));

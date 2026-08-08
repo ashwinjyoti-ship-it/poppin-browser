@@ -530,7 +530,13 @@ body.pane-is-resizing * { cursor: col-resize !important; user-select: none !impo
 .document-row > .document-open-database:hover { color: #8b581f; background: #ffe7c4; }
 .section-empty { padding: 8px 6px; color: #a0978d; font-size: 11px; }
 
-.pages-actions { display: flex; gap: 4px; }
+.pages-section { container-type: inline-size; }
+.pages-actions { display: flex; min-width: 0; flex-wrap: wrap; justify-content: flex-end; gap: 4px; }
+.pages-actions button { flex: 0 0 auto; }
+@container (max-width: 260px) {
+  .pages-section .section-heading { display: grid; grid-template-columns: minmax(0, 1fr); align-items: start; gap: 8px; }
+  .pages-actions { justify-content: flex-start; }
+}
 .page-tree { display: flex; flex-direction: column; gap: 2px; }
 .page-tree-row { display: grid; grid-template-columns: 18px 18px minmax(0, 1fr) 24px; align-items: center; min-height: 32px; border-radius: 8px; }
 .page-tree-row:hover { background: var(--surface-muted); }
@@ -544,7 +550,7 @@ body.pane-is-resizing * { cursor: col-resize !important; user-select: none !impo
 
 .native-page-view, .native-database-view { width: 100%; height: 100%; overflow: auto; background: #fffdf9; }
 .native-document-header { position: sticky; z-index: 3; top: 0; padding: 30px 42px 20px; border-bottom: 1px solid var(--divider); background: rgba(255, 253, 249, .96); backdrop-filter: blur(14px); }
-.native-title-input { display: block; width: 100%; padding: 0; border: 0; outline: 0; color: #2d2925; background: transparent; font-size: clamp(25px, 3vw, 38px); font-weight: 720; letter-spacing: -.045em; }
+.native-title-input { display: block; width: 100%; padding: 0; overflow: hidden; border: 0; outline: 0; color: #2d2925; background: transparent; font-size: clamp(25px, 3vw, 38px); font-weight: 720; letter-spacing: -.045em; text-overflow: ellipsis; white-space: nowrap; }
 .native-document-meta { display: flex; justify-content: space-between; margin-top: 8px; color: #9b8f83; font-size: 10px; }
 .native-header-actions { display: flex; align-items: center; gap: 6px; }
 .native-header-actions button { display: flex; align-items: center; gap: 4px; min-height: 27px; padding: 0 8px; border: 1px solid var(--border); border-radius: 7px; color: #795631; background: var(--surface); font-size: 9px; }
@@ -558,7 +564,7 @@ body.pane-is-resizing * { cursor: col-resize !important; user-select: none !impo
 .task-document-prompt time { color: #a0978d; font-size: 9px; }
 .task-document-result { padding: 28px 0 46px; border-bottom: 1px solid var(--divider); }
 .task-document-result-meta { display: flex; justify-content: space-between; margin-bottom: 22px; }
-.tandem-markdown { color: #1d3325; font-size: 15px; line-height: 1.7; overflow-wrap: anywhere; }
+.tandem-markdown { color: #1d3325; font-size: 15px; line-height: 1.7; overflow-wrap: break-word; }
 .tandem-markdown > :first-child { margin-top: 0; }
 .tandem-markdown > :last-child { margin-bottom: 0; }
 .tandem-markdown h1 { margin: 28px 0 14px; font-size: 28px; line-height: 1.2; }
@@ -571,8 +577,14 @@ body.pane-is-resizing * { cursor: col-resize !important; user-select: none !impo
 .tandem-markdown pre { padding: 14px 16px; overflow-x: auto; border-radius: 8px; color: #e2e8f0; background: #17281d; white-space: pre-wrap; }
 .tandem-markdown code { padding: 2px 5px; border-radius: 4px; background: #f4f1ed; font-family: ui-monospace, monospace; font-size: .9em; }
 .tandem-markdown pre code { padding: 0; color: inherit; background: none; }
-.tandem-markdown table { width: 100%; margin: 16px 0; border-collapse: collapse; table-layout: auto; }
-.tandem-markdown th, .tandem-markdown td { padding: 9px 11px; border: 1px solid #dcded6; text-align: left; vertical-align: top; }
+.tandem-table-scroll { max-width: 100%; margin: 16px 0; overflow-x: auto; border: 1px solid #dcded6; border-radius: 8px; }
+.tandem-table-scroll:focus-visible { outline: 2px solid #006a40; outline-offset: 2px; }
+.tandem-markdown table { width: 100%; min-width: 640px; margin: 0; border-collapse: collapse; table-layout: auto; }
+.tandem-markdown th, .tandem-markdown td { padding: 9px 11px; overflow-wrap: normal; word-break: normal; border: 1px solid #dcded6; text-align: left; vertical-align: top; }
+.tandem-markdown tr:first-child th { border-top: 0; }
+.tandem-markdown tr > :first-child { border-left: 0; }
+.tandem-markdown tr > :last-child { border-right: 0; }
+.tandem-markdown tbody tr:last-child td { border-bottom: 0; }
 .tandem-markdown th { background: #f4f1ed; font-weight: 650; }
 .tandem-markdown a, .task-document-sources a { color: #006a40; text-decoration: underline; text-underline-offset: 2px; }
 .tandem-markdown img { display: block; max-width: 100%; height: auto; margin: 12px 0; border-radius: 8px; }
@@ -865,6 +877,7 @@ body.pane-is-resizing * { cursor: col-resize !important; user-select: none !impo
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; }
 }
-.agent-tabs-entry { display: inline-flex; align-items: center; gap: 7px; flex: 0 0 auto; max-width: 220px; height: 27px; padding: 0 10px; border: 1px solid rgba(210, 136, 45, .28); border-radius: 9px; color: #7b4b16; background: #fff6e8; font: 600 11px/1 system-ui; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.agent-tabs-entry span { display: grid; place-items: center; min-width: 17px; height: 17px; border-radius: 9px; color: white; background: #d78421; font-size: 10px; }
+.agent-tabs-entry { display: inline-flex; align-items: center; gap: 7px; flex: 0 1 360px; width: max-content; max-width: min(360px, 34vw); height: 27px; padding: 0 10px; overflow: hidden; border: 1px solid rgba(210, 136, 45, .28); border-radius: 9px; color: #7b4b16; background: #fff6e8; font: 600 11px/1 system-ui; white-space: nowrap; }
+.agent-tabs-entry-label { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-tabs-entry-count { display: grid; place-items: center; flex: 0 0 auto; min-width: 17px; height: 17px; border-radius: 9px; color: white; background: #d78421; font-size: 10px; }
 .agent-tabs-entry-active { box-shadow: inset 0 0 0 1px rgba(210, 132, 31, .25); background: #ffeed2; }

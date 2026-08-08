@@ -5,7 +5,7 @@ import { markdownToPdfHtml } from '../../tandem/markdownToPdfHtml';
 
 export function TandemMarkdown({ markdown, title, className = '' }: { markdown: string; title: string; className?: string }) {
   const html = useMemo(
-    () => DOMPurify.sanitize(markdownToPdfHtml(markdown || 'No result was returned.', title)),
+    () => wrapScrollableTables(DOMPurify.sanitize(markdownToPdfHtml(markdown || 'No result was returned.', title))),
     [markdown, title],
   );
 
@@ -18,4 +18,10 @@ export function TandemMarkdown({ markdown, title, className = '' }: { markdown: 
   };
 
   return <article className={`tandem-markdown ${className}`} onClick={openLink} dangerouslySetInnerHTML={{ __html: html }} />;
+}
+
+function wrapScrollableTables(html: string): string {
+  return html
+    .replaceAll('<table>', '<div class="tandem-table-scroll" role="region" aria-label="Scrollable table" tabindex="0"><table>')
+    .replaceAll('</table>', '</table></div>');
 }

@@ -85,6 +85,7 @@ describe('native Pages UI', () => {
     render(<NativePageView pageId="task-page" revision={0} onCommand={vi.fn().mockResolvedValue(null)} taskSnapshot={COMPLETED_TASK} onTaskCommand={vi.fn()} onTaskStarted={vi.fn()} />);
     expect(await screen.findByText('Top choices')).toHaveProperty('tagName', 'STRONG');
     expect(screen.getByRole('table')).toBeVisible();
+    expect(screen.getByRole('region', { name: 'Scrollable table' })).toHaveAttribute('tabindex', '0');
     expect(screen.getByRole('link', { name: 'Shop' })).toHaveAttribute('href', 'https://shop.example/guitar');
     expect(screen.queryByText('| Guitar | Price |')).not.toBeInTheDocument();
   });
