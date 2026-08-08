@@ -65,8 +65,25 @@ describe('BrowserAgentEngine', () => {
     expect(engine.getSnapshot().taskSpace).toMatchObject({
       mode: 'browser-only', tabIds: ['agent-exploration'], contextTabIds: [], explorationTabIds: ['agent-exploration'],
     });
+    expect(engine.getSnapshot().watching).toBe(true);
+    expect(pages.activated).toEqual(['agent-exploration']);
     expect((await agentAct(engine, { type: 'navigate', url: 'https://example.com' }, 'agent-exploration')).ok).toBe(true);
     expect(pages.performed).toContainEqual({ tabId: 'agent-exploration', action: { type: 'navigate', url: 'https://example.com' } });
+  });
+
+  it('shows live Agent Tabs by default, follows agent tab changes, and lets the user leave without stopping', async () => {
+    const { engine, pages } = setup();
+    await engine.execute({ type: 'start', taskId: 'task-1', mode: 'mixed', tabIds: ['approved'] });
+    expect(engine.getSnapshot().watching).toBe(true);
+    expect(pages.activated).toEqual(['agent-exploration']);
+    expect((await agentAct(engine, { type: 'read' }, 'agent-approved')).ok).toBe(true);
+    expect(pages.activated).toEqual(['agent-exploration', 'agent-approved']);
+    expect(await engine.execute({ type: 'leaveWatch' })).toEqual({ ok: true });
+    expect(engine.getSnapshot()).toMatchObject({ state: 'running', watching: false });
+    expect((await agentAct(engine, { type: 'read' }, 'agent-exploration')).ok).toBe(true);
+    expect(pages.activated).toEqual(['agent-exploration', 'agent-approved']);
+    expect(await engine.execute({ type: 'watch' })).toEqual({ ok: true });
+    expect(pages.activated).toEqual(['agent-exploration', 'agent-approved', 'agent-exploration']);
   });
 
   it('supports pause, explicit resume, and immediate user takeover', async () => {

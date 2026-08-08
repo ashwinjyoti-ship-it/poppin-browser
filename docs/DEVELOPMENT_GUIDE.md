@@ -98,6 +98,7 @@ These rules are non-negotiable:
 - Authentication happens only in Poppin’s persistent browser partition and is performed by the user.
 - Authentication popups open as sandboxed, task-independent overlay windows that preserve the website's opener relationship. Poppin displays a Cancel control but receives no credential-field access.
 - With “Follow website; preview other sites,” ordinary same-site links navigate normally while cross-site links open in an Arc-style Peek overlay. The user can close the preview or promote it to a full tab without losing the source page.
+- Browser-use Work tasks open their isolated Agent Tabs in live view immediately. Poppin follows the active task-owned tab while the user is watching; selecting a normal tab leaves live view without pausing Codex, and “Agent Tabs” returns to the current live page. The trusted Work Result opens only after the browser turn completes.
 - Web content has no privileged Poppin API access.
 - User-entered addresses are restricted to HTTP(S). Trusted internal result pages are allowlisted only for Poppin-created/restored tabs; do not open arbitrary custom schemes from the address bar.
 - Explicitly asking for browser use grants ordinary visible actions inside that task's Agent Tabs. Selected tabs, documents, or visual selections provide explicit grounding for mixed work; a browser-only task receives only a fresh exploration tab. Credential forms and critical actions pause for exact approval; reversible draft creation and saving do not.

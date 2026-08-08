@@ -104,6 +104,7 @@ export type BrowserAgentCommand =
   | { type: 'stop' }
   | { type: 'takeOver' }
   | { type: 'watch' }
+  | { type: 'leaveWatch' }
   | { type: 'keepTabs' }
   | { type: 'closeTaskTabs' }
   | { type: 'act'; taskSpaceId: string; tabId: string; action: BrowserAgentAction }

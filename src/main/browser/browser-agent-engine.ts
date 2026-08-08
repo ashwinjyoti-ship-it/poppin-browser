@@ -128,6 +128,7 @@ export class BrowserAgentEngine {
         case 'resume': return this.resume();
         case 'stop': return this.stop();
         case 'watch': return this.watch();
+        case 'leaveWatch': return this.leaveWatch();
         case 'keepTabs': return this.keepTabs();
         case 'closeTaskTabs': return this.closeTaskTabs();
         case 'act': return await this.act(command.taskSpaceId, command.tabId, command.action);
@@ -185,7 +186,8 @@ export class BrowserAgentEngine {
     };
     this.controlEpoch += 1;
     this.latestSnapshotByTab.clear();
-    this.snapshot = { ...emptySnapshot(), state: 'running', taskId, taskSpace, allowedTabIds: tabIds, activeTabId: explorationTabId };
+    const watching = this.pages.watchTaskSpace(id, explorationTabId);
+    this.snapshot = { ...emptySnapshot(), state: 'running', taskId, taskSpace, watching, allowedTabIds: tabIds, activeTabId: explorationTabId };
     this.append('', 'Agent Tabs started', tabIds.join(', '), 'completed', `${contextTabIds.length} context clone(s) and 1 fresh exploration tab created; source tabs were unchanged.`);
     await this.persist();
     this.emit();
@@ -253,6 +255,12 @@ export class BrowserAgentEngine {
     const space = this.snapshot.taskSpace;
     if (!space || !this.pages.watchTaskSpace(space.id, space.activeTabId)) return { ok: false, message: 'Agent Tabs are no longer available.' };
     this.snapshot.watching = true;
+    this.emit();
+    return { ok: true };
+  }
+
+  private leaveWatch(): BrowserAgentCommandResult {
+    this.snapshot.watching = false;
     this.emit();
     return { ok: true };
   }
@@ -492,6 +500,7 @@ export class BrowserAgentEngine {
     const epoch = this.controlEpoch;
     this.snapshot.activeTabId = tabId;
     this.updateTaskSpace({ activeTabId: tabId });
+    if (this.snapshot.watching) this.pages.watchTaskSpace(space.id, tabId);
     this.snapshot.currentAction = label(action);
     this.append(tabId, label(action), inspectedTarget, 'started', 'Visible action started.');
     this.emit();

@@ -282,6 +282,15 @@ describe('packaged browser workflow', () => {
     await expect.poll(() => exactPageInfo(application!, `${origin}/agent`)).toMatchObject({ title: 'Browser agent fixture' });
     const agentTabId = await shell.evaluate(async () => (await window.poppinBrowser.getSnapshot()).activeTabId);
     expect(await shell.evaluate((tabId) => window.poppinBrowserAgent.command({ type: 'start', taskId: 'smoke-browser-task', mode: 'mixed', tabIds: [tabId] }), agentTabId)).toMatchObject({ ok: true });
+    await expect.poll(() => shell.evaluate(async () => {
+      const agent = await window.poppinBrowserAgent.getSnapshot();
+      const browser = await window.poppinBrowser.getSnapshot();
+      return agent.watching && browser.activeTabId === agent.taskSpace?.explorationTabIds[0];
+    })).toBe(true);
+    await shell.getByRole('tab', { name: /Browser agent fixture/ }).first().click();
+    await expect.poll(() => shell.evaluate(async () => (await window.poppinBrowserAgent.getSnapshot()).watching)).toBe(false);
+    await shell.getByRole('button', { name: /Agent Tabs · Browser task/ }).click();
+    await expect.poll(() => shell.evaluate(async () => (await window.poppinBrowserAgent.getSnapshot()).watching)).toBe(true);
     const agentScope = await shell.evaluate(async () => {
       const snapshot = await window.poppinBrowserAgent.getSnapshot();
       if (snapshot.taskSpace?.contextTabIds.length !== 1 || snapshot.taskSpace.explorationTabIds.length !== 1) throw new Error('Mixed Agent Tabs were not created.');
