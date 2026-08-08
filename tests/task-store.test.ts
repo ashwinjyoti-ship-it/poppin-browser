@@ -27,6 +27,7 @@ describe('task store', () => {
       result: 'Implemented the change.',
       diff: 'diff --git a/src/App.tsx b/src/App.tsx',
       error: null,
+      browserRun: { required: true, state: 'completed', taskSpaceId: 'space-1', successfulActionCount: 3, retryCount: 1, lastActionAt: '2026-08-07T00:00:30.000Z' },
       delivery: { branch: 'codex/task', commit: 'c'.repeat(40), remote: 'https://github.com/acme/repo.git', pushed: true, pullRequest: null, message: 'Pushed.' },
       createdAt: '2026-08-07T00:00:00.000Z',
       updatedAt: '2026-08-07T00:01:00.000Z',
@@ -46,6 +47,7 @@ describe('task store', () => {
     store.save({
       state: 'Running', kind: 'code', prompt: 'Test', model: 'model', reasoningEffort: 'low', threadId: '', turnId: '',
       baselineCommit: 'b'.repeat(40), progress: [], pendingApproval: null, result: '', diff: '', error: null,
+      browserRun: { required: false, state: 'not-required', taskSpaceId: null, successfulActionCount: 0, retryCount: 0, lastActionAt: null },
       createdAt: now, updatedAt: now,
     });
     store.close();

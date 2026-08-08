@@ -22,6 +22,10 @@ describe('Codex app-server client', () => {
       expect.objectContaining({ id: 'test-model', defaultReasoningEffort: 'medium' }),
     ]);
     const thread = await server.startThread({ cwd: '/tmp/project', model: 'test-model', developerInstructions: 'Stay scoped.' });
+    await expect(server.injectThreadItems(thread.id, [
+      { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Prior request' }] },
+      { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Prior answer' }] },
+    ])).resolves.toBeUndefined();
     const turn = await server.startTurn({ threadId: thread.id, prompt: 'Fix it', cwd: '/tmp/project', model: 'test-model', effort: 'medium' });
     expect(turn.id).toBe('turn-test');
     await expect(approval).resolves.toEqual({ method: 'item/commandExecution/requestApproval', id: 900 });

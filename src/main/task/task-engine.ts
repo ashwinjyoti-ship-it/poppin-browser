@@ -6,6 +6,7 @@ import {
   TASK_CHANNELS,
   type CodexModelSnapshot,
   type TaskApprovalSnapshot,
+  type TaskBrowserRunSnapshot,
   type TaskCommand,
   type TaskCommandResult,
   type TaskProgressSnapshot,
@@ -22,7 +23,9 @@ import {
   isRecord,
   type CodexDynamicToolCallResponse,
   type CodexDynamicToolSpec,
+  type CodexThread,
   type CodexThreadItem,
+  type JsonObject,
   type RpcNotification,
   type RpcServerRequest,
 } from '../codex/protocol';
@@ -34,6 +37,9 @@ import { GitHubEngine } from '../project/github-engine';
 const MAX_RESULT_LENGTH = 120_000;
 const MAX_DIFF_LENGTH = 1_500_000;
 const MAX_PROGRESS_ITEMS = 100;
+const MAX_BROWSER_COMPLETION_RETRIES = 1;
+const MAX_REHYDRATED_CONVERSATION_ITEMS = 12;
+const MAX_REHYDRATED_ITEM_LENGTH = 60_000;
 const BROWSER_TOOL_NAME = 'poppin_browser_action';
 const BROWSER_BATCH_TOOL_NAME = 'poppin_browser_batch';
 
@@ -69,7 +75,8 @@ export class TaskEngine {
   private pendingPermissionProfile: Record<string, unknown> | null = null;
   private pendingExternalAction: PendingExternalAction | null = null;
   private pendingQuestionIds: string[] = [];
-  private pendingBrowserToolRequest: number | string | null = null;
+  private pendingBrowserToolRequest: { requestId: number | string; command: Extract<BrowserAgentCommand, { type: 'act' | 'batch' }> } | null = null;
+  private browserToolsAvailableInCurrentThread = false;
 
   constructor(
     private readonly window: BrowserWindow,
@@ -84,6 +91,7 @@ export class TaskEngine {
         ...this.task,
         state: 'Failed',
         pendingApproval: null,
+        browserRun: this.task.browserRun.required ? { ...this.task.browserRun, state: 'incomplete' } : this.task.browserRun,
         error: 'Poppin closed before this Codex task finished. Review the project before starting another task.',
         updatedAt: new Date().toISOString(),
       };
@@ -104,12 +112,13 @@ export class TaskEngine {
 
   resolveBrowserToolApproval(command: BrowserAgentCommand, result: BrowserAgentCommandResult): void {
     if (!['respondApproval', 'takeOver', 'pause', 'stop'].includes(command.type) || this.pendingBrowserToolRequest === null) return;
-    const requestId = this.pendingBrowserToolRequest;
+    const pending = this.pendingBrowserToolRequest;
     this.pendingBrowserToolRequest = null;
-    this.respondToBrowserTool(requestId, result);
+    this.recordBrowserRunActions(pending.command, result);
+    this.respondToBrowserTool(pending.requestId, result);
     if (this.task) {
       this.upsertProgress({
-        id: `browser-tool-${String(requestId)}`,
+        id: `browser-tool-${String(pending.requestId)}`,
         kind: 'status',
         title: result.ok ? 'Browser action completed' : 'Browser action not performed',
         detail: result.data ?? result.message ?? (result.ok ? 'Completed in the approved tab.' : 'Rejected by the user.'),
@@ -164,6 +173,7 @@ export class TaskEngine {
     this.saveTimer = null;
     await this.server?.close();
     this.server = null;
+    this.browserToolsAvailableInCurrentThread = false;
     await Promise.allSettled([...this.notificationWork]);
     if (this.task) this.store.save(this.task);
   }
@@ -242,15 +252,15 @@ export class TaskEngine {
       if (!access.ok) return access;
     }
     const browserSnapshot = this.options.getBrowserAgentSnapshot?.();
-    const browserTools = kind === 'work' && browserSnapshot?.state === 'running' && browserSnapshot.allowedTabIds.length > 0
-      ? BROWSER_DYNAMIC_TOOLS
-      : undefined;
     const thread = await server.startThread({
       cwd,
       model: model.id,
       developerInstructions: kind === 'code' ? CODE_DEVELOPER_INSTRUCTIONS : WORK_DEVELOPER_INSTRUCTIONS,
-      dynamicTools: kind === 'work' && this.options.executeBrowserAgentCommand ? BROWSER_DYNAMIC_TOOLS : browserTools,
+      // Dynamic tools are registered once per Work thread by Codex. They remain dormant unless
+      // TaskEngine has created a task-owned browser space for the current browser-required turn.
+      dynamicTools: kind === 'work' && this.options.executeBrowserAgentCommand ? BROWSER_DYNAMIC_TOOLS : undefined,
     });
+    this.browserToolsAvailableInCurrentThread = kind === 'work' && Boolean(this.options.executeBrowserAgentCommand);
     const now = new Date().toISOString();
     this.task = {
       state: 'Running', kind, prompt, model: model.id, reasoningEffort: effort,
@@ -260,6 +270,7 @@ export class TaskEngine {
         detail: kind === 'code' ? pathTail(cwd) : selectedContextSummary(workspace), status: 'running',
       }],
       pendingApproval: null, result: '', diff: '', error: null, createdAt: now, updatedAt: now,
+      browserRun: createBrowserRun(wantsBrowserUse, browserSnapshot),
     };
     this.persistAndEmit();
     try {
@@ -306,8 +317,11 @@ export class TaskEngine {
       && priorBrowserSession?.state === 'completed'
       && Boolean(priorTaskSpace)
       && !priorTaskSpace!.kept;
+    const inheritsBrowserRequirement = task.kind === 'work'
+      && task.browserRun.required
+      && !priorTaskSpace?.kept;
     const wantsBrowserUse = task.kind === 'work' && (
-      inferTaskRequirements(prompt, Boolean(project)).browserUse || resumesCompletedBrowserWork
+      inferTaskRequirements(prompt, Boolean(project)).browserUse || inheritsBrowserRequirement || resumesCompletedBrowserWork
     );
     if (wantsBrowserUse) {
       if (!this.options.executeBrowserAgentCommand) return { ok: false, message: 'Controlled browser use is not available.' };
@@ -318,12 +332,13 @@ export class TaskEngine {
       if (!access.ok) return access;
     }
     const browserSnapshot = this.options.getBrowserAgentSnapshot?.();
-    await server.resumeThread(task.threadId, cwd);
+    await this.resumeThreadForTurn(task, cwd, wantsBrowserUse);
     task.state = 'Running';
     task.prompt = prompt;
     task.pendingApproval = null;
     task.error = null;
     task.result = '';
+    task.browserRun = createBrowserRun(wantsBrowserUse, browserSnapshot);
     task.progress = [{
       id: `continuation-${Date.now()}`, kind: 'status',
       title: intent === 'revision' ? 'Revising with Codex' : 'Continuing the Codex conversation',
@@ -417,13 +432,14 @@ export class TaskEngine {
     if (!task || !['Running', 'Needs Approval'].includes(task.state)) return { ok: false, message: 'There is no running task to cancel.' };
     if (task.pendingApproval) this.server?.respond(task.pendingApproval.requestId, { decision: 'cancel' });
     if (this.pendingBrowserToolRequest !== null) {
-      this.respondToBrowserTool(this.pendingBrowserToolRequest, { ok: false, message: 'The task was cancelled before the browser action was approved.' });
+      this.respondToBrowserTool(this.pendingBrowserToolRequest.requestId, { ok: false, message: 'The task was cancelled before the browser action was approved.' });
       this.pendingBrowserToolRequest = null;
     }
     if (task.threadId && task.turnId) await this.server?.interruptTurn(task.threadId, task.turnId);
     task.state = 'Cancelled';
     task.pendingApproval = null;
     task.error = null;
+    if (task.browserRun.required) task.browserRun.state = 'incomplete';
     await this.captureDiff();
     this.persistAndEmit();
     this.options.onTaskEnded?.('stopped');
@@ -680,9 +696,10 @@ export class TaskEngine {
       return;
     }
     const result = await this.options.executeBrowserAgentCommand(command);
+    this.recordBrowserRunActions(command, result);
     const browserSnapshot = this.options.getBrowserAgentSnapshot?.();
     if (!result.ok && browserSnapshot?.state === 'needs-approval' && browserSnapshot.pendingApproval) {
-      this.pendingBrowserToolRequest = request.id;
+      this.pendingBrowserToolRequest = { requestId: request.id, command };
       this.upsertProgress({
         id: `browser-tool-${String(request.id)}`,
         kind: 'status',
@@ -746,16 +763,24 @@ export class TaskEngine {
       case 'turn/completed': {
         const turn = isRecord(params.turn) ? params.turn : null;
         const status = turn ? stringValue(turn.status) : 'failed';
+        if (status === 'completed' && task.kind === 'work' && task.browserRun.required && task.browserRun.successfulActionCount === 0) {
+          if (await this.retryBrowserRequiredTurn(task)) return;
+          this.failBrowserRequiredTurn(task);
+          return;
+        }
         if (status === 'completed') {
           task.state = task.kind === 'work' ? 'Completed' : 'Needs Approval';
           task.pendingApproval = null;
           task.error = null;
+          if (task.browserRun.required) task.browserRun.state = 'completed';
         } else if (status === 'interrupted') {
           task.state = 'Cancelled';
           task.pendingApproval = null;
+          if (task.browserRun.required) task.browserRun.state = 'incomplete';
         } else {
           task.state = 'Failed';
           task.pendingApproval = null;
+          if (task.browserRun.required) task.browserRun.state = 'incomplete';
           task.error = turn && isRecord(turn.error) ? stringValue(turn.error.message) || 'Codex failed to complete the task.' : 'Codex failed to complete the task.';
         }
         await this.captureDiff();
@@ -799,6 +824,86 @@ export class TaskEngine {
     }
   }
 
+  private recordBrowserRunActions(command: Extract<BrowserAgentCommand, { type: 'act' | 'batch' }>, result: BrowserAgentCommandResult): void {
+    const task = this.task;
+    if (!task?.browserRun.required) return;
+    const count = countSuccessfulMeaningfulActions(command, result);
+    if (count === 0) return;
+    task.browserRun.successfulActionCount += count;
+    task.browserRun.state = 'action-observed';
+    task.browserRun.lastActionAt = new Date().toISOString();
+    this.touchAndSchedule();
+  }
+
+  private async retryBrowserRequiredTurn(task: TaskRecordSnapshot): Promise<boolean> {
+    if (task.browserRun.retryCount >= MAX_BROWSER_COMPLETION_RETRIES) return false;
+    const browserSnapshot = this.options.getBrowserAgentSnapshot?.();
+    if (!browserSnapshot?.taskSpace || browserSnapshot.state !== 'running' || browserSnapshot.taskSpace.id !== task.browserRun.taskSpaceId) return false;
+    const server = this.requireServer();
+    task.browserRun.retryCount += 1;
+    task.browserRun.state = 'retrying';
+    task.state = 'Running';
+    task.pendingApproval = null;
+    task.error = null;
+    task.result = '';
+    this.appendProgress({
+      id: `browser-retry-${task.browserRun.retryCount}`,
+      kind: 'status',
+      title: 'Retrying required browser work',
+      detail: 'Codex completed without using Agent Tabs. Poppin is retrying this turn with an explicit browser-use requirement.',
+      status: 'running',
+    });
+    this.persistAndEmit();
+    try {
+      const turn = await server.startTurn({
+        threadId: task.threadId,
+        prompt: buildTaskPrompt(browserRetryPrompt(task.prompt), workspaceSnapshot(this.workspaceStore), browserSnapshot),
+        cwd: this.workDirectory(),
+        model: task.model,
+        effort: task.reasoningEffort,
+      });
+      task.turnId = turn.id;
+      this.touchAndSchedule();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private async resumeThreadForTurn(task: TaskRecordSnapshot, cwd: string, wantsBrowserUse: boolean): Promise<void> {
+    const server = this.requireServer();
+    const resumed = await server.resumeThread(task.threadId, cwd);
+    if (!wantsBrowserUse || this.browserToolsAvailableInCurrentThread) return;
+
+    const replacement = await server.startThread({
+      cwd,
+      model: task.model,
+      developerInstructions: WORK_DEVELOPER_INSTRUCTIONS,
+      dynamicTools: BROWSER_DYNAMIC_TOOLS,
+    });
+    const history = conversationHistoryItems(resumed, task);
+    await server.injectThreadItems(replacement.id, history);
+    task.threadId = replacement.id;
+    this.browserToolsAvailableInCurrentThread = true;
+  }
+
+  private failBrowserRequiredTurn(task: TaskRecordSnapshot): void {
+    task.state = 'Failed';
+    task.pendingApproval = null;
+    task.result = '';
+    task.browserRun.state = 'incomplete';
+    task.error = 'Browser research is incomplete: Codex did not execute a browser action after Poppin retried the turn. The task and Agent Tabs were retained so you can retry without losing context.';
+    this.appendProgress({
+      id: `browser-incomplete-${Date.now()}`,
+      kind: 'status',
+      title: 'Browser research incomplete',
+      detail: task.error,
+      status: 'failed',
+    });
+    this.persistAndEmit();
+    this.options.onTaskEnded?.('stopped');
+  }
+
   private requireServer(): CodexAppServer {
     if (!this.server || this.connection.state !== 'ready') throw new Error(this.connection.message);
     return this.server;
@@ -813,6 +918,7 @@ export class TaskEngine {
     this.task.state = 'Failed';
     this.task.pendingApproval = null;
     this.task.error = message;
+    if (this.task.browserRun.required) this.task.browserRun.state = 'incomplete';
     this.persistAndEmit();
     this.options.onTaskEnded?.('stopped');
   }
@@ -1022,6 +1128,103 @@ function parseBrowserBatchArguments(rawArguments: unknown): Extract<BrowserAgent
     } else return null;
   }
   return { type: 'batch', taskSpaceId, tabId, snapshotId, steps };
+}
+
+function createBrowserRun(required: boolean, browserSnapshot?: BrowserAgentSnapshot): TaskBrowserRunSnapshot {
+  return {
+    required,
+    state: required ? 'awaiting-action' : 'not-required',
+    taskSpaceId: required ? browserSnapshot?.taskSpace?.id ?? null : null,
+    successfulActionCount: 0,
+    retryCount: 0,
+    lastActionAt: null,
+  };
+}
+
+function conversationHistoryItems(thread: CodexThread, task: TaskRecordSnapshot): JsonObject[] {
+  const items: JsonObject[] = [];
+  for (const turn of thread.turns ?? []) {
+    for (const item of turn.items) {
+      if (item.type === 'userMessage') {
+        const text = (item.content ?? [])
+          .filter((content) => content.type === 'text' && typeof content.text === 'string')
+          .map((content) => content.text!)
+          .join('\n')
+          .trim();
+        if (text) items.push(responseMessage('user', stripHistoricalAgentTabs(text).slice(0, MAX_REHYDRATED_ITEM_LENGTH)));
+      } else if (item.type === 'agentMessage' && item.text?.trim()) {
+        items.push(responseMessage('assistant', item.text.trim().slice(-MAX_REHYDRATED_ITEM_LENGTH)));
+      }
+    }
+  }
+  if (items.length === 0) {
+    items.push(responseMessage('user', `USER REQUEST\n${task.prompt}`));
+    if (task.result.trim()) items.push(responseMessage('assistant', task.result.trim().slice(-MAX_REHYDRATED_ITEM_LENGTH)));
+  }
+  return items.slice(-MAX_REHYDRATED_CONVERSATION_ITEMS);
+}
+
+function responseMessage(role: 'user' | 'assistant', text: string): JsonObject {
+  return { type: 'message', role, content: [{ type: role === 'user' ? 'input_text' : 'output_text', text }] };
+}
+
+function stripHistoricalAgentTabs(text: string): string {
+  return text.replace(/\n\nTASK-OWNED AGENT TABS\n[\s\S]*$/u, '');
+}
+
+function countSuccessfulMeaningfulActions(
+  command: Extract<BrowserAgentCommand, { type: 'act' | 'batch' }>,
+  result: BrowserAgentCommandResult,
+): number {
+  if (command.type === 'act') {
+    if (!result.ok || command.action.type === 'wait' || command.action.type === 'scroll') return 0;
+    if (command.action.type !== 'read') return 1;
+    return isLiveBrowserRead(result.data) ? 1 : 0;
+  }
+
+  const completedSteps = parseCompletedBatchStepIndexes(result.data);
+  if (completedSteps) {
+    return completedSteps.filter((index) => isMeaningfulBatchStep(command.steps[index])).length;
+  }
+  if (!result.ok) return 0;
+  return command.steps.filter(isMeaningfulBatchStep).length;
+}
+
+function isMeaningfulBatchStep(step: BrowserBatchStep | undefined): boolean {
+  return Boolean(step && step.action !== 'waitFor');
+}
+
+function parseCompletedBatchStepIndexes(data: string | undefined): number[] | null {
+  if (!data) return null;
+  try {
+    const parsed = JSON.parse(data) as unknown;
+    if (!isRecord(parsed) || !Array.isArray(parsed.steps)) return null;
+    return parsed.steps
+      .filter((entry) => isRecord(entry) && entry.ok === true && Number.isInteger(entry.step))
+      .map((entry) => Number(entry.step));
+  } catch {
+    return null;
+  }
+}
+
+function isLiveBrowserRead(data: string | undefined): boolean {
+  if (!data) return false;
+  try {
+    const parsed = JSON.parse(data) as unknown;
+    return isRecord(parsed) && /^https?:\/\//i.test(stringValue(parsed.url));
+  } catch {
+    return false;
+  }
+}
+
+function browserRetryPrompt(originalPrompt: string): string {
+  return `Poppin requires live browser work for this turn, but the previous response completed without any browser action.
+
+Retry the original request now:
+
+${originalPrompt}
+
+You MUST use poppin_browser_action or poppin_browser_batch with the task-owned Agent Tabs supplied below before answering. Visibly navigate or search live pages, read the relevant results, collect source URLs, and return a researched answer with sources. Do not say that browser access is unavailable: the browser tools and exact task-space identifiers are active for this turn.`;
 }
 
 function selectedContextSummary(workspace: WorkspaceSnapshot): string {

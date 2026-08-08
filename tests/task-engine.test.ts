@@ -26,6 +26,11 @@ class FakeCodexServer extends EventEmitter {
   dynamicTools: unknown[] | null = null;
   responses: Array<{ id: number | string; result: unknown }> = [];
   resumeCount = 0;
+  turnCount = 0;
+  prompts: string[] = [];
+  startThreadCount = 0;
+  resumeTurns: NonNullable<import('../src/main/codex/protocol').CodexThread['turns']> = [];
+  injectedItems: unknown[] = [];
 
   async connect() {}
   async getAccount() { return { account: { type: 'chatgpt' as const, email: 'tester@example.com', planType: 'plus' }, requiresOpenaiAuth: true }; }
@@ -37,15 +42,19 @@ class FakeCodexServer extends EventEmitter {
     }];
   }
   async startThread(params: { developerInstructions: string; cwd: string; dynamicTools?: unknown[] }) {
+    this.startThreadCount += 1;
     this.developerInstructions = params.developerInstructions;
     this.cwd = params.cwd;
     this.dynamicTools = params.dynamicTools ?? null;
     return { id: 'thread-1', sessionId: 'session-1', preview: '', ephemeral: false };
   }
-  async resumeThread() { this.resumeCount += 1; return { id: 'thread-1', sessionId: 'session-1', preview: '', ephemeral: false }; }
+  async resumeThread() { this.resumeCount += 1; return { id: 'thread-1', sessionId: 'session-1', preview: '', ephemeral: false, turns: this.resumeTurns }; }
+  async injectThreadItems(_threadId: string, items: unknown[]) { this.injectedItems = items; }
   async startTurn(params: { prompt: string }) {
     this.prompt = params.prompt;
-    return { id: 'turn-1', status: 'inProgress' as const, error: null };
+    this.prompts.push(params.prompt);
+    this.turnCount += 1;
+    return { id: `turn-${this.turnCount}`, status: 'inProgress' as const, error: null };
   }
   async interruptTurn() {}
   respond(id: number | string, result: unknown) { this.responses.push({ id, result }); }
@@ -78,6 +87,7 @@ async function setup({ withProject = true, withBrowserAgent = false, withTabCont
   const fake = new FakeCodexServer();
   const send = vi.fn();
   const onResultReady = vi.fn();
+  const onTaskEnded = vi.fn();
   const github = new FakeGitHub();
   const onOpenExternal = vi.fn();
   const browserSnapshot: BrowserAgentSnapshot = {
@@ -111,6 +121,7 @@ async function setup({ withProject = true, withBrowserAgent = false, withTabCont
       createServer: () => fake as unknown as CodexAppServer,
       workDirectory: directory,
       onResultReady,
+      onTaskEnded,
       github: github as unknown as GitHubEngine,
       onOpenExternal,
       ...(withBrowserAgent ? {
@@ -120,7 +131,7 @@ async function setup({ withProject = true, withBrowserAgent = false, withTabCont
     },
   );
   await engine.initialize();
-  return { engine, fake, repositoryPath, taskStore, workspaceStore, onResultReady, directory, github, onOpenExternal, browserSnapshot, browserCommand };
+  return { engine, fake, repositoryPath, taskStore, workspaceStore, onResultReady, onTaskEnded, directory, github, onOpenExternal, browserSnapshot, browserCommand };
 }
 
 describe('task engine', () => {
@@ -133,7 +144,9 @@ describe('task engine', () => {
     taskStore.save({
       state: 'Needs Approval', kind: 'code', prompt: 'Review me', model: 'gpt-test', reasoningEffort: 'high',
       threadId: 'thread-1', turnId: 'turn-1', baselineCommit: 'a'.repeat(40), progress: [],
-      pendingApproval: null, result: 'Done', diff: 'diff', error: null, createdAt: now, updatedAt: now,
+      pendingApproval: null, result: 'Done', diff: 'diff', error: null,
+      browserRun: { required: false, state: 'not-required', taskSpaceId: null, successfulActionCount: 0, retryCount: 0, lastActionAt: null },
+      createdAt: now, updatedAt: now,
     });
     const window = { isDestroyed: () => false, webContents: { isDestroyed: () => false, send: () => undefined } };
     const engine = new TaskEngine(window as unknown as Electron.BrowserWindow, taskStore, workspaceStore, new GitEngine());
@@ -218,16 +231,23 @@ describe('task engine', () => {
       withProject: false, withBrowserAgent: true, withTabContext: false,
     });
     expect(await engine.execute({
-      type: 'startTask', prompt: 'Can you search the five best acoustic guitars under 10,000 and give me a list and tell me where I can buy them?', model: 'gpt-test', reasoningEffort: 'high', kind: 'work',
+      type: 'startTask', prompt: 'Search for acoustic guitars under ₹10,000 and tell me where I can buy them.', model: 'gpt-test', reasoningEffort: 'high', kind: 'work',
     })).toEqual({ ok: true });
     expect(browserCommand).toHaveBeenCalledWith(expect.objectContaining({ type: 'start', mode: 'browser-only', tabIds: [] }));
     expect(fake.dynamicTools).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'poppin_browser_action' })]));
     expect(fake.prompt).toContain('"mode": "browser-only"');
     expect(fake.prompt).toContain('"explorationTabs"');
-    fake.emit('notification', { method: 'item/agentMessage/delta', params: { threadId: 'thread-1', turnId: 'turn-1', itemId: 'message-1', delta: 'Comparison with sources.' } });
+    fake.emit('request', {
+      id: 31,
+      method: 'item/tool/call',
+      params: { threadId: 'thread-1', turnId: 'turn-1', callId: 'call-search', tool: 'poppin_browser_action', arguments: { taskSpaceId: 'space-1', tabId: 'exploration-tab', action: { type: 'navigate', url: 'https://duckduckgo.com/?q=acoustic+guitars+under+10000' } } },
+    });
+    await vi.waitFor(() => expect(engine.getSnapshot().task?.browserRun).toMatchObject({ required: true, state: 'action-observed', successfulActionCount: 1 }));
+    fake.emit('notification', { method: 'item/agentMessage/delta', params: { threadId: 'thread-1', turnId: 'turn-1', itemId: 'message-1', delta: 'Comparison with sources: https://example.com/guitars' } });
     fake.emit('notification', { method: 'turn/completed', params: { threadId: 'thread-1', turn: { id: 'turn-1', status: 'completed', error: null } } });
     await vi.waitFor(() => expect(onResultReady).toHaveBeenCalledWith(expect.objectContaining({
-      kind: 'work', result: 'Comparison with sources.', state: 'Completed',
+      kind: 'work', result: 'Comparison with sources: https://example.com/guitars', state: 'Completed',
+      browserRun: expect.objectContaining({ required: true, state: 'completed', successfulActionCount: 1 }),
     })));
     await engine.close();
     taskStore.close();
@@ -264,6 +284,12 @@ describe('task engine', () => {
     await engine.execute({
       type: 'startTask', prompt: 'Search for acoustic guitars under 10,000 and tell me where to buy them.', model: 'gpt-test', reasoningEffort: 'high', kind: 'work',
     });
+    fake.emit('request', {
+      id: 32,
+      method: 'item/tool/call',
+      params: { threadId: 'thread-1', turnId: 'turn-1', callId: 'call-search', tool: 'poppin_browser_action', arguments: { taskSpaceId: 'space-1', tabId: 'exploration-tab', action: { type: 'search', text: 'acoustic guitars under 10000' } } },
+    });
+    await vi.waitFor(() => expect(engine.getSnapshot().task?.browserRun.successfulActionCount).toBe(1));
     fake.emit('notification', { method: 'item/agentMessage/delta', params: { threadId: 'thread-1', turnId: 'turn-1', itemId: 'message-1', delta: 'Initial result.' } });
     fake.emit('notification', { method: 'turn/completed', params: { threadId: 'thread-1', turn: { id: 'turn-1', status: 'completed', error: null } } });
     await vi.waitFor(() => expect(engine.getSnapshot().task).toMatchObject({ state: 'Completed' }));
@@ -275,6 +301,93 @@ describe('task engine', () => {
     expect(browserCommand).toHaveBeenCalledWith(expect.objectContaining({ type: 'start', mode: 'browser-only', tabIds: [] }));
     expect(fake.prompt).toContain('TASK-OWNED AGENT TABS');
     expect(fake.prompt).toContain('"explorationTabs"');
+    expect(engine.getSnapshot().task?.browserRun).toMatchObject({ required: true, state: 'awaiting-action', successfulActionCount: 0 });
+    await engine.close();
+    taskStore.close();
+    workspaceStore.close();
+  });
+
+  it('rehydrates a persisted Work conversation into a tool-enabled thread after app restart', async () => {
+    const first = await setup({ withProject: false, withBrowserAgent: true, withTabContext: false });
+    await first.engine.execute({
+      type: 'startTask', prompt: 'Search for acoustic guitars under ₹10,000 and tell me where I can buy them.', model: 'gpt-test', reasoningEffort: 'high', kind: 'work',
+    });
+    first.fake.emit('request', {
+      id: 41,
+      method: 'item/tool/call',
+      params: { threadId: 'thread-1', turnId: 'turn-1', callId: 'call-search', tool: 'poppin_browser_action', arguments: { taskSpaceId: 'space-1', tabId: 'exploration-tab', action: { type: 'search', text: 'acoustic guitars under 10000' } } },
+    });
+    await vi.waitFor(() => expect(first.engine.getSnapshot().task?.browserRun.successfulActionCount).toBe(1));
+    first.fake.emit('notification', { method: 'item/agentMessage/delta', params: { threadId: 'thread-1', turnId: 'turn-1', itemId: 'message-1', delta: 'Prior sourced answer.' } });
+    first.fake.emit('notification', { method: 'turn/completed', params: { threadId: 'thread-1', turn: { id: 'turn-1', status: 'completed', error: null } } });
+    await vi.waitFor(() => expect(first.engine.getSnapshot().task?.state).toBe('Completed'));
+    await first.engine.close();
+    first.browserSnapshot.state = 'completed';
+    first.browserSnapshot.taskSpace = { ...first.browserSnapshot.taskSpace!, owner: 'user', status: 'completed' };
+
+    const resumedServer = new FakeCodexServer();
+    resumedServer.resumeTurns = [{ items: [
+      { type: 'userMessage', content: [{ type: 'text', text: 'USER REQUEST\nOriginal research\n\nTASK-OWNED AGENT TABS\n{"taskSpaceId":"stale"}' }] },
+      { type: 'agentMessage', text: 'Prior sourced answer.' },
+    ] }];
+    const window = { isDestroyed: () => false, webContents: { isDestroyed: () => false, send: vi.fn() } };
+    const resumed = new TaskEngine(
+      window as unknown as Electron.BrowserWindow,
+      first.taskStore,
+      first.workspaceStore,
+      new GitEngine(),
+      {
+        locateCodex: async () => ({ executable: '/fake/codex', args: [] }),
+        createServer: () => resumedServer as unknown as CodexAppServer,
+        workDirectory: first.directory,
+        getBrowserAgentSnapshot: () => first.browserSnapshot,
+        executeBrowserAgentCommand: first.browserCommand,
+      },
+    );
+    await resumed.initialize();
+    expect(await resumed.execute({ type: 'continueTask', prompt: 'continue' })).toEqual({ ok: true });
+    expect(resumedServer.resumeCount).toBe(1);
+    expect(resumedServer.startThreadCount).toBe(1);
+    expect(resumedServer.dynamicTools).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'poppin_browser_action' })]));
+    expect(resumedServer.injectedItems).toEqual([
+      { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'USER REQUEST\nOriginal research' }] },
+      { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Prior sourced answer.' }] },
+    ]);
+    expect(resumedServer.prompt).toContain('TASK-OWNED AGENT TABS');
+    expect(resumedServer.prompt).not.toContain('"taskSpaceId":"stale"');
+    await resumed.close();
+    first.taskStore.close();
+    first.workspaceStore.close();
+  });
+
+  it('retries a browser-required turn once and never presents a zero-action response as completed', async () => {
+    const { engine, fake, onResultReady, onTaskEnded, browserSnapshot, taskStore, workspaceStore } = await setup({
+      withProject: false, withBrowserAgent: true, withTabContext: false,
+    });
+    await engine.execute({
+      type: 'startTask', prompt: 'Search for acoustic guitars under ₹10,000 and tell me where I can buy them.', model: 'gpt-test', reasoningEffort: 'high', kind: 'work',
+    });
+    fake.emit('notification', { method: 'item/agentMessage/delta', params: { threadId: 'thread-1', turnId: 'turn-1', itemId: 'message-1', delta: 'I do not have a browser connection.' } });
+    fake.emit('notification', { method: 'turn/completed', params: { threadId: 'thread-1', turn: { id: 'turn-1', status: 'completed', error: null } } });
+
+    await vi.waitFor(() => expect(fake.turnCount).toBe(2));
+    expect(engine.getSnapshot().task).toMatchObject({
+      state: 'Running', result: '',
+      browserRun: { required: true, state: 'retrying', taskSpaceId: 'space-1', successfulActionCount: 0, retryCount: 1, lastActionAt: null },
+    });
+    expect(fake.prompt).toContain('MUST use poppin_browser_action or poppin_browser_batch');
+    expect(fake.prompt).toContain('Search for acoustic guitars under ₹10,000');
+    expect(onResultReady).not.toHaveBeenCalled();
+
+    fake.emit('notification', { method: 'item/agentMessage/delta', params: { threadId: 'thread-1', turnId: 'turn-2', itemId: 'message-2', delta: 'Still no browser.' } });
+    fake.emit('notification', { method: 'turn/completed', params: { threadId: 'thread-1', turn: { id: 'turn-2', status: 'completed', error: null } } });
+    await vi.waitFor(() => expect(engine.getSnapshot().task).toMatchObject({
+      state: 'Failed', result: '', browserRun: expect.objectContaining({ state: 'incomplete', retryCount: 1 }),
+      error: expect.stringContaining('did not execute a browser action'),
+    }));
+    expect(browserSnapshot.taskSpace).not.toBeNull();
+    expect(onResultReady).not.toHaveBeenCalled();
+    expect(onTaskEnded).toHaveBeenCalledWith('stopped');
     await engine.close();
     taskStore.close();
     workspaceStore.close();

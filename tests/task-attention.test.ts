@@ -9,7 +9,9 @@ const TASK_SNAPSHOT: TaskSnapshot = {
   task: {
     kind: 'work', state: 'Needs Approval', prompt: 'Summarize this', model: 'gpt-test', reasoningEffort: 'high',
     threadId: 'thread-1', turnId: 'turn-1', baselineCommit: '', progress: [], pendingApproval: null,
-    result: 'Summary', diff: '', error: null, createdAt: '2026-08-07T12:00:00Z', updatedAt: '2026-08-07T12:01:00Z',
+    result: 'Summary', diff: '', error: null,
+    browserRun: { required: false, state: 'not-required', taskSpaceId: null, successfulActionCount: 0, retryCount: 0, lastActionAt: null },
+    createdAt: '2026-08-07T12:00:00Z', updatedAt: '2026-08-07T12:01:00Z',
   },
 };
 
