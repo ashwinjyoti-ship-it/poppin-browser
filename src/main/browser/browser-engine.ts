@@ -30,7 +30,7 @@ import {
 import { errorPageUrl } from './internal-pages';
 import { BrowserStateStore } from './state-store';
 import { normalizeTabOrder } from './tab-model';
-import { displayUrl, NEW_TAB_URL, normalizeAddressInput, normalizeTabInput, TASK_RESULT_URL } from './url-input';
+import { displayUrl, NEW_TAB_URL, normalizeAddressInput, normalizeTabInput } from './url-input';
 import type { CapturedTabContext } from '../../shared/workspace';
 import type { VisualSelectionSnapshot } from '../../shared/workspace';
 import { HtmlFullscreenCoordinator, type HtmlFullscreenTransition } from './html-fullscreen';
@@ -80,6 +80,7 @@ export class BrowserEngine {
   private closeConfirmed = false;
   private authenticationWindow: BrowserWindow | null = null;
   private overlayKind: 'authentication' | 'preview' | null = null;
+  private contentVisible = true;
 
   constructor(
     private readonly window: BrowserWindow,
@@ -169,16 +170,6 @@ export class BrowserEngine {
     const normalized = normalizeAddressInput(url);
     if (normalized.kind !== 'url') return;
     this.createTab(normalized.url, randomUUID(), false, undefined, true, 'end');
-  }
-
-  openTaskResult(): void {
-    const existing = this.tabOrder.map((id) => this.tabs.get(id)).find((tab) => tab?.lastExternalUrl === TASK_RESULT_URL);
-    if (existing) {
-      this.activateTab(existing.snapshot.id);
-      existing.view.webContents.reloadIgnoringCache();
-      return;
-    }
-    this.createTab(TASK_RESULT_URL, randomUUID(), false);
   }
 
   hasTab(tabId: string): boolean {
@@ -582,8 +573,9 @@ export class BrowserEngine {
         return this.closeLinkPreview();
       case 'openLinkPreviewInTab':
         return this.openLinkPreviewInTab();
-      case 'openTaskResult':
-        this.openTaskResult();
+      case 'setContentVisible':
+        this.contentVisible = command.visible;
+        this.layoutViews();
         return { ok: true };
       case 'setLayout':
         this.viewInsets = {
@@ -1263,12 +1255,12 @@ export class BrowserEngine {
     if (this.window.isDestroyed()) return;
     const [width = 1, height = 1] = this.window.getContentSize();
     const isHtmlFullscreen = this.htmlFullscreen.isActiveFor(this.activeTabId);
-    const bounds: Rectangle = {
+    const bounds: Rectangle = this.contentVisible ? {
       x: isHtmlFullscreen ? 0 : PAGE_MARGIN + this.viewInsets.left,
       y: isHtmlFullscreen ? 0 : this.viewInsets.top,
       width: isHtmlFullscreen ? width : Math.max(1, width - PAGE_MARGIN * 2 - this.viewInsets.left - this.viewInsets.right),
       height: isHtmlFullscreen ? height : Math.max(1, height - this.viewInsets.top - PAGE_MARGIN - this.viewInsets.bottom),
-    };
+    } : { x: 0, y: 0, width: 0, height: 0 };
     for (const tab of this.tabs.values()) {
       tab.view.setBounds(bounds);
       tab.view.setBorderRadius(isHtmlFullscreen && tab.snapshot.id === this.activeTabId ? 0 : 18);

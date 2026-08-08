@@ -14,7 +14,7 @@ import {
   type TaskSnapshot,
   type TaskKind,
 } from '../../shared/task';
-import type { WorkspaceSnapshot } from '../../shared/workspace';
+import type { PageContextSnapshot, WorkspaceSnapshot } from '../../shared/workspace';
 import type { BrowserAgentAction, BrowserAgentCommand, BrowserAgentCommandResult, BrowserAgentSnapshot, BrowserBatchStep } from '../../shared/browser-agent';
 import { inferTaskRequirements } from '../../shared/task-requirements';
 import { CodexAppServer } from '../codex/codex-app-server';
@@ -42,6 +42,8 @@ const MAX_REHYDRATED_CONVERSATION_ITEMS = 12;
 const MAX_REHYDRATED_ITEM_LENGTH = 60_000;
 const BROWSER_TOOL_NAME = 'poppin_browser_action';
 const BROWSER_BATCH_TOOL_NAME = 'poppin_browser_batch';
+const DATABASE_QUERY_TOOL_NAME = 'database_query';
+const PAGE_COMMENT_APPLY_TOOL_NAME = 'page_comment_apply';
 
 type ConnectionSnapshot = TaskSnapshot['connection'];
 
@@ -57,6 +59,9 @@ interface TaskEngineOptions {
   onExportResult?: (task: TaskRecordSnapshot, format: 'markdown' | 'text') => Promise<string | null>;
   getBrowserAgentSnapshot?: () => BrowserAgentSnapshot;
   executeBrowserAgentCommand?: (command: BrowserAgentCommand) => Promise<BrowserAgentCommandResult>;
+  getPageContexts?: () => PageContextSnapshot[];
+  querySelectedDatabase?: (databaseId: string, limit: number) => string;
+  applyPageComment?: (commentId: string, replacement: string) => string;
 }
 
 interface PendingExternalAction {
@@ -77,6 +82,7 @@ export class TaskEngine {
   private pendingQuestionIds: string[] = [];
   private pendingBrowserToolRequest: { requestId: number | string; command: Extract<BrowserAgentCommand, { type: 'act' | 'batch' }> } | null = null;
   private browserToolsAvailableInCurrentThread = false;
+  private readonly agentMessages = new Map<string, string>();
 
   constructor(
     private readonly window: BrowserWindow,
@@ -258,12 +264,13 @@ export class TaskEngine {
       developerInstructions: kind === 'code' ? CODE_DEVELOPER_INSTRUCTIONS : WORK_DEVELOPER_INSTRUCTIONS,
       // Dynamic tools are registered once per Work thread by Codex. They remain dormant unless
       // TaskEngine has created a task-owned browser space for the current browser-required turn.
-      dynamicTools: kind === 'work' && this.options.executeBrowserAgentCommand ? BROWSER_DYNAMIC_TOOLS : undefined,
+      dynamicTools: kind === 'work' ? workDynamicTools(this.options) : undefined,
     });
     this.browserToolsAvailableInCurrentThread = kind === 'work' && Boolean(this.options.executeBrowserAgentCommand);
     const now = new Date().toISOString();
+    this.agentMessages.clear();
     this.task = {
-      state: 'Running', kind, prompt, model: model.id, reasoningEffort: effort,
+      state: 'Running', kind, prompt, model: model.id, reasoningEffort: effort, documentId: randomUUID(),
       threadId: thread.id, turnId: '', baselineCommit,
       progress: [{
         id: 'starting', kind: 'status', title: kind === 'code' ? 'Starting Code task' : 'Starting Work task',
@@ -310,18 +317,16 @@ export class TaskEngine {
     const model = this.connection.models.find((candidate) => candidate.id === task.model);
     if (!model) return { ok: false, message: 'The original Codex model is no longer available.' };
     const server = this.requireServer();
-    const workspace = workspaceSnapshot(this.workspaceStore);
+    const workspace = workspaceSnapshot(this.workspaceStore, this.options.getPageContexts);
     const priorBrowserSession = this.options.getBrowserAgentSnapshot?.();
     const priorTaskSpace = priorBrowserSession?.taskSpace;
-    const resumesCompletedBrowserWork = task.kind === 'work'
-      && priorBrowserSession?.state === 'completed'
-      && Boolean(priorTaskSpace)
-      && !priorTaskSpace!.kept;
+    const continuesBrowserWork = isImplicitBrowserContinuation(prompt);
     const inheritsBrowserRequirement = task.kind === 'work'
       && task.browserRun.required
-      && !priorTaskSpace?.kept;
+      && !priorTaskSpace?.kept
+      && continuesBrowserWork;
     const wantsBrowserUse = task.kind === 'work' && (
-      inferTaskRequirements(prompt, Boolean(project)).browserUse || inheritsBrowserRequirement || resumesCompletedBrowserWork
+      inferTaskRequirements(prompt, Boolean(project)).browserUse || inheritsBrowserRequirement
     );
     if (wantsBrowserUse) {
       if (!this.options.executeBrowserAgentCommand) return { ok: false, message: 'Controlled browser use is not available.' };
@@ -338,6 +343,7 @@ export class TaskEngine {
     task.pendingApproval = null;
     task.error = null;
     task.result = '';
+    this.agentMessages.clear();
     task.browserRun = createBrowserRun(wantsBrowserUse, browserSnapshot);
     task.progress = [{
       id: `continuation-${Date.now()}`, kind: 'status',
@@ -582,7 +588,7 @@ export class TaskEngine {
   } {
     if (this.connection.state !== 'ready') throw new Error(this.connection.message);
     if (this.task && ['Running', 'Needs Approval'].includes(this.task.state)) throw new Error('Finish or cancel the current task first.');
-    const workspace = workspaceSnapshot(this.workspaceStore);
+    const workspace = workspaceSnapshot(this.workspaceStore, this.options.getPageContexts);
     if (!workspace.workspace) throw new Error('Create the workspace first.');
     if (kind === 'code' && !workspace.project) throw new Error('Connect a local Git project for this Code task, or run it as Work.');
     const model = this.connection.models.find((candidate) => candidate.id === modelId);
@@ -673,6 +679,45 @@ export class TaskEngine {
       return;
     }
     const tool = stringValue(request.params.tool);
+    if (tool === DATABASE_QUERY_TOOL_NAME) {
+      const argumentsValue = parseDynamicToolArguments(request.params.arguments);
+      if (!this.options.querySelectedDatabase || !argumentsValue) {
+        this.respondToBrowserTool(request.id, { ok: false, message: 'Database query is not available.' });
+        return;
+      }
+      const databaseId = stringValue(argumentsValue.databaseId);
+      const limitValue = argumentsValue.limit;
+      const limit = typeof limitValue === 'number' && Number.isFinite(limitValue) ? limitValue : 50;
+      if (!databaseId) {
+        this.respondToBrowserTool(request.id, { ok: false, message: 'databaseId is required.' });
+        return;
+      }
+      try {
+        this.respondToBrowserTool(request.id, { ok: true, data: this.options.querySelectedDatabase(databaseId, limit) });
+      } catch (error) {
+        this.respondToBrowserTool(request.id, { ok: false, message: error instanceof Error ? error.message : 'Database query failed.' });
+      }
+      return;
+    }
+    if (tool === PAGE_COMMENT_APPLY_TOOL_NAME) {
+      const argumentsValue = parseDynamicToolArguments(request.params.arguments);
+      if (!this.options.applyPageComment || !argumentsValue) {
+        this.respondToBrowserTool(request.id, { ok: false, message: 'Page comment resolution is not available.' });
+        return;
+      }
+      const commentId = stringValue(argumentsValue.commentId);
+      const replacement = typeof argumentsValue.replacement === 'string' ? argumentsValue.replacement : null;
+      if (!commentId || replacement === null) {
+        this.respondToBrowserTool(request.id, { ok: false, message: 'commentId and replacement are required.' });
+        return;
+      }
+      try {
+        this.respondToBrowserTool(request.id, { ok: true, data: this.options.applyPageComment(commentId, replacement) });
+      } catch (error) {
+        this.respondToBrowserTool(request.id, { ok: false, message: error instanceof Error ? error.message : 'Page instruction could not be applied.' });
+      }
+      return;
+    }
     if (tool !== BROWSER_TOOL_NAME && tool !== BROWSER_BATCH_TOOL_NAME) {
       this.server?.rejectRequest(request.id, 'Poppin supports only its task-scoped browser tools.');
       return;
@@ -744,7 +789,12 @@ export class TaskEngine {
       }
       case 'item/agentMessage/delta': {
         const delta = stringValue(params.delta);
-        if (delta) task.result = `${task.result}${delta}`.slice(-MAX_RESULT_LENGTH);
+        if (delta) {
+          const itemId = stringValue(params.itemId) || 'agent-message';
+          const message = `${this.agentMessages.get(itemId) ?? ''}${delta}`.slice(-MAX_RESULT_LENGTH);
+          this.agentMessages.set(itemId, message);
+          task.result = message;
+        }
         break;
       }
       case 'item/commandExecution/outputDelta': {
@@ -832,6 +882,7 @@ export class TaskEngine {
     task.browserRun.successfulActionCount += count;
     task.browserRun.state = 'action-observed';
     task.browserRun.lastActionAt = new Date().toISOString();
+    task.browserRun.sources = mergeBrowserSources(task.browserRun.sources, browserSourcesFromAction(command, result));
     this.touchAndSchedule();
   }
 
@@ -846,6 +897,7 @@ export class TaskEngine {
     task.pendingApproval = null;
     task.error = null;
     task.result = '';
+    this.agentMessages.clear();
     this.appendProgress({
       id: `browser-retry-${task.browserRun.retryCount}`,
       kind: 'status',
@@ -857,7 +909,7 @@ export class TaskEngine {
     try {
       const turn = await server.startTurn({
         threadId: task.threadId,
-        prompt: buildTaskPrompt(browserRetryPrompt(task.prompt), workspaceSnapshot(this.workspaceStore), browserSnapshot),
+        prompt: buildTaskPrompt(browserRetryPrompt(task.prompt), workspaceSnapshot(this.workspaceStore, this.options.getPageContexts), browserSnapshot),
         cwd: this.workDirectory(),
         model: task.model,
         effort: task.reasoningEffort,
@@ -879,7 +931,7 @@ export class TaskEngine {
       cwd,
       model: task.model,
       developerInstructions: WORK_DEVELOPER_INSTRUCTIONS,
-      dynamicTools: BROWSER_DYNAMIC_TOOLS,
+      dynamicTools: workDynamicTools(this.options),
     });
     const history = conversationHistoryItems(resumed, task);
     await server.injectThreadItems(replacement.id, history);
@@ -986,6 +1038,10 @@ function buildTaskPrompt(prompt: string, workspace: WorkspaceSnapshot, browserAg
     ...workspace.documents.filter((item) => item.selected).map((item) => ({
       type: 'document', title: item.name, source: item.path, content: item.capturedText, truncated: item.truncated,
     })),
+    ...(workspace.pageContexts ?? []).map((item) => ({
+      type: `native-${item.kind}`, pageId: item.pageId, title: item.title, content: item.content,
+      truncated: item.truncated, rowCount: item.rowCount,
+    })),
     ...(workspace.visualSelection ? [{
       type: 'localhost-visual-selection', source: workspace.visualSelection.url,
       selector: workspace.visualSelection.selector, html: workspace.visualSelection.html,
@@ -1053,6 +1109,41 @@ const BROWSER_DYNAMIC_TOOLS: CodexDynamicToolSpec[] = [{
     },
   },
 }];
+
+const DATABASE_DYNAMIC_TOOL: CodexDynamicToolSpec = {
+  type: 'function',
+  name: DATABASE_QUERY_TOOL_NAME,
+  description: 'Read a bounded schema-and-row slice from a native Poppin Database that the user explicitly selected in the Pages pane.',
+  inputSchema: {
+    type: 'object', additionalProperties: false, required: ['databaseId'],
+    properties: {
+      databaseId: { type: 'string', description: 'The selected native database pageId shown in SELECTED CONTEXT.' },
+      limit: { type: 'number', minimum: 1, maximum: 200, description: 'Maximum rows to return. Defaults to 50.' },
+    },
+  },
+};
+
+const PAGE_COMMENT_DYNAMIC_TOOL: CodexDynamicToolSpec = {
+  type: 'function',
+  name: PAGE_COMMENT_APPLY_TOOL_NAME,
+  description: 'Surgically replace the exact selection anchored by an open comment on a native Page. The block version and selection hash are validated before editing, then the comment is resolved.',
+  inputSchema: {
+    type: 'object', additionalProperties: false, required: ['commentId', 'replacement'],
+    properties: {
+      commentId: { type: 'string' },
+      replacement: { type: 'string', description: 'Only the replacement text for the anchored selection.' },
+    },
+  },
+};
+
+function workDynamicTools(options: TaskEngineOptions): CodexDynamicToolSpec[] | undefined {
+  const tools = [
+    ...(options.executeBrowserAgentCommand ? BROWSER_DYNAMIC_TOOLS : []),
+    ...(options.querySelectedDatabase ? [DATABASE_DYNAMIC_TOOL] : []),
+    ...(options.applyPageComment ? [PAGE_COMMENT_DYNAMIC_TOOL] : []),
+  ];
+  return tools.length ? tools : undefined;
+}
 
 function parseBrowserToolArguments(rawArguments: unknown): { taskSpaceId: string; tabId: string; action: BrowserAgentAction } | null {
   let value = rawArguments;
@@ -1138,7 +1229,73 @@ function createBrowserRun(required: boolean, browserSnapshot?: BrowserAgentSnaps
     successfulActionCount: 0,
     retryCount: 0,
     lastActionAt: null,
+    sources: [],
   };
+}
+
+function isImplicitBrowserContinuation(prompt: string): boolean {
+  const normalized = prompt.trim().toLowerCase().replace(/[.!?]+$/u, '').trim();
+  if (!normalized || normalized.length > 80) return false;
+  return /^(?:continue|go on|keep going|more|find more|show more|next|retry|try again|check another|what else|do that|do it)(?:\s+(?:please|with that|from there|the search|the research|the task))?$/u.test(normalized);
+}
+
+function parseDynamicToolArguments(value: unknown): Record<string, unknown> | null {
+  if (typeof value === 'string') {
+    try { value = JSON.parse(value) as unknown; } catch { return null; }
+  }
+  return isRecord(value) ? value : null;
+}
+
+function browserSourcesFromAction(
+  command: Extract<BrowserAgentCommand, { type: 'act' | 'batch' }>,
+  result: BrowserAgentCommandResult,
+): TaskBrowserRunSnapshot['sources'] {
+  if (!result.ok) return [];
+  if (command.type === 'act') {
+    if (command.action.type === 'navigate') return sourceForUrl(command.action.url);
+    if (command.action.type === 'read' && result.data) return semanticSource(result.data);
+    return [];
+  }
+  if (!result.data) return [];
+  try {
+    const data = JSON.parse(result.data) as unknown;
+    if (!isRecord(data) || !Array.isArray(data.steps)) return [];
+    return data.steps.flatMap((step) => {
+      if (!isRecord(step) || step.ok !== true || typeof step.detail !== 'string') return [];
+      return semanticSource(step.detail);
+    });
+  } catch {
+    return [];
+  }
+}
+
+function semanticSource(data: string): TaskBrowserRunSnapshot['sources'] {
+  try {
+    const value = JSON.parse(data) as unknown;
+    if (!isRecord(value)) return [];
+    return sourceForUrl(stringValue(value.url), stringValue(value.title));
+  } catch {
+    return [];
+  }
+}
+
+function sourceForUrl(url: string, title = ''): TaskBrowserRunSnapshot['sources'] {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return [];
+    return [{ title: title.trim().slice(0, 300) || parsed.hostname, url: parsed.toString().slice(0, 8_000) }];
+  } catch {
+    return [];
+  }
+}
+
+function mergeBrowserSources(
+  current: TaskBrowserRunSnapshot['sources'],
+  additions: TaskBrowserRunSnapshot['sources'],
+): TaskBrowserRunSnapshot['sources'] {
+  const sources = new Map(current.map((source) => [source.url, source]));
+  for (const source of additions) sources.set(source.url, source);
+  return [...sources.values()].slice(-100);
 }
 
 function conversationHistoryItems(thread: CodexThread, task: TaskRecordSnapshot): JsonObject[] {
@@ -1230,13 +1387,15 @@ You MUST use poppin_browser_action or poppin_browser_batch with the task-owned A
 function selectedContextSummary(workspace: WorkspaceSnapshot): string {
   const tabs = workspace.tabContexts.length;
   const documents = workspace.documents.filter((item) => item.selected).length;
-  const total = tabs + documents;
-  return total === 0 ? 'No selected sources' : `${total} selected source${total === 1 ? '' : 's'} (${tabs} tab${tabs === 1 ? '' : 's'}, ${documents} document${documents === 1 ? '' : 's'})`;
+  const pages = workspace.pageContexts?.length ?? 0;
+  const total = tabs + documents + pages;
+  return total === 0 ? 'No selected sources' : `${total} selected source${total === 1 ? '' : 's'} (${tabs} tab${tabs === 1 ? '' : 's'}, ${documents} document${documents === 1 ? '' : 's'}, ${pages} native page${pages === 1 ? '' : 's'})`;
 }
 
 function hasSelectedContext(workspace: WorkspaceSnapshot): boolean {
   return workspace.tabContexts.length > 0
     || workspace.documents.some((item) => item.selected)
+    || Boolean(workspace.pageContexts?.length)
     || workspace.visualSelection !== null;
 }
 
@@ -1251,13 +1410,14 @@ function githubCompareUrl(remote: string | null, base: string, head: string): st
   return `https://github.com/${encodeURIComponent(match[1]!)}/${encodeURIComponent(match[2]!)}/compare/${encodeURIComponent(base)}...${encodeURIComponent(head)}?expand=1`;
 }
 
-function workspaceSnapshot(store: WorkspaceStore): WorkspaceSnapshot {
+function workspaceSnapshot(store: WorkspaceStore, getPageContexts?: () => PageContextSnapshot[]): WorkspaceSnapshot {
   return {
     workspace: store.getWorkspace(),
     documents: store.listDocuments(),
     tabContexts: store.listTabContexts(),
     project: store.getProject(),
     visualSelection: store.getVisualSelection(),
+    pageContexts: getPageContexts?.() ?? [],
   };
 }
 
@@ -1323,6 +1483,7 @@ function cloneTask(task: TaskRecordSnapshot): TaskRecordSnapshot {
     ...task,
     progress: task.progress.map((item) => ({ ...item })),
     pendingApproval: task.pendingApproval ? { ...task.pendingApproval } : null,
+    browserRun: { ...task.browserRun, sources: task.browserRun.sources.map((source) => ({ ...source })) },
     ...(task.delivery ? { delivery: { ...task.delivery, pullRequest: task.delivery.pullRequest ? { ...task.delivery.pullRequest } : null } } : {}),
   };
 }

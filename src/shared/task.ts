@@ -50,6 +50,12 @@ export interface TaskBrowserRunSnapshot {
   successfulActionCount: number;
   retryCount: number;
   lastActionAt: string | null;
+  sources: TaskBrowserSourceSnapshot[];
+}
+
+export interface TaskBrowserSourceSnapshot {
+  title: string;
+  url: string;
 }
 
 export interface TaskRecordSnapshot {
@@ -58,6 +64,7 @@ export interface TaskRecordSnapshot {
   prompt: string;
   model: string;
   reasoningEffort: string;
+  documentId: string;
   threadId: string;
   turnId: string;
   baselineCommit: string;

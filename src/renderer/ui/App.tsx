@@ -4,6 +4,7 @@ import { DEFAULT_BROWSER_SETTINGS, type BrowserCommand, type BrowserSnapshot } f
 import type { WorkspaceCommand, WorkspaceSnapshot } from '../../shared/workspace';
 import type { TaskCommand, TaskCommandResult, TaskSnapshot } from '../../shared/task';
 import type { BrowserAgentCommand, BrowserAgentCommandResult, BrowserAgentSnapshot } from '../../shared/browser-agent';
+import type { PagesCommand, PagesSnapshot } from '../../shared/pages';
 import { Brand } from './Brand';
 import { BrowserToolbar } from './BrowserToolbar';
 import { TabStrip } from './TabStrip';
@@ -11,6 +12,8 @@ import { WorkspacePane } from './WorkspacePane';
 import { ContextPane, type PaneSection } from './ContextPane';
 import { CommandBar } from './CommandBar';
 import { PaneResizer } from './PaneResizer';
+import { NativePageView } from './NativePageView';
+import { NativeDatabaseView } from './NativeDatabaseView';
 import { getChromeLayout, getTitlebarLeftInset } from './chrome-layout';
 import { issueForCommand, visibleAddressIssue, type AddressIssue } from './address-issue';
 import { browserApprovalAttentionKey, taskAttentionKey } from './task-attention';
@@ -32,6 +35,7 @@ const EMPTY_SNAPSHOT: BrowserSnapshot = {
 const EMPTY_WORKSPACE: WorkspaceSnapshot = { workspace: null, documents: [], tabContexts: [], project: null, visualSelection: null };
 const EMPTY_TASK: TaskSnapshot = { connection: { state: 'checking', message: 'Connecting to Codex…', accountLabel: null, models: [] }, task: null };
 const EMPTY_BROWSER_AGENT: BrowserAgentSnapshot = { state: 'idle', taskId: null, taskSpace: null, watching: false, allowedTabIds: [], activeTabId: null, currentAction: null, pendingApproval: null, log: [] };
+const EMPTY_PAGES: PagesSnapshot = { pages: [], tabs: [], activeTabId: null, selectedPageIds: [] };
 
 export function App() {
   const [snapshot, setSnapshot] = useState<BrowserSnapshot>(EMPTY_SNAPSHOT);
@@ -44,6 +48,8 @@ export function App() {
   const [contextSection, setContextSection] = useState<PaneSection>('context');
   const [taskSnapshot, setTaskSnapshot] = useState<TaskSnapshot>(EMPTY_TASK);
   const [browserAgentSnapshot, setBrowserAgentSnapshot] = useState<BrowserAgentSnapshot>(EMPTY_BROWSER_AGENT);
+  const [pagesSnapshot, setPagesSnapshot] = useState<PagesSnapshot>(EMPTY_PAGES);
+  const [pagesRevision, setPagesRevision] = useState(0);
   const [commandCollapsed, setCommandCollapsed] = useState(false);
   const [commandOverlayHeight, setCommandOverlayHeight] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -51,9 +57,17 @@ export function App() {
   const [viewport, setViewport] = useState(() => ({ width: window.innerWidth, height: window.innerHeight }));
   const addressInputRef = useRef<HTMLInputElement>(null);
 
-  const activeTab = snapshot.tabs.find((tab) => tab.id === snapshot.activeTabId) ?? null;
-  const visibleTabs = snapshot.tabs.filter((tab) => !tab.taskSpaceId || (browserAgentSnapshot.watching && tab.taskSpaceId === browserAgentSnapshot.taskSpace?.id));
-  const address = isEditingAddress ? addressDraft : activeTab?.url ?? '';
+  const activeNativeTab = pagesSnapshot.tabs.find((tab) => tab.id === pagesSnapshot.activeTabId) ?? null;
+  const activeNativeTabId = activeNativeTab?.id ?? null;
+  const browserActiveTab = snapshot.tabs.find((tab) => tab.id === snapshot.activeTabId) ?? null;
+  const activeTab = activeNativeTab ? null : browserActiveTab;
+  const browserTabs = snapshot.tabs.filter((tab) => !tab.taskSpaceId || (browserAgentSnapshot.watching && tab.taskSpaceId === browserAgentSnapshot.taskSpace?.id));
+  const visibleTabs = [
+    ...browserTabs.map((tab) => ({ ...tab, kind: 'browser' as const })),
+    ...pagesSnapshot.tabs.map((tab) => ({ id: tab.id, title: tab.title, kind: tab.kind })),
+  ];
+  const activeTabId = activeNativeTab?.id ?? snapshot.activeTabId;
+  const address = isEditingAddress ? addressDraft : activeTab?.url ?? (activeNativeTab ? `${activeNativeTab.kind}://${activeNativeTab.pageId}` : '');
   const addressError = visibleAddressIssue(addressIssue, activeTab);
   const chromeLayout = getChromeLayout(viewport.width, viewport.height);
   const paneWidths = normalizePaneWidths(preferredPaneWidths, viewport.width);
@@ -94,6 +108,14 @@ export function App() {
     };
     void window.poppinBrowserAgent.getSnapshot().then(receiveBrowserAgentSnapshot);
     const unsubscribeBrowserAgent = window.poppinBrowserAgent.subscribe(receiveBrowserAgentSnapshot);
+    void window.poppinPages.getSnapshot().then((initialSnapshot) => {
+      if (mounted) setPagesSnapshot(initialSnapshot);
+    });
+    const unsubscribePages = window.poppinPages.subscribe((nextSnapshot) => {
+      if (!mounted) return;
+      setPagesSnapshot(nextSnapshot);
+      setPagesRevision((value) => value + 1);
+    });
     const unsubscribeFocus = window.poppinBrowser.onFocusAddress(() => {
       addressInputRef.current?.focus();
       addressInputRef.current?.select();
@@ -104,9 +126,18 @@ export function App() {
       unsubscribeWorkspace();
       unsubscribeTask();
       unsubscribeBrowserAgent();
+      unsubscribePages();
       unsubscribeFocus();
     };
   }, []);
+
+  useEffect(() => {
+    void window.poppinBrowser.command({ type: 'setContentVisible', visible: activeNativeTabId === null });
+  }, [activeNativeTabId]);
+
+  useEffect(() => {
+    if (browserAgentSnapshot.watching && pagesSnapshot.activeTabId) void window.poppinPages.command({ type: 'deactivateTabs' });
+  }, [browserAgentSnapshot.watching, pagesSnapshot.activeTabId]);
 
   useEffect(() => {
     const updateViewport = () => {
@@ -161,6 +192,15 @@ export function App() {
       return result.ok ? null : result.message ?? 'Poppin could not complete that action.';
     } catch {
       return 'Poppin could not complete that action.';
+    }
+  };
+
+  const sendPagesCommand = async (command: PagesCommand): Promise<string | null> => {
+    try {
+      const result = await window.poppinPages.command(command);
+      return result.ok ? null : result.message ?? 'Poppin could not update Pages.';
+    } catch {
+      return 'Poppin could not update Pages.';
     }
   };
 
@@ -237,15 +277,22 @@ export function App() {
         <TabStrip
           tabs={visibleTabs}
           groups={snapshot.groups}
-          activeTabId={snapshot.activeTabId}
+          activeTabId={activeTabId}
           onActivate={(tabId) => {
+            const nativeTab = pagesSnapshot.tabs.find((candidate) => candidate.id === tabId);
+            if (nativeTab) {
+              if (browserAgentSnapshot.watching) void sendBrowserAgentCommand({ type: 'leaveWatch' });
+              void sendPagesCommand({ type: 'activateTab', tabId });
+              return;
+            }
             const tab = snapshot.tabs.find((candidate) => candidate.id === tabId);
             if (browserAgentSnapshot.watching && !tab?.taskSpaceId) void sendBrowserAgentCommand({ type: 'leaveWatch' });
+            void sendPagesCommand({ type: 'deactivateTabs' });
             void sendCommand({ type: 'activate', tabId });
           }}
-          onClose={(tabId) => void sendCommand({ type: 'close', tabId })}
-          onCreate={() => void sendCommand({ type: 'create' })}
-          onReorder={(tabId, beforeTabId) => void sendCommand({ type: 'reorder', tabId, beforeTabId })}
+          onClose={(tabId) => { if (pagesSnapshot.tabs.some((tab) => tab.id === tabId)) void sendPagesCommand({ type: 'closeTab', tabId }); else void sendCommand({ type: 'close', tabId }); }}
+          onCreate={() => { void sendPagesCommand({ type: 'deactivateTabs' }); void sendCommand({ type: 'create' }); }}
+          onReorder={(tabId, beforeTabId) => { if (pagesSnapshot.tabs.some((tab) => tab.id === tabId)) void sendPagesCommand({ type: 'reorderTab', tabId, beforeTabId: pagesSnapshot.tabs.some((tab) => tab.id === beforeTabId) ? beforeTabId : null }); else void sendCommand({ type: 'reorder', tabId, beforeTabId: snapshot.tabs.some((tab) => tab.id === beforeTabId) ? beforeTabId : null }); }}
           onShowTabMenu={(tabId) => void sendCommand({ type: 'showTabMenu', tabId })}
           onToggleGroup={(groupId) => void sendCommand({ type: 'toggleGroup', groupId })}
           onRenameGroup={(groupId, name) => void sendCommand({ type: 'renameGroup', groupId, name })}
@@ -259,9 +306,11 @@ export function App() {
         collapsed={workspaceCollapsed}
         snapshot={workspaceSnapshot}
         tabs={snapshot.tabs.filter((tab) => !tab.taskSpaceId)}
+        pages={pagesSnapshot}
         onCollapseChange={setWorkspaceCollapsed}
         onCreate={(name) => sendWorkspaceCommand({ type: 'createWorkspace', name })}
         onCommand={sendWorkspaceCommand}
+        onPagesCommand={sendPagesCommand}
       />
       <ContextPane
         collapsed={visibleContextCollapsed}
@@ -276,7 +325,7 @@ export function App() {
         }}
         onClearVisualSelection={() => { void sendWorkspaceCommand({ type: 'clearVisualSelection' }); }}
         onTaskCommand={sendTaskCommand}
-        onOpenResult={() => { void sendCommand({ type: 'openTaskResult' }); }}
+        onOpenResult={() => { if (taskSnapshot.task) void sendPagesCommand({ type: 'openTaskDocument', threadId: taskSnapshot.task.documentId }); }}
         browserAgentSnapshot={browserAgentSnapshot}
         onBrowserAgentCommand={sendBrowserAgentCommand}
         section={visibleContextSection}
@@ -298,7 +347,13 @@ export function App() {
           onResize={(width) => resizePane('right', width)}
         />
       ) : null}
-      <div className={`browser-stage ${workspaceCollapsed ? 'workspace-collapsed' : ''} ${visibleContextCollapsed ? 'context-collapsed' : ''}`} aria-hidden="true" />
+      {activeNativeTab ? (
+        <div className={`native-stage ${workspaceCollapsed ? 'workspace-collapsed' : ''} ${visibleContextCollapsed ? 'context-collapsed' : ''}`}>
+          {activeNativeTab.kind === 'database'
+            ? <NativeDatabaseView pageId={activeNativeTab.pageId} revision={pagesRevision} onCommand={sendPagesCommand} />
+            : <NativePageView pageId={activeNativeTab.pageId} revision={pagesRevision} onCommand={sendPagesCommand} taskSnapshot={taskSnapshot} onTaskCommand={sendTaskCommand} onTaskStarted={() => { setContextCollapsed(false); setContextSection('task'); }} />}
+        </div>
+      ) : <div className={`browser-stage ${workspaceCollapsed ? 'workspace-collapsed' : ''} ${visibleContextCollapsed ? 'context-collapsed' : ''}`} aria-hidden="true" />}
       <CommandBar snapshot={taskSnapshot} workspace={workspaceSnapshot} collapsed={commandCollapsed} onCollapseChange={setCommandCollapsed} onCommand={sendTaskCommand} onOverlayHeightChange={setCommandOverlayHeight} />
     </main>
   );

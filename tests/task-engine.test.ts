@@ -90,6 +90,8 @@ async function setup({ withProject = true, withBrowserAgent = false, withTabCont
   const onTaskEnded = vi.fn();
   const github = new FakeGitHub();
   const onOpenExternal = vi.fn();
+  const querySelectedDatabase = vi.fn(() => 'Name\nGuitar');
+  const applyPageComment = vi.fn(() => 'Applied comment');
   const browserSnapshot: BrowserAgentSnapshot = {
     state: 'idle', taskId: null, taskSpace: null, watching: false, allowedTabIds: [], activeTabId: null, currentAction: null, pendingApproval: null, log: [],
   };
@@ -124,6 +126,8 @@ async function setup({ withProject = true, withBrowserAgent = false, withTabCont
       onTaskEnded,
       github: github as unknown as GitHubEngine,
       onOpenExternal,
+      querySelectedDatabase,
+      applyPageComment,
       ...(withBrowserAgent ? {
         getBrowserAgentSnapshot: () => browserSnapshot,
         executeBrowserAgentCommand: browserCommand,
@@ -131,7 +135,7 @@ async function setup({ withProject = true, withBrowserAgent = false, withTabCont
     },
   );
   await engine.initialize();
-  return { engine, fake, repositoryPath, taskStore, workspaceStore, onResultReady, onTaskEnded, directory, github, onOpenExternal, browserSnapshot, browserCommand };
+  return { engine, fake, repositoryPath, taskStore, workspaceStore, onResultReady, onTaskEnded, directory, github, onOpenExternal, browserSnapshot, browserCommand, querySelectedDatabase, applyPageComment };
 }
 
 describe('task engine', () => {
@@ -143,9 +147,9 @@ describe('task engine', () => {
     const now = new Date().toISOString();
     taskStore.save({
       state: 'Needs Approval', kind: 'code', prompt: 'Review me', model: 'gpt-test', reasoningEffort: 'high',
-      threadId: 'thread-1', turnId: 'turn-1', baselineCommit: 'a'.repeat(40), progress: [],
+      documentId: 'document-1', threadId: 'thread-1', turnId: 'turn-1', baselineCommit: 'a'.repeat(40), progress: [],
       pendingApproval: null, result: 'Done', diff: 'diff', error: null,
-      browserRun: { required: false, state: 'not-required', taskSpaceId: null, successfulActionCount: 0, retryCount: 0, lastActionAt: null },
+      browserRun: { required: false, state: 'not-required', taskSpaceId: null, successfulActionCount: 0, retryCount: 0, lastActionAt: null, sources: [] },
       createdAt: now, updatedAt: now,
     });
     const window = { isDestroyed: () => false, webContents: { isDestroyed: () => false, send: () => undefined } };
@@ -243,12 +247,39 @@ describe('task engine', () => {
       params: { threadId: 'thread-1', turnId: 'turn-1', callId: 'call-search', tool: 'poppin_browser_action', arguments: { taskSpaceId: 'space-1', tabId: 'exploration-tab', action: { type: 'navigate', url: 'https://duckduckgo.com/?q=acoustic+guitars+under+10000' } } },
     });
     await vi.waitFor(() => expect(engine.getSnapshot().task?.browserRun).toMatchObject({ required: true, state: 'action-observed', successfulActionCount: 1 }));
+    expect(engine.getSnapshot().task?.browserRun.sources).toEqual([{
+      title: 'duckduckgo.com', url: 'https://duckduckgo.com/?q=acoustic+guitars+under+10000',
+    }]);
+    fake.emit('notification', { method: 'item/agentMessage/delta', params: { threadId: 'thread-1', turnId: 'turn-1', itemId: 'preamble', delta: 'I am researching live sources now.' } });
     fake.emit('notification', { method: 'item/agentMessage/delta', params: { threadId: 'thread-1', turnId: 'turn-1', itemId: 'message-1', delta: 'Comparison with sources: https://example.com/guitars' } });
     fake.emit('notification', { method: 'turn/completed', params: { threadId: 'thread-1', turn: { id: 'turn-1', status: 'completed', error: null } } });
     await vi.waitFor(() => expect(onResultReady).toHaveBeenCalledWith(expect.objectContaining({
       kind: 'work', result: 'Comparison with sources: https://example.com/guitars', state: 'Completed',
       browserRun: expect.objectContaining({ required: true, state: 'completed', successfulActionCount: 1 }),
     })));
+    await engine.close();
+    taskStore.close();
+    workspaceStore.close();
+  });
+
+  it('accepts serialized arguments for native Page and Database tools', async () => {
+    const { engine, fake, taskStore, workspaceStore, querySelectedDatabase, applyPageComment } = await setup({ withProject: false, withTabContext: false });
+    await engine.execute({ type: 'startTask', prompt: 'Use my selected native data', model: 'gpt-test', reasoningEffort: 'high', kind: 'work' });
+    fake.emit('request', {
+      id: 41, method: 'item/tool/call',
+      params: { threadId: 'thread-1', turnId: 'turn-1', tool: 'database_query', arguments: JSON.stringify({ databaseId: 'db-1', limit: 12 }) },
+    });
+    fake.emit('request', {
+      id: 42, method: 'item/tool/call',
+      params: { threadId: 'thread-1', turnId: 'turn-1', tool: 'page_comment_apply', arguments: JSON.stringify({ commentId: 'comment-1', replacement: 'Tuesday' }) },
+    });
+    await vi.waitFor(() => expect(fake.responses).toHaveLength(2));
+    expect(querySelectedDatabase).toHaveBeenCalledWith('db-1', 12);
+    expect(applyPageComment).toHaveBeenCalledWith('comment-1', 'Tuesday');
+    expect(fake.responses).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 41, result: expect.objectContaining({ success: true }) }),
+      expect.objectContaining({ id: 42, result: expect.objectContaining({ success: true }) }),
+    ]));
     await engine.close();
     taskStore.close();
     workspaceStore.close();
@@ -302,6 +333,58 @@ describe('task engine', () => {
     expect(fake.prompt).toContain('TASK-OWNED AGENT TABS');
     expect(fake.prompt).toContain('"explorationTabs"');
     expect(engine.getSnapshot().task?.browserRun).toMatchObject({ required: true, state: 'awaiting-action', successfulActionCount: 0 });
+    await engine.close();
+    taskStore.close();
+    workspaceStore.close();
+  });
+
+  it('does not inherit browser work for an explicit native Page follow-up', async () => {
+    const { engine, fake, browserCommand, browserSnapshot, taskStore, workspaceStore } = await setup({
+      withProject: false, withBrowserAgent: true, withTabContext: false,
+    });
+    await engine.execute({
+      type: 'startTask', prompt: 'Search for acoustic guitars under 10,000 and tell me where to buy them.', model: 'gpt-test', reasoningEffort: 'high', kind: 'work',
+    });
+    fake.emit('request', {
+      id: 33,
+      method: 'item/tool/call',
+      params: { threadId: 'thread-1', turnId: 'turn-1', callId: 'call-search', tool: 'poppin_browser_action', arguments: { taskSpaceId: 'space-1', tabId: 'exploration-tab', action: { type: 'search', text: 'acoustic guitars under 10000' } } },
+    });
+    await vi.waitFor(() => expect(engine.getSnapshot().task?.browserRun.successfulActionCount).toBe(1));
+    fake.emit('notification', { method: 'item/agentMessage/delta', params: { threadId: 'thread-1', turnId: 'turn-1', itemId: 'message-1', delta: 'Initial result.' } });
+    fake.emit('notification', { method: 'turn/completed', params: { threadId: 'thread-1', turn: { id: 'turn-1', status: 'completed', error: null } } });
+    await vi.waitFor(() => expect(engine.getSnapshot().task?.state).toBe('Completed'));
+    browserSnapshot.state = 'completed';
+    browserSnapshot.taskSpace = { ...browserSnapshot.taskSpace!, owner: 'user', status: 'completed' };
+    browserCommand.mockClear();
+
+    const nativePrompt = 'Resolve native Page comment comment-1. Follow its anchored instruction, then call page_comment_apply with only the precise replacement text.';
+    expect(await engine.execute({ type: 'continueTask', prompt: nativePrompt })).toEqual({ ok: true });
+    expect(browserCommand).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'start' }));
+    expect(engine.getSnapshot().task?.browserRun).toMatchObject({ required: false, state: 'not-required', successfulActionCount: 0 });
+    expect(fake.prompt).toContain(nativePrompt);
+    await engine.close();
+    taskStore.close();
+    workspaceStore.close();
+  });
+
+  it('does not inherit unrelated retained Agent Tabs for a terse native follow-up', async () => {
+    const { engine, fake, browserCommand, browserSnapshot, taskStore, workspaceStore } = await setup({
+      withProject: false, withBrowserAgent: true, withTabContext: false,
+    });
+    await engine.execute({
+      type: 'startTask', prompt: 'Summarize my selected native Page.', model: 'gpt-test', reasoningEffort: 'high', kind: 'work',
+    });
+    fake.emit('notification', { method: 'item/agentMessage/delta', params: { threadId: 'thread-1', turnId: 'turn-1', itemId: 'message-1', delta: 'Native summary.' } });
+    fake.emit('notification', { method: 'turn/completed', params: { threadId: 'thread-1', turn: { id: 'turn-1', status: 'completed', error: null } } });
+    await vi.waitFor(() => expect(engine.getSnapshot().task?.state).toBe('Completed'));
+    browserSnapshot.state = 'completed';
+    browserSnapshot.taskSpace = { id: 'older-space', taskId: 'older-task', name: 'Older research', mode: 'browser-only', tabIds: ['older-tab'], contextTabIds: [], explorationTabIds: ['older-tab'], activeTabId: 'older-tab', status: 'completed', owner: 'user', kept: false, createdAt: '', updatedAt: '' };
+    browserCommand.mockClear();
+
+    expect(await engine.execute({ type: 'continueTask', prompt: 'continue' })).toEqual({ ok: true });
+    expect(browserCommand).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'start' }));
+    expect(engine.getSnapshot().task?.browserRun).toMatchObject({ required: false, state: 'not-required' });
     await engine.close();
     taskStore.close();
     workspaceStore.close();
@@ -373,7 +456,7 @@ describe('task engine', () => {
     await vi.waitFor(() => expect(fake.turnCount).toBe(2));
     expect(engine.getSnapshot().task).toMatchObject({
       state: 'Running', result: '',
-      browserRun: { required: true, state: 'retrying', taskSpaceId: 'space-1', successfulActionCount: 0, retryCount: 1, lastActionAt: null },
+      browserRun: { required: true, state: 'retrying', taskSpaceId: 'space-1', successfulActionCount: 0, retryCount: 1, lastActionAt: null, sources: [] },
     });
     expect(fake.prompt).toContain('MUST use poppin_browser_action or poppin_browser_batch');
     expect(fake.prompt).toContain('Search for acoustic guitars under ₹10,000');

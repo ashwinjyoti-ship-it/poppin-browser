@@ -122,23 +122,23 @@ Poppin pauses before sign-in/authentication, password/passkey/biometric/credenti
 
 ### YouTube transcript-summary acceptance flow
 
-For a request such as “Give me a five-point summary”, the user selects a YouTube tab, reviews Poppin's request to use that tab and read its transcript, and grants access. Codex visibly opens or reads captions/transcript exposed by the approved page and creates a timestamped summary in the centre result tab. No Git project is required. The user may approve, revise, copy, save, or export it. Poppin must not silently download or transcribe protected media.
+For a request such as “Give me a five-point summary”, the user selects a YouTube tab, reviews Poppin's request to use that tab and read its transcript, and grants access. Codex visibly opens or reads captions/transcript exposed by the approved page and creates a timestamped summary in the native task document. No Git project is required. The user may revise, copy, save, or export it. Poppin must not silently download or transcribe protected media.
 
 ### Architecture and verification
 
 `BrowserAgentEngine` is a reusable main-process engine behind a narrow IPC contract. It owns lifecycle, tab scope, action validation, approval gates, logging, and teardown. Verification includes unit coverage for tab scope, pause/stop/takeover, approval gates, and credential-boundary rejection; integration coverage proving that unapproved tabs and privileged APIs are inaccessible; and a localhost fixture covering visual selection, navigation, typing, click, approval, takeover, and teardown. Hands-on local-site testing precedes general web use.
 
-## Phase 8 — Centre-Browser Results, Preview, Review, and Delivery
+## Phase 8 — Native Tandem Results, Preview, Review, and Delivery
 
 **Status:** Implemented and release-verified on 2026-08-07. Do not expand beyond this scope.
 
-**Outcome:** Substantial Work and Code output is reviewed in the centre browser, with compact controls and metadata in the right pane.
+**Outcome:** Substantial Work and Code output is reviewed in a native Tandem Page, with compact controls and metadata in the right pane. Browser preview remains available for localhost Code work.
 
-### Trusted result tabs
+### Persistent task documents
 
-- Open a trusted, sandboxed internal result page such as `poppin://task/current/result` as a normal Poppin tab.
-- Revisions update the same result tab instead of creating duplicates, and the result persists with the current task where appropriate.
-- Result content receives no Node or privileged Poppin APIs. Source links may open as additional Poppin tabs.
+- Append each completed turn to one native Page keyed by a stable task-document identity, not by a replaceable Codex thread ID.
+- Revisions and follow-ups update the same conversation document instead of creating duplicates, and the result persists in `poppin.sqlite`.
+- Render GFM through Tandem's exact Markdown implementation, sanitize the HTML, and open source links as additional Poppin tabs.
 - Supported presentations include timestamped video summaries, research briefs with source links, document summaries, comparisons, structured tables, checklists and action items, drafts and reports, Markdown, generated-document previews, test reports, localhost previews, and pull-request summaries.
 - Actions include Approve, Revise in the same active task, Copy, Save, Export, Open Sources, and Open Generated Files. Never overwrite an original attachment without explicit approval; prefer a new previewable output artifact.
 
@@ -260,7 +260,7 @@ Initial candidates are an unsent Gmail draft, a timestamped YouTube transcript s
 - **2026-08-08:** Browser-use Work tasks gain browser-only and mixed topologies. Browser-only starts with one fresh exploration Agent Tab and no user-tab context; mixed combines explicit frozen context and cloned context tabs with a separate fresh exploration tab; context-only remains unchanged. Every topology completes through the same trusted centre-browser Result workflow. Verification covers 82 passing unit/component/integration tests with one expected live-Codex skip, the packaged arm64 Electron smoke flow, and integrity-checked ad-hoc-signed arm64 and x64 DMG candidates.
 - **2026-08-08:** Authentication and conversation feedback replaces detached OAuth tabs with a sandboxed overlay window that preserves `window.opener`, shares only Poppin's own persistent partition, and exposes a visible Cancel control. Link settings persist independently of the best-effort live refresh applied to loaded pages. Completed Work output immediately permits a bottom-bar follow-up on the same persisted Codex thread; only exact consequential operations and Code result delivery remain approval-gated.
 - **2026-08-08:** “Follow website” adopts Arc-style Peek behavior: same-site links remain in context, while a clicked cross-site link opens in a compact overlay with Close and Open in Tab actions. OAuth uses the same visual layer but retains a distinct protected sign-in state and credential boundary.
-- **2026-08-08:** Browser-use Work tasks enter Agent Tabs live view automatically and follow the agent's active task-owned tab. Choosing a normal tab moves the agent into background work without stopping it; Agent Tabs returns to live view, and the trusted result tab opens only when work completes. Product-comparison and price-research prompts explicitly trigger browser use.
+- **2026-08-08:** Browser-use Work tasks enter Agent Tabs live view automatically and follow the agent's active task-owned tab. Choosing a normal tab moves the agent into background work without stopping it; Agent Tabs returns to live view, and the persistent native Tandem task document opens only when work completes. Product-comparison and price-research prompts explicitly trigger browser use.
 - **2026-08-08:** Plain-language search, lookup, live price/stock, and “where can I buy” requests explicitly start browser-only Agent Tabs. Browser intent must not depend on the user adding “the web,” “website,” or a generic product noun.
 - **2026-08-08:** A completed browser-enabled Work turn preserves browser capability for its Codex conversation. A terse follow-up such as “continue” creates a fresh task-owned browser space before the same thread resumes, unless the user explicitly kept the old tabs.
 - **2026-08-08:** Browser-required Work persists its task-space and browser-run state and cannot become a completed Result without a successful meaningful browser action. A zero-action Codex completion retries once in the active conversation with an explicit Agent Tabs instruction; if the retry also performs no action, Poppin surfaces an incomplete failure and retains the task and tabs instead of showing a generic answer as completed. Since Codex dynamic tools are currently registered only at thread start, a browser-required continuation after app-server restart transparently rehydrates the resumed user/assistant history into a replacement tool-enabled thread while keeping one visible Poppin conversation.

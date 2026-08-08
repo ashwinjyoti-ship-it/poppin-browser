@@ -1,0 +1,65 @@
+name: Poppin validation
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: poppin-validation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-and-package:
+    name: Validate and package macOS app
+    runs-on: macos-14
+    timeout-minutes: 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=moderate
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Package app
+        run: npm run package
+
+      - name: Create candidate archive and checksum
+        shell: bash
+        run: |
+          app_path="$(find out -maxdepth 2 -type d -name 'Poppin Browser.app' -print -quit)"
+          test -n "$app_path"
+          mkdir -p dist-ci
+          archive="dist-ci/Poppin-Browser-${GITHUB_SHA}-${RUNNER_ARCH}.zip"
+          ditto -c -k --sequesterRsrc --keepParent "$app_path" "$archive"
+          shasum -a 256 "$archive" > "${archive}.sha256"
+
+      - name: Upload packaged candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: Poppin-Browser-${{ runner.arch }}-${{ github.sha }}
+          path: dist-ci/
+          if-no-files-found: error
+          retention-days: 14

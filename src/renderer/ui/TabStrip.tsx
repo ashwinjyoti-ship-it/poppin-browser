@@ -1,11 +1,11 @@
-import { ChevronDown, ChevronRight, Globe2, Pencil, Plus, TriangleAlert, X } from 'lucide-react';
+import { ChevronDown, ChevronRight, Database, FileText, Globe2, Pencil, Plus, TriangleAlert, X } from 'lucide-react';
 import { type DragEvent, useMemo, useRef, useState } from 'react';
 
-import type { BrowserTabGroup, BrowserTabSnapshot } from '../../shared/browser';
+import type { BrowserFailure, BrowserTabGroup } from '../../shared/browser';
 import type { BrowserTaskSpace } from '../../shared/browser-agent';
 
 interface TabStripProps {
-  tabs: BrowserTabSnapshot[];
+  tabs: TabStripTabSnapshot[];
   groups: BrowserTabGroup[];
   activeTabId: string;
   onActivate: (tabId: string) => void;
@@ -19,6 +19,18 @@ interface TabStripProps {
   agentTaskSpace?: BrowserTaskSpace | null;
   watchingAgentTabs?: boolean;
   onWatchAgentTabs?: () => void;
+}
+
+export interface TabStripTabSnapshot {
+  id: string;
+  title: string;
+  kind?: 'browser' | 'page' | 'database';
+  faviconUrls?: string[];
+  pinned?: boolean;
+  groupId?: string | null;
+  taskSpaceId?: string | null;
+  isLoading?: boolean;
+  failure?: BrowserFailure | null;
 }
 
 export function TabStrip({
@@ -76,7 +88,18 @@ export function TabStrip({
         onDragOver={(event) => event.preventDefault()}
         onDrop={(event) => dropTab(event, null, onReorder)}
       >
-        {agentTaskSpace ? <button type="button" className={`agent-tabs-entry ${watchingAgentTabs ? 'agent-tabs-entry-active' : ''}`} onClick={onWatchAgentTabs}>Agent Tabs · {agentTaskSpace.name}<span>{agentTaskSpace.tabIds.length}</span></button> : null}
+        {agentTaskSpace ? (
+          <button
+            type="button"
+            className={`agent-tabs-entry ${watchingAgentTabs ? 'agent-tabs-entry-active' : ''}`}
+            aria-label={`Agent Tabs · ${agentTaskSpace.name}. Return to live view.`}
+            title={`Agent Tabs · ${agentTaskSpace.name}`}
+            onClick={onWatchAgentTabs}
+          >
+            <span className="agent-tabs-entry-label">Agent Tabs · {agentTaskSpace.name}</span>
+            <span className="agent-tabs-entry-count" aria-hidden="true">{agentTaskSpace.tabIds.length}</span>
+          </button>
+        ) : null}
         {tabs.flatMap((tab) => {
           const group = tab.groupId ? groupsById.get(tab.groupId) : undefined;
           const showGroup = Boolean(group && !renderedGroups.has(group.id));
@@ -116,7 +139,7 @@ export function TabStrip({
                 onDragOver={(event) => event.preventDefault()}
                 onDrop={(event) => dropTab(event, tab.id, onReorder)}
                 onClick={() => onActivate(tab.id)}
-                onContextMenu={(event) => { event.preventDefault(); onShowTabMenu(tab.id); }}
+                onContextMenu={(event) => { event.preventDefault(); if (!tab.kind || tab.kind === 'browser') onShowTabMenu(tab.id); }}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter' || event.key === ' ') {
                     event.preventDefault();
@@ -125,7 +148,7 @@ export function TabStrip({
                 }}
               >
                 <span className="tab-icon" aria-hidden="true">
-                  <TabFavicon key={`${tab.failure ? 'failed' : 'ready'}:${tab.faviconUrls.join('|')}`} tab={tab} />
+                  <TabFavicon key={`${tab.failure ? 'failed' : 'ready'}:${tab.faviconUrls?.join('|') ?? tab.kind}`} tab={tab} />
                 </span>
                 {tab.pinned ? null : <span className="tab-title">{tab.title || 'Untitled'}</span>}
                 {tab.isLoading ? <span className="tab-loading" aria-label="Loading" /> : null}
@@ -221,11 +244,13 @@ function TabGroupChip({ group, count, editing, draftName, onDraftNameChange, onF
   );
 }
 
-function TabFavicon({ tab }: { tab: BrowserTabSnapshot }) {
+function TabFavicon({ tab }: { tab: TabStripTabSnapshot }) {
   const [candidateIndex, setCandidateIndex] = useState(0);
 
+  if (tab.kind === 'page') return <FileText size={15} />;
+  if (tab.kind === 'database') return <Database size={15} />;
   if (tab.failure) return <TriangleAlert size={15} className="tab-failure-icon" />;
-  const source = tab.faviconUrls[candidateIndex];
+  const source = tab.faviconUrls?.[candidateIndex];
   if (!source) return <Globe2 size={15} />;
   return (
     <img

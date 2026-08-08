@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Check, ChevronLeft, ChevronRight, Copy, ExternalLink, FileText, Globe2, RefreshCw, RotateCcw, X } from 'lucide-react';
+import { Check, ChevronLeft, ChevronRight, Copy, Database, ExternalLink, FileText, Globe2, RefreshCw, RotateCcw, X } from 'lucide-react';
 
 import type { TaskCommand, TaskCommandResult, TaskSnapshot } from '../../shared/task';
 import type { WorkspaceSnapshot } from '../../shared/workspace';
@@ -30,7 +30,7 @@ export function ContextPane({ collapsed, snapshot, taskSnapshot, onCollapseChang
   const [internalSection, setInternalSection] = useState<PaneSection>('context');
   const activeSection = section ?? internalSection;
   const selectedDocuments = snapshot.documents.filter((document) => document.selected);
-  const itemCount = snapshot.tabContexts.length + selectedDocuments.length + (snapshot.visualSelection ? 1 : 0);
+  const itemCount = snapshot.tabContexts.length + selectedDocuments.length + (snapshot.pageContexts?.length ?? 0) + (snapshot.visualSelection ? 1 : 0);
 
   if (collapsed) {
     return (
@@ -73,7 +73,7 @@ function ContextView({ snapshot, activeTab, onRefreshTab, onCaptureVisualSelecti
   const [selectionMessage, setSelectionMessage] = useState('');
   const [selecting, setSelecting] = useState(false);
   const documents = snapshot.documents.filter((document) => document.selected);
-  const itemCount = snapshot.tabContexts.length + documents.length + (snapshot.visualSelection ? 1 : 0);
+  const itemCount = snapshot.tabContexts.length + documents.length + (snapshot.pageContexts?.length ?? 0) + (snapshot.visualSelection ? 1 : 0);
   const activeIsLocalhost = Boolean(activeTab && /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?(?:\/|$)/i.test(activeTab.url));
   const capture = async () => {
     if (!activeTab || !onCaptureVisualSelection) return;
@@ -106,6 +106,14 @@ function ContextView({ snapshot, activeTab, onRefreshTab, onCaptureVisualSelecti
             {document.truncated ? <span className="context-note">Captured at the 60,000-character limit.</span> : null}
           </article>
         ))}
+        {(snapshot.pageContexts ?? []).map((page) => (
+          <article className="context-card" key={page.pageId}>
+            <div className="context-card-heading">{page.kind === 'database' ? <Database size={14} /> : <FileText size={14} />}<strong>{page.title}</strong></div>
+            <span className="context-source">Native {page.kind}{page.rowCount === null ? '' : ` · ${page.rowCount} rows`}</span>
+            <pre>{page.content || '(Empty page)'}</pre>
+            {page.truncated ? <span className="context-note">Captured at the 60,000-character limit.</span> : null}
+          </article>
+        ))}
         {snapshot.visualSelection ? (
           <article className="context-card visual-selection-card">
             <div className="context-card-heading"><strong>Selected localhost UI</strong><button type="button" onClick={onClearVisualSelection} aria-label="Clear visual selection"><X size={13} /></button></div>
@@ -127,6 +135,9 @@ function TaskView({ snapshot, browserAgent, onCommand, onBrowserAgentCommand }: 
   onBrowserAgentCommand?: (command: BrowserAgentCommand) => Promise<BrowserAgentCommandResult>;
 }) {
   const task = snapshot.task;
+  const visibleProgress = task?.kind === 'work' && task.state === 'Completed'
+    ? task.progress.filter((item) => item.kind !== 'message')
+    : task?.progress ?? [];
   const [questionAnswer, setQuestionAnswer] = useState('');
   const approvalRef = useRef<HTMLElement>(null);
   useEffect(() => {
@@ -162,9 +173,10 @@ function TaskView({ snapshot, browserAgent, onCommand, onBrowserAgentCommand }: 
       {task && onBrowserAgentCommand ? <BrowserUseView snapshot={browserAgent} onCommand={onBrowserAgentCommand} /> : null}
       {task ? (
         <div className="task-progress-list">
-          {task.progress.map((item) => (
+          {visibleProgress.map((item) => (
             <article key={item.id} className="task-progress-item"><i className={`progress-state progress-${item.status}`} /><div><strong>{item.title}</strong>{item.detail ? <pre>{item.detail}</pre> : null}</div></article>
           ))}
+          {task.kind === 'work' && task.state === 'Completed' ? <p className="context-note">The completed response is formatted in the active Tandem page.</p> : null}
         </div>
       ) : <div className="context-empty">Choose context when it matters, or ask Codex to browse from a fresh Agent Tab.</div>}
       {task?.state === 'Running' || task?.pendingApproval ? <button type="button" className="task-cancel" onClick={() => { void onCommand({ type: 'cancelTask' }); }}>Cancel task</button> : null}
@@ -204,8 +216,8 @@ function ResultView({ snapshot, workspace, onCommand, onOpenResult }: { snapshot
     <div className="right-pane-content result-view">
       <div className="pane-heading"><div><span className="eyebrow">{task.kind} result</span><h2>{task.kind === 'code' ? 'Review the change' : 'Review the output'}</h2></div><span className={`task-state task-state-${slug(task.state)}`}>{task.state}</span></div>
       {task.kind === 'code' ? <button type="button" className="secondary-button preview-button" onClick={() => { void onCommand({ type: 'openPreview' }).then((result) => setMessage(result.message ?? 'Preview opened in the centre browser.')); }}>Open localhost preview</button> : null}
-      {task.result ? <div className="result-toolbar"><button type="button" className="secondary-button" onClick={onOpenResult}><ExternalLink size={13} /> Open result tab</button><button type="button" className="secondary-button" onClick={() => { void navigator.clipboard.writeText(task.result).then(() => setMessage('Copied result.')); }}><Copy size={13} /> Copy</button><button type="button" className="secondary-button" onClick={() => { void onCommand({ type: 'exportResult', format: 'markdown' }).then((result) => setMessage(result.message ?? 'Saved.')); }}>Save</button><button type="button" className="secondary-button" onClick={() => { void onCommand({ type: 'exportResult', format: 'text' }).then((result) => setMessage(result.message ?? 'Exported.')); }}>Export</button></div> : null}
-      <section className="result-section"><h3>Codex summary</h3><pre>{task.result || (task.state === 'Running' ? 'Codex is working…' : 'No summary was returned.')}</pre></section>
+      {task.result ? <div className="result-toolbar"><button type="button" className="secondary-button" onClick={onOpenResult}><ExternalLink size={13} /> Open Tandem page</button><button type="button" className="secondary-button" onClick={() => { void navigator.clipboard.writeText(task.result).then(() => setMessage('Copied result.')); }}><Copy size={13} /> Copy</button><button type="button" className="secondary-button" onClick={() => { void onCommand({ type: 'exportResult', format: 'markdown' }).then((result) => setMessage(result.message ?? 'Saved.')); }}>Save</button><button type="button" className="secondary-button" onClick={() => { void onCommand({ type: 'exportResult', format: 'text' }).then((result) => setMessage(result.message ?? 'Exported.')); }}>Export</button></div> : null}
+      {task.kind === 'work' ? <section className="result-section"><h3>Living document</h3><p>{task.state === 'Running' ? 'Codex is working. The completed turn will be added to the same Tandem page.' : task.result ? 'This turn is formatted in the task’s Tandem page, where you can select text and attach an instruction.' : 'No completed output is available yet.'}</p></section> : <section className="result-section"><h3>Codex summary</h3><pre>{task.result || (task.state === 'Running' ? 'Codex is working…' : 'No summary was returned.')}</pre></section>}
       {task.kind === 'code' ? <section className="result-section diff-section"><h3>Git diff</h3><pre>{task.diff || 'No project diff yet.'}</pre></section> : null}
       {canReview ? (
         <div className="review-actions">

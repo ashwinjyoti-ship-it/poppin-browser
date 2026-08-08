@@ -127,12 +127,6 @@ describe('packaged browser workflow', () => {
     expect(newTabPage).toBeDefined();
     await expect.poll(() => newTabPage!.getByRole('heading', { name: /where would you like to go/i }).isVisible()).toBe(true);
 
-    expect(await shell.evaluate(() => window.poppinBrowser.command({ type: 'openTaskResult' }))).toMatchObject({ ok: true });
-    await expect.poll(() => exactPageInfo(application!, 'poppin://task/current/result')).toMatchObject({ title: 'Task result' });
-    await expect.poll(() => shell.getByRole('tab').count()).toBe(2);
-    await shell.getByRole('button', { name: 'Close Task result' }).click();
-    await expect.poll(() => shell.getByRole('tab').count()).toBe(1);
-
     const address = shell.getByLabel('Address and search');
     const workspaceDivider = shell.getByRole('separator', { name: 'Resize workspace pane' });
     const initialWorkspaceWidth = Number(await workspaceDivider.getAttribute('aria-valuenow'));
@@ -266,10 +260,18 @@ describe('packaged browser workflow', () => {
     await address.press('Enter');
     await expect.poll(() => exactPageInfo(application!, `${origin}/`)).toMatchObject({ title: 'Local fixture' });
 
-    const workspace = shell.getByLabel('Workspace');
+    const workspace = shell.getByRole('complementary', { name: 'Workspace' });
     await workspace.getByLabel('Workspace name').fill('Launch workspace');
     await workspace.getByRole('button', { name: 'Create workspace' }).click();
     await expect.poll(() => workspace.getByRole('heading', { name: 'Launch workspace' }).isVisible()).toBe(true);
+    const workspaceBox = await workspace.boundingBox();
+    expect(workspaceBox).not.toBeNull();
+    for (const name of ['Page', 'Database', 'Memory']) {
+      const actionBox = await workspace.getByRole('button', { name, exact: true }).boundingBox();
+      expect(actionBox).not.toBeNull();
+      expect(actionBox!.x).toBeGreaterThanOrEqual(workspaceBox!.x);
+      expect(actionBox!.x + actionBox!.width).toBeLessThanOrEqual(workspaceBox!.x + workspaceBox!.width);
+    }
     const tabContextCheckbox = workspace.getByRole('checkbox', { name: 'Local fixture' });
     await tabContextCheckbox.click();
     await expect.poll(() => tabContextCheckbox.isChecked()).toBe(true);
@@ -282,6 +284,14 @@ describe('packaged browser workflow', () => {
     await expect.poll(() => exactPageInfo(application!, `${origin}/agent`)).toMatchObject({ title: 'Browser agent fixture' });
     const agentTabId = await shell.evaluate(async () => (await window.poppinBrowser.getSnapshot()).activeTabId);
     expect(await shell.evaluate((tabId) => window.poppinBrowserAgent.command({ type: 'start', taskId: 'smoke-browser-task', mode: 'mixed', tabIds: [tabId] }), agentTabId)).toMatchObject({ ok: true });
+    const agentTabsEntry = shell.getByRole('button', { name: /Agent Tabs · Browser task/ });
+    await expect.poll(() => agentTabsEntry.isVisible()).toBe(true);
+    expect(await agentTabsEntry.locator('.agent-tabs-entry-label').evaluate((element) => getComputedStyle(element).textOverflow)).toBe('ellipsis');
+    const agentEntryBox = await agentTabsEntry.boundingBox();
+    const agentCountBox = await agentTabsEntry.locator('.agent-tabs-entry-count').boundingBox();
+    expect(agentEntryBox).not.toBeNull();
+    expect(agentCountBox).not.toBeNull();
+    expect(agentCountBox!.x + agentCountBox!.width).toBeLessThanOrEqual(agentEntryBox!.x + agentEntryBox!.width);
     await expect.poll(() => shell.evaluate(async () => {
       const agent = await window.poppinBrowserAgent.getSnapshot();
       const browser = await window.poppinBrowser.getSnapshot();

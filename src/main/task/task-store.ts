@@ -8,6 +8,7 @@ interface TaskRow {
   prompt: string;
   model: string;
   reasoning_effort: string;
+  document_id: string;
   thread_id: string;
   turn_id: string;
   baseline_commit: string;
@@ -36,6 +37,7 @@ export class TaskStore {
         prompt TEXT NOT NULL,
         model TEXT NOT NULL,
         reasoning_effort TEXT NOT NULL,
+        document_id TEXT NOT NULL DEFAULT '',
         thread_id TEXT NOT NULL,
         turn_id TEXT NOT NULL,
         baseline_commit TEXT NOT NULL,
@@ -60,11 +62,15 @@ export class TaskStore {
     if (!columns.some((column) => column.name === 'browser_run_json')) {
       this.database.exec('ALTER TABLE active_task ADD COLUMN browser_run_json TEXT');
     }
+    if (!columns.some((column) => column.name === 'document_id')) {
+      this.database.exec("ALTER TABLE active_task ADD COLUMN document_id TEXT NOT NULL DEFAULT ''");
+    }
+    this.database.exec("UPDATE active_task SET document_id = thread_id WHERE document_id = ''");
   }
 
   load(): TaskRecordSnapshot | null {
     const row = this.database.prepare(`
-      SELECT state, kind, prompt, model, reasoning_effort, thread_id, turn_id, baseline_commit,
+      SELECT state, kind, prompt, model, reasoning_effort, document_id, thread_id, turn_id, baseline_commit,
         progress_json, approval_json, result, diff, error, browser_run_json, delivery_json, created_at, updated_at
       FROM active_task WHERE id = 'primary'
     `).get() as unknown as TaskRow | undefined;
@@ -85,6 +91,7 @@ export class TaskStore {
         prompt: row.prompt,
         model: row.model,
         reasoningEffort: row.reasoning_effort,
+        documentId: row.document_id || row.thread_id,
         threadId: row.thread_id,
         turnId: row.turn_id,
         baselineCommit: row.baseline_commit,
@@ -107,15 +114,16 @@ export class TaskStore {
   save(task: TaskRecordSnapshot): void {
     this.database.prepare(`
       INSERT INTO active_task (
-        id, state, kind, prompt, model, reasoning_effort, thread_id, turn_id, baseline_commit,
+        id, state, kind, prompt, model, reasoning_effort, document_id, thread_id, turn_id, baseline_commit,
         progress_json, approval_json, result, diff, error, browser_run_json, delivery_json, created_at, updated_at
-      ) VALUES ('primary', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES ('primary', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         state = excluded.state,
         kind = excluded.kind,
         prompt = excluded.prompt,
         model = excluded.model,
         reasoning_effort = excluded.reasoning_effort,
+        document_id = excluded.document_id,
         thread_id = excluded.thread_id,
         turn_id = excluded.turn_id,
         baseline_commit = excluded.baseline_commit,
@@ -134,6 +142,7 @@ export class TaskStore {
       task.prompt,
       task.model,
       task.reasoningEffort,
+      task.documentId,
       task.threadId,
       task.turnId,
       task.baselineCommit,
@@ -166,6 +175,7 @@ function emptyBrowserRun(): TaskBrowserRunSnapshot {
     successfulActionCount: 0,
     retryCount: 0,
     lastActionAt: null,
+    sources: [],
   };
 }
 
@@ -178,5 +188,8 @@ function parseBrowserRun(value: unknown): TaskBrowserRunSnapshot {
   if (!Number.isInteger(candidate.successfulActionCount) || candidate.successfulActionCount! < 0) throw new Error('Invalid browser run');
   if (!Number.isInteger(candidate.retryCount) || candidate.retryCount! < 0) throw new Error('Invalid browser run');
   if (candidate.lastActionAt !== null && typeof candidate.lastActionAt !== 'string') throw new Error('Invalid browser run');
-  return candidate as TaskBrowserRunSnapshot;
+  const sources = candidate.sources === undefined ? [] : candidate.sources;
+  if (!Array.isArray(sources) || !sources.every((source) => source && typeof source === 'object'
+    && typeof source.title === 'string' && typeof source.url === 'string')) throw new Error('Invalid browser run');
+  return { ...(candidate as TaskBrowserRunSnapshot), sources: sources.slice(0, 100) };
 }

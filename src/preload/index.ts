@@ -24,6 +24,13 @@ import {
   type BrowserAgentSnapshot,
   type PoppinBrowserAgentApi,
 } from '../shared/browser-agent';
+import {
+  PAGES_CHANNELS,
+  type PageDocumentSnapshot,
+  type PagesCommand,
+  type PagesSnapshot,
+  type PoppinPagesApi,
+} from '../shared/pages';
 
 const api: PoppinBrowserApi = {
   getSnapshot: () => ipcRenderer.invoke(BROWSER_CHANNELS.getSnapshot) as Promise<BrowserSnapshot>,
@@ -53,6 +60,20 @@ const workspaceApi: PoppinWorkspaceApi = {
 };
 
 contextBridge.exposeInMainWorld('poppinWorkspace', workspaceApi);
+
+const pagesApi: PoppinPagesApi = {
+  getSnapshot: () => ipcRenderer.invoke(PAGES_CHANNELS.getSnapshot) as Promise<PagesSnapshot>,
+  getPage: (pageId) => ipcRenderer.invoke(PAGES_CHANNELS.getPage, pageId) as Promise<PageDocumentSnapshot | null>,
+  command: (command: PagesCommand) => ipcRenderer.invoke(PAGES_CHANNELS.command, command),
+  exportPage: (pageId, format) => ipcRenderer.invoke(PAGES_CHANNELS.exportPage, pageId, format),
+  subscribe: (listener) => {
+    const handler = (_event: Electron.IpcRendererEvent, snapshot: PagesSnapshot) => listener(snapshot);
+    ipcRenderer.on(PAGES_CHANNELS.snapshot, handler);
+    return () => ipcRenderer.removeListener(PAGES_CHANNELS.snapshot, handler);
+  },
+};
+
+contextBridge.exposeInMainWorld('poppinPages', pagesApi);
 
 const taskApi: PoppinTaskApi = {
   getSnapshot: () => ipcRenderer.invoke(TASK_CHANNELS.getSnapshot) as Promise<TaskSnapshot>,

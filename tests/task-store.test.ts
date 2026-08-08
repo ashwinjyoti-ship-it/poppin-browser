@@ -19,6 +19,7 @@ describe('task store', () => {
       prompt: 'Change the button',
       model: 'gpt-5.6-sol',
       reasoningEffort: 'high',
+      documentId: 'document-1',
       threadId: 'thread-1',
       turnId: 'turn-1',
       baselineCommit: 'a'.repeat(40),
@@ -27,7 +28,7 @@ describe('task store', () => {
       result: 'Implemented the change.',
       diff: 'diff --git a/src/App.tsx b/src/App.tsx',
       error: null,
-      browserRun: { required: true, state: 'completed', taskSpaceId: 'space-1', successfulActionCount: 3, retryCount: 1, lastActionAt: '2026-08-07T00:00:30.000Z' },
+      browserRun: { required: true, state: 'completed', taskSpaceId: 'space-1', successfulActionCount: 3, retryCount: 1, lastActionAt: '2026-08-07T00:00:30.000Z', sources: [{ title: 'Example', url: 'https://example.com/' }] },
       delivery: { branch: 'codex/task', commit: 'c'.repeat(40), remote: 'https://github.com/acme/repo.git', pushed: true, pullRequest: null, message: 'Pushed.' },
       createdAt: '2026-08-07T00:00:00.000Z',
       updatedAt: '2026-08-07T00:01:00.000Z',
@@ -45,9 +46,9 @@ describe('task store', () => {
     const store = new TaskStore(databasePath);
     const now = new Date().toISOString();
     store.save({
-      state: 'Running', kind: 'code', prompt: 'Test', model: 'model', reasoningEffort: 'low', threadId: '', turnId: '',
+      state: 'Running', kind: 'code', prompt: 'Test', model: 'model', reasoningEffort: 'low', documentId: 'document-1', threadId: '', turnId: '',
       baselineCommit: 'b'.repeat(40), progress: [], pendingApproval: null, result: '', diff: '', error: null,
-      browserRun: { required: false, state: 'not-required', taskSpaceId: null, successfulActionCount: 0, retryCount: 0, lastActionAt: null },
+      browserRun: { required: false, state: 'not-required', taskSpaceId: null, successfulActionCount: 0, retryCount: 0, lastActionAt: null, sources: [] },
       createdAt: now, updatedAt: now,
     });
     store.close();

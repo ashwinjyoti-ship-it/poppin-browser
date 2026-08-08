@@ -1,13 +1,6 @@
 import { protocol, type Session } from 'electron';
 
 import { escapeHtml } from './safe-html';
-import type { TaskRecordSnapshot } from '../../shared/task';
-import type { WorkspaceSnapshot } from '../../shared/workspace';
-
-interface InternalPageData {
-  getTask: () => TaskRecordSnapshot | null;
-  getWorkspace: () => WorkspaceSnapshot | null;
-}
 
 export function registerInternalScheme(): void {
   protocol.registerSchemesAsPrivileged([
@@ -18,41 +11,15 @@ export function registerInternalScheme(): void {
   ]);
 }
 
-export function handleInternalPages(browserSession: Session, data?: InternalPageData): void {
+export function handleInternalPages(browserSession: Session): void {
   if (browserSession.protocol.isProtocolHandled('poppin')) return;
   browserSession.protocol.handle('poppin', (request) => {
     const url = new URL(request.url);
     if (url.hostname === 'error') {
       return htmlResponse(renderErrorPage(url));
     }
-    if (url.hostname === 'task' && url.pathname === '/current/result') {
-      return htmlResponse(renderTaskResult(data?.getTask() ?? null, data?.getWorkspace() ?? null));
-    }
     return htmlResponse(renderNewTabPage());
   });
-}
-
-function renderTaskResult(task: TaskRecordSnapshot | null, workspace: WorkspaceSnapshot | null): string {
-  if (!task) {
-    return pageShell('<main class="result-page"><p class="eyebrow">TASK RESULT</p><h1>No result yet</h1><p>Start a Work or Code task from the Poppin prompt box.</p></main>', 'Task result');
-  }
-  const sources = [
-    ...(workspace?.tabContexts.map((item) => ({ title: item.title, url: item.url })) ?? []),
-    ...(workspace?.documents.filter((item) => item.selected).map((item) => ({ title: item.name, url: '' })) ?? []),
-  ];
-  const sourceList = sources.length === 0 ? '<p class="empty">No sources were selected.</p>' : `<ul>${sources.map((source) => {
-    const title = escapeHtml(source.title);
-    return source.url ? `<li><a href="${escapeHtml(source.url)}">${title}</a></li>` : `<li>${title}</li>`;
-  }).join('')}</ul>`;
-  const kind = task.kind === 'code' ? 'CODE TASK' : 'WORK TASK';
-  return pageShell(`
-    <main class="result-page">
-      <header class="result-header"><div><p class="eyebrow">${kind}</p><h1>${escapeHtml(task.prompt)}</h1></div><span class="result-state">${escapeHtml(task.state)}</span></header>
-      <article class="result-content"><pre>${escapeHtml(task.result || 'No result was returned.')}</pre></article>
-      ${task.kind === 'code' ? `<details><summary>Git diff</summary><pre class="diff">${escapeHtml(task.diff || 'No project diff.')}</pre></details>` : ''}
-      <aside class="sources"><h2>Sources</h2>${sourceList}</aside>
-    </main>
-  `, `${task.kind === 'code' ? 'Code' : 'Work'} result`);
 }
 
 export function errorPageUrl(url: string, code: number, description: string): string {

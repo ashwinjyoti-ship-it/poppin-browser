@@ -1,6 +1,6 @@
 # Tandem + Memory Integration Roadmap
 
-**Status**: ready to start — build all sections below as one continuous push, not gated one at a time
+**Status**: Track A Phase 1 in progress — transactional Pages, native Page/Database tabs, comments, exports, spreadsheet import, protected Memory, and Tandem-rendered persistent task documents are implemented; the full TipTap editor port remains before Phase 1 is complete
 **Date**: 2026-08-08
 **This repo is the target** — all file paths below are relative to `poppin-browser`, right here.
 **Naming note**: this is a separate track from `POPPIN_MVP_ROADMAP.md`'s own Phase 1–13 (the browser/

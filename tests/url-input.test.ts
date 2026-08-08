@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { NEW_TAB_URL, normalizeAddressInput, normalizeTabInput, TASK_RESULT_URL } from '../src/main/browser/url-input';
+import { NEW_TAB_URL, normalizeAddressInput, normalizeTabInput } from '../src/main/browser/url-input';
 
 describe('normalizeAddressInput', () => {
   it('opens the branded new-tab page for empty input', () => {
@@ -47,10 +47,10 @@ describe('normalizeAddressInput', () => {
     expect(normalizeAddressInput('javascript:alert(1)')).toMatchObject({ kind: 'invalid' });
     expect(normalizeAddressInput('file:///tmp/private')).toMatchObject({ kind: 'invalid' });
     expect(normalizeAddressInput('data:text/html,hello')).toMatchObject({ kind: 'invalid' });
-    expect(normalizeAddressInput(TASK_RESULT_URL)).toMatchObject({ kind: 'invalid' });
+    expect(normalizeAddressInput('poppin://task/current/result')).toMatchObject({ kind: 'invalid' });
   });
 
-  it('allows Poppin to create and restore its trusted result tab', () => {
-    expect(normalizeTabInput(TASK_RESULT_URL)).toEqual({ kind: 'url', url: TASK_RESULT_URL });
+  it('does not restore the retired internal result page', () => {
+    expect(normalizeTabInput('poppin://task/current/result')).toMatchObject({ kind: 'invalid' });
   });
 });
