@@ -42,7 +42,7 @@ describe('task attention', () => {
     expect(browserApprovalAttentionKey({
       ...BROWSER_AGENT_SNAPSHOT,
       state: 'paused',
-      taskSpace: { id: 'space-1', taskId: 'task-1', name: 'Login', owner: 'user', status: 'user-controlling', tabIds: ['tab-1'], activeTabId: 'tab-1', createdAt: '2026-08-07T12:00:00Z', updatedAt: '2026-08-07T12:02:00Z', kept: false },
+      taskSpace: { id: 'space-1', taskId: 'task-1', name: 'Login', mode: 'mixed', owner: 'user', status: 'user-controlling', tabIds: ['tab-1'], contextTabIds: ['tab-1'], explorationTabIds: [], activeTabId: 'tab-1', createdAt: '2026-08-07T12:00:00Z', updatedAt: '2026-08-07T12:02:00Z', kept: false },
     })).toBe('takeover:2026-08-07T12:02:00Z');
   });
 });

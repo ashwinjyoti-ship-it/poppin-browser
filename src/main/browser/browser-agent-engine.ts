@@ -22,6 +22,7 @@ export interface BrowserAgentPageController {
   hasTab(tabId: string): boolean;
   describeTab?(tabId: string): string;
   createTaskSpaceTabs(taskSpaceId: string, sourceTabIds: string[]): string[];
+  createTaskSpaceExplorationTab(taskSpaceId: string): string | null;
   prepareTabForAgent(tabId: string, taskSpaceId: string): boolean;
   watchTaskSpace(taskSpaceId: string, activeTabId: string | null): boolean;
   closeTaskSpaceTabs(taskSpaceId: string): void;
@@ -79,6 +80,8 @@ export class BrowserAgentEngine {
     const taskSpace: BrowserTaskSpace = {
       ...restored,
       tabIds,
+      contextTabIds: restored.contextTabIds.filter((tabId) => tabIds.includes(tabId)),
+      explorationTabIds: restored.explorationTabIds.filter((tabId) => tabIds.includes(tabId)),
       activeTabId: restored.activeTabId && tabIds.includes(restored.activeTabId) ? restored.activeTabId : tabIds[0]!,
       owner: 'user',
       status: interrupted ? 'user-controlling' : restored.status,
@@ -104,7 +107,12 @@ export class BrowserAgentEngine {
   getSnapshot(): BrowserAgentSnapshot {
     return {
       ...this.snapshot,
-      taskSpace: this.snapshot.taskSpace ? { ...this.snapshot.taskSpace, tabIds: [...this.snapshot.taskSpace.tabIds] } : null,
+      taskSpace: this.snapshot.taskSpace ? {
+        ...this.snapshot.taskSpace,
+        tabIds: [...this.snapshot.taskSpace.tabIds],
+        contextTabIds: [...this.snapshot.taskSpace.contextTabIds],
+        explorationTabIds: [...this.snapshot.taskSpace.explorationTabIds],
+      } : null,
       allowedTabIds: [...this.snapshot.allowedTabIds],
       pendingApproval: this.snapshot.pendingApproval ? { ...this.snapshot.pendingApproval } : null,
       log: this.snapshot.log.map((entry) => ({ ...entry })),
@@ -114,7 +122,7 @@ export class BrowserAgentEngine {
   async execute(command: BrowserAgentCommand): Promise<BrowserAgentCommandResult> {
     try {
       switch (command.type) {
-        case 'start': return await this.start(command.taskId, command.name, command.tabIds);
+        case 'start': return await this.start(command.taskId, command.name, command.mode, command.tabIds);
         case 'pause': return this.pause('Paused by the user.');
         case 'takeOver': return this.takeOver();
         case 'resume': return this.resume();
@@ -153,7 +161,7 @@ export class BrowserAgentEngine {
     this.emit();
   }
 
-  private async start(taskId: string, name: string | undefined, requestedTabIds: string[]): Promise<BrowserAgentCommandResult> {
+  private async start(taskId: string, name: string | undefined, mode: BrowserTaskSpace['mode'], requestedTabIds: string[]): Promise<BrowserAgentCommandResult> {
     if (!taskId.trim()) return { ok: false, message: 'Browser use requires the active task.' };
     if (this.snapshot.taskSpace) {
       if (this.snapshot.taskSpace.kept) return { ok: false, message: 'Close the kept Agent Tabs before starting another browser-use task.' };
@@ -161,22 +169,27 @@ export class BrowserAgentEngine {
       this.pages.closeTaskSpaceTabs(this.snapshot.taskSpace.id);
     }
     const sourceTabIds = [...new Set(requestedTabIds)].filter((tabId) => this.pages.hasTab(tabId));
-    if (sourceTabIds.length === 0) return { ok: false, message: 'Select at least one available Poppin tab.' };
     const id = randomUUID();
-    const tabIds = this.pages.createTaskSpaceTabs(id, sourceTabIds);
-    if (tabIds.length === 0) return { ok: false, message: 'Poppin could not create task-owned tabs from the selected URLs.' };
+    const contextTabIds = this.pages.createTaskSpaceTabs(id, sourceTabIds);
+    const explorationTabId = this.pages.createTaskSpaceExplorationTab(id);
+    if (!explorationTabId) {
+      this.pages.closeTaskSpaceTabs(id);
+      return { ok: false, message: 'Poppin could not create a fresh task-owned exploration tab.' };
+    }
+    const explorationTabIds = [explorationTabId];
+    const tabIds = [...contextTabIds, ...explorationTabIds];
     const now = new Date().toISOString();
     const taskSpace: BrowserTaskSpace = {
-      id, taskId, name: name?.trim().slice(0, 80) || 'Browser task', owner: 'agent', status: 'agent-controlling',
-      tabIds, activeTabId: tabIds[0]!, createdAt: now, updatedAt: now, kept: false,
+      id, taskId, name: name?.trim().slice(0, 80) || 'Browser task', mode, owner: 'agent', status: 'agent-controlling',
+      tabIds, contextTabIds, explorationTabIds, activeTabId: explorationTabId, createdAt: now, updatedAt: now, kept: false,
     };
     this.controlEpoch += 1;
     this.latestSnapshotByTab.clear();
-    this.snapshot = { ...emptySnapshot(), state: 'running', taskId, taskSpace, allowedTabIds: tabIds, activeTabId: tabIds[0]! };
-    this.append('', 'Agent Tabs started', tabIds.join(', '), 'completed', `${tabIds.length} task-owned tab(s) created; source tabs were unchanged.`);
+    this.snapshot = { ...emptySnapshot(), state: 'running', taskId, taskSpace, allowedTabIds: tabIds, activeTabId: explorationTabId };
+    this.append('', 'Agent Tabs started', tabIds.join(', '), 'completed', `${contextTabIds.length} context clone(s) and 1 fresh exploration tab created; source tabs were unchanged.`);
     await this.persist();
     this.emit();
-    return { ok: true, data: JSON.stringify({ taskSpaceId: id, tabIds }) };
+    return { ok: true, data: JSON.stringify({ taskSpaceId: id, mode, contextTabIds, explorationTabIds }) };
   }
 
   private pause(detail: string): BrowserAgentCommandResult {

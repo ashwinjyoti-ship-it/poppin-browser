@@ -185,7 +185,7 @@ export class BrowserEngine {
     const sourceTabs = [...new Set(sourceTabIds)].flatMap((tabId) => {
       const tab = this.tabs.get(tabId);
       return tab && !tab.snapshot.taskSpaceId && !tab.view.webContents.isDestroyed() ? [tab] : [];
-    }).slice(0, Math.max(0, 50 - this.tabs.size));
+    }).slice(0, Math.max(0, 49 - this.tabs.size));
     return sourceTabs.map((source) => {
       const id = randomUUID();
       this.createTab(source.lastExternalUrl, id, false, {
@@ -193,6 +193,15 @@ export class BrowserEngine {
       }, false, 'end');
       return id;
     });
+  }
+
+  createTaskSpaceExplorationTab(taskSpaceId: string): string | null {
+    if (this.tabs.size >= 50) return null;
+    const id = randomUUID();
+    this.createTab('', id, false, {
+      id, url: NEW_TAB_URL, pinned: false, groupId: null, taskSpaceId,
+    }, false, 'end', false);
+    return id;
   }
 
   watchTaskSpace(taskSpaceId: string, activeTabId: string | null): boolean {
@@ -619,6 +628,7 @@ export class BrowserEngine {
     persisted?: PersistedTabState,
     activate = true,
     position: 'preferred' | 'end' = 'preferred',
+    loadInitial = true,
   ): string {
     const normalized = normalizeTabInput(input, this.settings.searchEngine);
     const initialUrl = normalized.kind === 'invalid' ? NEW_TAB_URL : normalized.url;
@@ -656,7 +666,7 @@ export class BrowserEngine {
     this.window.contentView.addChildView(view);
     this.attachTabEvents(record);
     if (activate) this.activateTab(id);
-    void view.webContents.loadURL(initialUrl).catch(() => undefined);
+    if (loadInitial) void view.webContents.loadURL(initialUrl).catch(() => undefined);
 
     if (focusAddress && initialUrl === NEW_TAB_URL) {
       this.window.webContents.send(BROWSER_CHANNELS.focusAddress);
