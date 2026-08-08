@@ -127,6 +127,8 @@ export class TaskEngine {
           return { ok: this.connection.state === 'ready', message: this.connection.state === 'ready' ? undefined : this.connection.message };
         case 'startTask':
           return await this.startTask(command.prompt, command.model, command.reasoningEffort, command.kind);
+        case 'continueTask':
+          return await this.continueTask(command.prompt, 'follow-up');
         case 'respondApproval':
           return await this.respondApproval(command.decision);
         case 'respondQuestion':
@@ -247,7 +249,7 @@ export class TaskEngine {
       cwd,
       model: model.id,
       developerInstructions: kind === 'code' ? CODE_DEVELOPER_INSTRUCTIONS : WORK_DEVELOPER_INSTRUCTIONS,
-      dynamicTools: browserTools,
+      dynamicTools: kind === 'work' && this.options.executeBrowserAgentCommand ? BROWSER_DYNAMIC_TOOLS : browserTools,
     });
     const now = new Date().toISOString();
     this.task = {
@@ -281,35 +283,63 @@ export class TaskEngine {
   }
 
   private async reviseTask(rawPrompt: string): Promise<TaskCommandResult> {
+    return this.continueTask(rawPrompt, 'revision');
+  }
+
+  private async continueTask(rawPrompt: string, intent: 'follow-up' | 'revision'): Promise<TaskCommandResult> {
     const prompt = validatePrompt(rawPrompt);
     const task = this.task;
     if (!task || !['Needs Approval', 'Completed', 'Failed', 'Cancelled'].includes(task.state)) {
-      return { ok: false, message: 'Wait for the current task to stop before revising it.' };
+      return { ok: false, message: 'Wait for the current Codex turn to stop before continuing.' };
     }
+    if (task.pendingApproval) return { ok: false, message: 'Resolve the current approval before continuing.' };
     const project = this.workspaceStore.getProject();
-    if (task.kind === 'code' && !project) return { ok: false, message: 'Reconnect the project before revising this task.' };
+    if (task.kind === 'code' && !project) return { ok: false, message: 'Reconnect the project before continuing this task.' };
     const cwd = task.kind === 'code' ? project!.repositoryPath : this.workDirectory();
     const model = this.connection.models.find((candidate) => candidate.id === task.model);
     if (!model) return { ok: false, message: 'The original Codex model is no longer available.' };
     const server = this.requireServer();
+    const workspace = workspaceSnapshot(this.workspaceStore);
+    const wantsBrowserUse = task.kind === 'work' && inferTaskRequirements(prompt, Boolean(project)).browserUse;
+    if (wantsBrowserUse) {
+      if (!this.options.executeBrowserAgentCommand) return { ok: false, message: 'Controlled browser use is not available.' };
+      const mode = hasSelectedContext(workspace) ? 'mixed' : 'browser-only';
+      const access = await this.options.executeBrowserAgentCommand({
+        type: 'start', taskId: `task-${randomUUID()}`, name: prompt.slice(0, 80), mode, tabIds: workspace.tabContexts.map((item) => item.tabId),
+      });
+      if (!access.ok) return access;
+    }
+    const browserSnapshot = this.options.getBrowserAgentSnapshot?.();
     await server.resumeThread(task.threadId, cwd);
     task.state = 'Running';
     task.prompt = prompt;
     task.pendingApproval = null;
     task.error = null;
     task.result = '';
-    task.progress = [{ id: `revision-${Date.now()}`, kind: 'status', title: 'Revising with Codex', detail: prompt, status: 'running' }];
+    task.progress = [{
+      id: `continuation-${Date.now()}`, kind: 'status',
+      title: intent === 'revision' ? 'Revising with Codex' : 'Continuing the Codex conversation',
+      detail: prompt, status: 'running',
+    }];
     this.persistAndEmit();
-    const turn = await server.startTurn({
-      threadId: task.threadId,
-      prompt: buildTaskPrompt(`Revise the current ${task.kind === 'code' ? 'implementation' : 'result'} according to this user feedback:\n\n${prompt}`, workspaceSnapshot(this.workspaceStore)),
-      cwd,
-      model: task.model,
-      effort: task.reasoningEffort,
-    });
-    task.turnId = turn.id;
-    this.touchAndSchedule();
-    return { ok: true };
+    try {
+      const turn = await server.startTurn({
+        threadId: task.threadId,
+        prompt: buildTaskPrompt(intent === 'revision'
+          ? `Revise the current ${task.kind === 'code' ? 'implementation' : 'result'} according to this user feedback:\n\n${prompt}`
+          : `Continue the existing conversation and answer this follow-up:\n\n${prompt}`, workspace, browserSnapshot),
+        cwd,
+        model: task.model,
+        effort: task.reasoningEffort,
+      });
+      task.turnId = turn.id;
+      this.touchAndSchedule();
+      return { ok: true };
+    } catch (error) {
+      if (wantsBrowserUse) await this.options.executeBrowserAgentCommand?.({ type: 'closeTaskTabs' });
+      this.failTask(error instanceof Error ? error.message : 'Codex could not continue the conversation.');
+      throw error;
+    }
   }
 
   private async respondApproval(decision: 'accept' | 'decline' | 'cancel'): Promise<TaskCommandResult> {
@@ -709,7 +739,7 @@ export class TaskEngine {
         const turn = isRecord(params.turn) ? params.turn : null;
         const status = turn ? stringValue(turn.status) : 'failed';
         if (status === 'completed') {
-          task.state = 'Needs Approval';
+          task.state = task.kind === 'work' ? 'Completed' : 'Needs Approval';
           task.pendingApproval = null;
           task.error = null;
         } else if (status === 'interrupted') {

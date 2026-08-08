@@ -74,6 +74,7 @@ export interface TaskSnapshot {
 export type TaskCommand =
   | { type: 'refreshConnection' }
   | { type: 'startTask'; prompt: string; model: string; reasoningEffort: string; kind: TaskKind }
+  | { type: 'continueTask'; prompt: string }
   | { type: 'respondApproval'; decision: 'accept' | 'decline' | 'cancel' }
   | { type: 'respondQuestion'; answer: string }
   | { type: 'cancelTask' }

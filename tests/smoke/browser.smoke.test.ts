@@ -46,12 +46,26 @@ beforeEach(async () => {
         <button id="send" type="button" onclick="document.body.dataset.sent='true'">Send reply</button>`);
       return;
     }
+    if (route === '/oauth-start') {
+      response.end(`<!doctype html><title>OAuth opener fixture</title>
+        <h1>OAuth opener fixture</h1>
+        <button id="signin" onclick="window.open('/oauth-popup', 'fixture-oauth', 'width=560,height=640')">Sign in</button>
+        <script>addEventListener('message', (event) => { if (event.origin === location.origin && event.data === 'oauth-complete') document.body.dataset.auth = 'complete'; });</script>`);
+      return;
+    }
+    if (route === '/oauth-popup') {
+      response.end(`<!doctype html><title>Secure fixture sign-in</title>
+        <h1>Secure fixture sign-in</h1>
+        <button id="complete" onclick="window.opener.postMessage('oauth-complete', location.origin); window.close()">Complete sign-in</button>`);
+      return;
+    }
     response.setHeader('Set-Cookie', 'poppin-session=restored; Path=/; SameSite=Lax');
     response.end(`<!doctype html>
       <link rel="icon" href="/favicon.svg">
       <title>Local fixture</title>
       <h1>Local fixture</h1>
       <a href="/second" id="second">Second page</a>
+      <a href="http://localhost:${(server.address() as { port: number }).port}/second" id="external">External site</a>
       <button id="popup" onclick="window.open('/popup', '_blank')">Open popup</button>`);
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -183,6 +197,7 @@ describe('packaged browser workflow', () => {
       return document.elementFromPoint(x, y)?.closest('.browser-settings-panel')?.getAttribute('aria-label') ?? null;
     }, { x: railBox!.x + railBox!.width / 2, y: Math.max(railBox!.y + 10, settingsBox!.y + 10) })).toBe('Browser settings');
     await shell.getByLabel('Links open in').selectOption('same-tab');
+    await expect.poll(() => shell.evaluate(async () => (await window.poppinBrowser.getSnapshot()).settings.linkOpening)).toBe('same-tab');
     await shell.getByRole('button', { name: 'Close browser settings' }).click();
     await shell.getByRole('button', { name: 'Open context and task pane' }).click();
     await application.evaluate(async ({ webContents }, prefix) => {
@@ -195,7 +210,61 @@ describe('packaged browser workflow', () => {
     await address.press('Enter');
     await shell.getByRole('button', { name: 'Browser settings' }).click();
     await shell.getByLabel('Links open in').selectOption('follow-site');
+    await expect.poll(() => shell.evaluate(async () => (await window.poppinBrowser.getSnapshot()).settings.linkOpening)).toBe('follow-site');
     await shell.getByRole('button', { name: 'Close browser settings' }).click();
+
+    await application.evaluate(async ({ webContents }, targetUrl) => {
+      const contents = webContents.getAllWebContents().find((candidate) => candidate.getURL() === targetUrl);
+      await contents?.executeJavaScript("document.querySelector('#external').click()");
+    }, `${origin}/`);
+    await expect.poll(() => shell.getByRole('region', { name: 'Link preview overlay' }).isVisible()).toBe(true);
+    expect(await shell.getByRole('tab').count()).toBe(1);
+    await shell.getByRole('region', { name: 'Link preview overlay' }).getByRole('button', { name: 'Close' }).click();
+    await expect.poll(() => shell.getByRole('region', { name: 'Link preview overlay' }).count()).toBe(0);
+
+    await application.evaluate(async ({ webContents }, targetUrl) => {
+      const contents = webContents.getAllWebContents().find((candidate) => candidate.getURL() === targetUrl);
+      await contents?.executeJavaScript("document.querySelector('#external').click()");
+    }, `${origin}/`);
+    await expect.poll(() => shell.getByRole('region', { name: 'Link preview overlay' }).isVisible()).toBe(true);
+    await shell.getByRole('region', { name: 'Link preview overlay' }).getByRole('button', { name: 'Open in tab' }).click();
+    await expect.poll(() => shell.getByRole('tab').count()).toBe(2);
+    await expect.poll(() => shell.getByRole('region', { name: 'Link preview overlay' }).count()).toBe(0);
+    await shell.evaluate(async () => {
+      const snapshot = await window.poppinBrowser.getSnapshot();
+      await window.poppinBrowser.command({ type: 'close', tabId: snapshot.activeTabId });
+    });
+    await expect.poll(() => shell.getByRole('tab').count()).toBe(1);
+
+    await address.fill(`${origin}/oauth-start`);
+    await address.press('Enter');
+    await expect.poll(() => exactPageInfo(application!, `${origin}/oauth-start`)).toMatchObject({ title: 'OAuth opener fixture' });
+    await application.evaluate(async ({ webContents }, targetUrl) => {
+      const contents = webContents.getAllWebContents().find((candidate) => candidate.getURL() === targetUrl);
+      await contents?.executeJavaScript("document.querySelector('#signin').click()");
+    }, `${origin}/oauth-start`);
+    await expect.poll(() => application!.windows().some((page) => page.url() === `${origin}/oauth-popup`)).toBe(true);
+    await expect.poll(() => shell.evaluate(async () => (await window.poppinBrowser.getSnapshot()).authenticationPopup?.url ?? null)).toBe(`${origin}/oauth-popup`);
+    await expect.poll(() => shell.getByRole('region', { name: 'Secure sign-in overlay' }).isVisible()).toBe(true);
+    const authPopup = application.windows().find((page) => page.url() === `${origin}/oauth-popup`)!;
+    await authPopup.getByRole('button', { name: 'Complete sign-in' }).click();
+    await expect.poll(() => application!.evaluate(async ({ webContents }, targetUrl) => {
+      const contents = webContents.getAllWebContents().find((candidate) => candidate.getURL() === targetUrl);
+      return contents?.executeJavaScript('document.body.dataset.auth || null');
+    }, `${origin}/oauth-start`)).toBe('complete');
+    await expect.poll(() => shell.getByRole('region', { name: 'Secure sign-in overlay' }).count()).toBe(0);
+
+    await application.evaluate(async ({ webContents }, targetUrl) => {
+      const contents = webContents.getAllWebContents().find((candidate) => candidate.getURL() === targetUrl);
+      await contents?.executeJavaScript("document.querySelector('#signin').click()");
+    }, `${origin}/oauth-start`);
+    await expect.poll(() => shell.getByRole('region', { name: 'Secure sign-in overlay' }).isVisible()).toBe(true);
+    await shell.getByRole('region', { name: 'Secure sign-in overlay' }).getByRole('button', { name: 'Cancel' }).click();
+    await expect.poll(() => shell.getByRole('region', { name: 'Secure sign-in overlay' }).count()).toBe(0);
+
+    await address.fill(origin);
+    await address.press('Enter');
+    await expect.poll(() => exactPageInfo(application!, `${origin}/`)).toMatchObject({ title: 'Local fixture' });
 
     const workspace = shell.getByLabel('Workspace');
     await workspace.getByLabel('Workspace name').fill('Launch workspace');

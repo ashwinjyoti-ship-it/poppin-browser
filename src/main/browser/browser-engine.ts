@@ -44,6 +44,10 @@ const MAX_LAYOUT_INSET = 520;
 const MAX_TAB_CONTEXT_CHARACTERS = 60_000;
 const CLOSED_TAB_LIMIT = 12;
 const GROUP_COLORS: BrowserGroupColor[] = ['amber', 'blue', 'green', 'rose', 'violet'];
+const AUTHENTICATION_HOSTS = new Set([
+  'accounts.google.com', 'appleid.apple.com', 'auth.openai.com', 'chatgpt.com',
+  'login.microsoftonline.com', 'claude.ai', 'auth.anthropic.com',
+]);
 
 interface BrowserTabRecord {
   view: WebContentsView;
@@ -74,6 +78,8 @@ export class BrowserEngine {
   private readonly htmlFullscreen = new HtmlFullscreenCoordinator();
   private viewInsets = { top: DEFAULT_CHROME_HEIGHT, left: 0, right: 0, bottom: 0 };
   private closeConfirmed = false;
+  private authenticationWindow: BrowserWindow | null = null;
+  private overlayKind: 'authentication' | 'preview' | null = null;
 
   constructor(
     private readonly window: BrowserWindow,
@@ -82,6 +88,7 @@ export class BrowserEngine {
     private readonly getWindowState: () => WindowState,
   ) {
     this.window.on('resize', () => this.layoutViews());
+    this.window.on('move', () => this.layoutAuthenticationWindow());
     this.window.on('enter-full-screen', () => {
       this.applyFullscreenTransition(this.htmlFullscreen.windowDidEnter());
       this.layoutViews();
@@ -147,6 +154,14 @@ export class BrowserEngine {
       isFullScreen: this.window.isFullScreen(),
       canReopenClosedTab: this.closedTabs.length > 0,
       settings: { ...this.settings },
+      authenticationPopup: this.authenticationWindow && !this.authenticationWindow.isDestroyed() && this.overlayKind === 'authentication' ? {
+        title: this.authenticationWindow.getTitle() || 'Secure sign-in',
+        url: this.authenticationWindow.webContents.getURL(),
+      } : null,
+      linkPreview: this.authenticationWindow && !this.authenticationWindow.isDestroyed() && this.overlayKind === 'preview' ? {
+        title: this.authenticationWindow.getTitle() || 'Link preview',
+        url: this.authenticationWindow.webContents.getURL(),
+      } : null,
     };
   }
 
@@ -552,6 +567,12 @@ export class BrowserEngine {
         return this.showGroupMenu(command.groupId);
       case 'updateSettings':
         return this.updateSettings(command.settings);
+      case 'cancelAuthenticationPopup':
+        return this.cancelAuthenticationPopup();
+      case 'closeLinkPreview':
+        return this.closeLinkPreview();
+      case 'openLinkPreviewInTab':
+        return this.openLinkPreviewInTab();
       case 'openTaskResult':
         this.openTaskResult();
         return { ok: true };
@@ -679,6 +700,29 @@ export class BrowserEngine {
   private attachTabEvents(tab: BrowserTabRecord): void {
     const contents = tab.view.webContents;
     contents.setWindowOpenHandler(({ url }) => {
+      const authentication = !tab.snapshot.taskSpaceId && isAuthenticationPopup(url, contents.getURL());
+      const preview = !tab.snapshot.taskSpaceId && this.settings.linkOpening === 'follow-site'
+        && isExternalLinkPreview(url, contents.getURL());
+      if (authentication || preview) {
+        return {
+          action: 'allow',
+          overrideBrowserWindowOptions: {
+            parent: this.window,
+            frame: false,
+            show: false,
+            backgroundColor: '#fbf8f2',
+            autoHideMenuBar: true,
+            webPreferences: {
+              session: this.browserSession,
+              nodeIntegration: false,
+              contextIsolation: true,
+              sandbox: true,
+              webSecurity: true,
+              allowRunningInsecureContent: false,
+            },
+          },
+        };
+      }
       if (tab.snapshot.taskSpaceId || this.settings.linkOpening === 'same-tab') {
         void contents.loadURL(url).catch(() => undefined);
       } else {
@@ -686,6 +730,45 @@ export class BrowserEngine {
         this.createTab(url, id, false, tab.snapshot.taskSpaceId ? { id, url, taskSpaceId: tab.snapshot.taskSpaceId } : undefined, tab.snapshot.taskSpaceId ? false : this.settings.focusNewTabs);
       }
       return { action: 'deny' };
+    });
+    contents.on('did-create-window', (popup, details) => {
+      const kind = isAuthenticationPopup(details.url, contents.getURL())
+        ? 'authentication'
+        : this.settings.linkOpening === 'follow-site' && isExternalLinkPreview(details.url, contents.getURL()) ? 'preview' : null;
+      if (!kind) {
+        popup.close();
+        return;
+      }
+      this.authenticationWindow?.close();
+      this.authenticationWindow = popup;
+      this.overlayKind = kind;
+      popup.setTitle(kind === 'authentication' ? 'Secure sign-in' : 'Link preview');
+      popup.webContents.on('will-navigate', (event, url) => {
+        const protocol = safeProtocol(url);
+        if (protocol !== 'http:' && protocol !== 'https:' && protocol !== 'about:') event.preventDefault();
+      });
+      popup.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+      popup.webContents.on('page-title-updated', (_event, title) => {
+        popup.setTitle(title || (kind === 'authentication' ? 'Secure sign-in' : 'Link preview'));
+        this.emitSnapshot();
+      });
+      popup.once('ready-to-show', () => {
+        if (popup.isDestroyed()) return;
+        this.layoutAuthenticationWindow();
+        popup.show();
+        popup.focus();
+        this.emitSnapshot();
+      });
+      popup.on('closed', () => {
+        if (this.authenticationWindow === popup) {
+          this.authenticationWindow = null;
+          this.overlayKind = null;
+        }
+        this.emitSnapshot();
+      });
+      popup.webContents.on('before-input-event', (_event, input) => {
+        if (input.type === 'keyDown' && input.key === 'Escape') popup.close();
+      });
     });
     contents.on('context-menu', (_event, params) => {
       showPageContextMenu(this.window, contents, params, {
@@ -1049,9 +1132,34 @@ export class BrowserEngine {
 
   private updateSettings(updates: Partial<BrowserSettings>): BrowserCommandResult {
     this.settings = sanitizeBrowserSettings({ ...this.settings, ...updates });
-    for (const tab of this.tabs.values()) this.applyLinkOpeningPreference(tab);
+    if (updates.linkOpening !== undefined) {
+      for (const tab of this.tabs.values()) this.applyLinkOpeningPreference(tab);
+    }
     this.emitSnapshot();
     this.scheduleSave();
+    return { ok: true };
+  }
+
+  private cancelAuthenticationPopup(): BrowserCommandResult {
+    const popup = this.authenticationWindow;
+    if (!popup || popup.isDestroyed() || this.overlayKind !== 'authentication') return { ok: false, message: 'There is no sign-in overlay to cancel.' };
+    popup.close();
+    return { ok: true };
+  }
+
+  private closeLinkPreview(): BrowserCommandResult {
+    const popup = this.authenticationWindow;
+    if (!popup || popup.isDestroyed() || this.overlayKind !== 'preview') return { ok: false, message: 'There is no link preview to close.' };
+    popup.close();
+    return { ok: true };
+  }
+
+  private openLinkPreviewInTab(): BrowserCommandResult {
+    const popup = this.authenticationWindow;
+    if (!popup || popup.isDestroyed() || this.overlayKind !== 'preview') return { ok: false, message: 'There is no link preview to open.' };
+    const url = popup.webContents.getURL();
+    popup.close();
+    this.createTab(url, randomUUID(), false, undefined, true);
     return { ok: true };
   }
 
@@ -1102,17 +1210,19 @@ export class BrowserEngine {
   private applyLinkOpeningPreference(tab: BrowserTabRecord): void {
     if (tab.view.webContents.isDestroyed()) return;
     const forceNewTab = this.settings.linkOpening === 'new-tab';
+    const previewExternal = this.settings.linkOpening === 'follow-site';
     void tab.view.webContents.executeJavaScript(`(() => {
       const key = '__poppinLinkPreference';
       const existing = window[key];
       if (existing) document.removeEventListener('click', existing, true);
-      if (!${JSON.stringify(forceNewTab)}) { window[key] = null; return; }
+      if (!${JSON.stringify(forceNewTab || previewExternal)}) { window[key] = null; return; }
       const handler = (event) => {
         if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
         const target = event.target instanceof Element ? event.target.closest('a[href]') : null;
         if (!target || target.hasAttribute('download')) return;
         const href = target.href;
         if (!href || href.startsWith('javascript:') || href.startsWith('mailto:') || href.startsWith('tel:') || target.hash && target.origin === location.origin && target.pathname === location.pathname) return;
+        if (${JSON.stringify(previewExternal)} && target.origin === location.origin) return;
         event.preventDefault();
         event.stopImmediatePropagation();
         window.open(href, '_blank', 'noopener');
@@ -1154,6 +1264,21 @@ export class BrowserEngine {
       tab.view.setBounds(bounds);
       tab.view.setBorderRadius(isHtmlFullscreen && tab.snapshot.id === this.activeTabId ? 0 : 18);
     }
+    this.layoutAuthenticationWindow();
+  }
+
+  private layoutAuthenticationWindow(): void {
+    const popup = this.authenticationWindow;
+    if (!popup || popup.isDestroyed() || this.window.isDestroyed()) return;
+    const parent = this.window.getContentBounds();
+    const width = Math.min(720, Math.max(420, parent.width - 96));
+    const height = Math.min(760, Math.max(420, parent.height - 170));
+    popup.setBounds({
+      x: parent.x + Math.round((parent.width - width) / 2),
+      y: parent.y + Math.min(112, Math.max(72, Math.round(parent.height * 0.12))),
+      width,
+      height,
+    });
   }
 
   private applyFullscreenTransition(transition: HtmlFullscreenTransition): void {
@@ -1213,6 +1338,37 @@ function sanitizeBrowserSettings(settings: BrowserSettings): BrowserSettings {
     warnBeforeClosingMultipleTabs: Boolean(settings.warnBeforeClosingMultipleTabs),
     searchEngine: settings.searchEngine === 'google' ? 'google' : 'duckduckgo',
   };
+}
+
+export function isAuthenticationPopup(value: string, openerValue: string): boolean {
+  try {
+    const opener = new URL(openerValue);
+    const localOpener = isLocalhostUrl(openerValue);
+    if (opener.protocol !== 'https:' && !localOpener) return false;
+    if (value === 'about:blank') return opener.hostname === 'claude.ai';
+    const target = new URL(value);
+    const localTarget = isLocalhostUrl(value);
+    if (target.protocol !== 'https:' && !(localOpener && localTarget)) return false;
+    const knownHost = AUTHENTICATION_HOSTS.has(target.hostname)
+      || target.hostname.endsWith('.anthropic.com');
+    const sameOrigin = target.origin === opener.origin;
+    const authSignal = /(?:^|[/?#&_.-])(auth|oauth|login|sign[-_]?in|authorize|consent|callback)(?:$|[/?#&_.=-])/i.test(`${target.hostname}${target.pathname}${target.search}`);
+    return (authSignal && (knownHost || sameOrigin)) || (knownHost && opener.hostname === 'claude.ai');
+  } catch {
+    return false;
+  }
+}
+
+export function isExternalLinkPreview(value: string, openerValue: string): boolean {
+  try {
+    const target = new URL(value);
+    const opener = new URL(openerValue);
+    const allowedTarget = target.protocol === 'https:' || isLocalhostUrl(value);
+    const allowedOpener = opener.protocol === 'https:' || isLocalhostUrl(openerValue);
+    return allowedTarget && allowedOpener && target.origin !== opener.origin;
+  } catch {
+    return false;
+  }
 }
 
 export function isLocalhostUrl(value: string): boolean {

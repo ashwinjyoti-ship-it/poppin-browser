@@ -56,6 +56,33 @@ button { color: inherit; }
 }
 .settings-open .browser-chrome { z-index: 6; }
 
+.authentication-overlay-status {
+  position: absolute;
+  z-index: 30;
+  top: 9px;
+  left: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  width: min(620px, calc(100% - 180px));
+  min-height: 48px;
+  padding: 8px 10px 8px 14px;
+  border: 1px solid rgba(215, 156, 82, .46);
+  border-radius: 14px;
+  background: rgba(255, 250, 242, .98);
+  box-shadow: 0 14px 38px rgba(72, 44, 16, .18);
+  transform: translateX(-50%);
+  -webkit-app-region: no-drag;
+}
+.authentication-overlay-status div { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
+.authentication-overlay-status strong { overflow: hidden; color: #584126; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.authentication-overlay-status span { color: #826e57; font-size: 9px; }
+.authentication-overlay-status button { padding: 7px 11px; border: 1px solid #d9b98f; border-radius: 9px; color: #72491f; background: white; font-size: 10px; font-weight: 650; }
+.link-preview-status { width: min(680px, calc(100% - 180px)); }
+.link-preview-status div { flex: 1; }
+.link-preview-status span { overflow: hidden; max-width: 460px; text-overflow: ellipsis; white-space: nowrap; }
+
 .top-row {
   display: grid;
   grid-template-columns: 178px minmax(460px, 1fr);

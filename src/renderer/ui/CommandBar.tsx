@@ -25,11 +25,14 @@ export function CommandBar({ snapshot, workspace, collapsed, onCollapseChange, o
   const [sending, setSending] = useState(false);
   const [preflight, setPreflight] = useState<TaskRequirements | null>(null);
   const preflightRef = useRef<HTMLElement>(null);
+  const canContinue = Boolean(snapshot.task && !snapshot.task.pendingApproval && ['Needs Approval', 'Completed', 'Failed', 'Cancelled'].includes(snapshot.task.state));
   const defaultModel = snapshot.connection.models.find((candidate) => candidate.isDefault) ?? snapshot.connection.models[0] ?? null;
-  const model = snapshot.connection.models.find((candidate) => candidate.id === modelId) ?? defaultModel;
+  const requestedModelId = canContinue ? snapshot.task?.model ?? '' : modelId;
+  const model = snapshot.connection.models.find((candidate) => candidate.id === requestedModelId) ?? defaultModel;
   const selectedModelId = model?.id ?? '';
-  const selectedEffort = model?.reasoningEfforts.includes(effort) ? effort : model?.defaultReasoningEffort ?? '';
-  const isActive = snapshot.task?.state === 'Running' || snapshot.task?.state === 'Needs Approval';
+  const requestedEffort = canContinue ? snapshot.task?.reasoningEffort ?? '' : effort;
+  const selectedEffort = model?.reasoningEfforts.includes(requestedEffort) ? requestedEffort : model?.defaultReasoningEffort ?? '';
+  const isBlocking = snapshot.task?.state === 'Running' || Boolean(snapshot.task?.pendingApproval);
 
   useLayoutEffect(() => {
     if (!preflight) {
@@ -71,7 +74,16 @@ export function CommandBar({ snapshot, workspace, collapsed, onCollapseChange, o
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    if (sending || isActive) return;
+    if (sending || isBlocking) return;
+    if (canContinue) {
+      setSending(true);
+      setError('');
+      const result = await onCommand({ type: 'continueTask', prompt });
+      setSending(false);
+      if (result.ok) setPrompt('');
+      else setError(result.message ?? 'Codex could not continue that conversation.');
+      return;
+    }
     const requirements = inferTaskRequirements(prompt, Boolean(workspace.project));
     const needsPreflight = requirements.kind === 'code';
     if (needsPreflight && !preflight) {
@@ -96,14 +108,14 @@ export function CommandBar({ snapshot, workspace, collapsed, onCollapseChange, o
           const next = snapshot.connection.models.find((candidate) => candidate.id === event.target.value);
           setModelId(event.target.value);
           setEffort(next?.defaultReasoningEffort ?? '');
-        }} disabled={snapshot.connection.state !== 'ready' || isActive}>
+        }} disabled={snapshot.connection.state !== 'ready' || isBlocking || canContinue}>
           {snapshot.connection.models.length === 0 ? <option value="">Unavailable</option> : null}
           {snapshot.connection.models.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.name}</option>)}
         </select>
       </label>
       <label className="command-select">
         <span>Reasoning</span>
-        <select value={selectedEffort} onChange={(event) => setEffort(event.target.value)} disabled={!model || isActive}>
+        <select value={selectedEffort} onChange={(event) => setEffort(event.target.value)} disabled={!model || isBlocking || canContinue}>
           {(model?.reasoningEfforts ?? []).map((value) => <option key={value} value={value}>{titleCase(value)}</option>)}
         </select>
       </label>
@@ -112,15 +124,15 @@ export function CommandBar({ snapshot, workspace, collapsed, onCollapseChange, o
         <input
           value={prompt}
           onChange={(event) => { setPrompt(event.target.value); setError(''); setPreflight(null); }}
-          placeholder={snapshot.connection.state === 'ready' ? 'Ask Poppin to summarize, research, draft, or change code…' : snapshot.connection.message}
-          disabled={snapshot.connection.state !== 'ready' || isActive}
+          placeholder={snapshot.connection.state === 'ready' ? (canContinue ? 'Ask a follow-up in the same Codex conversation…' : 'Ask Poppin to summarize, research, draft, or change code…') : snapshot.connection.message}
+          disabled={snapshot.connection.state !== 'ready' || isBlocking}
         />
         {error ? <span className="command-error">{error}</span> : null}
       </label>
       {snapshot.task?.state === 'Running' ? (
         <button className="command-stop" type="button" onClick={() => { void onCommand({ type: 'cancelTask' }); }} aria-label="Cancel Codex task"><Square size={15} /></button>
       ) : (
-        <button className="command-send" type="submit" disabled={!prompt.trim() || !selectedModelId || !selectedEffort || sending || isActive} aria-label="Send to Codex"><Send size={17} /></button>
+        <button className="command-send" type="submit" disabled={!prompt.trim() || !selectedModelId || !selectedEffort || sending || isBlocking} aria-label={canContinue ? 'Send follow-up to Codex' : 'Send to Codex'}><Send size={17} /></button>
       )}
       <button className="command-collapse" type="button" onClick={() => onCollapseChange(true)} aria-label="Collapse Codex command bar"><ChevronDown size={15} /></button>
       {preflight ? (
