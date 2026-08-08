@@ -26,6 +26,9 @@ import { BrowserAgentStateStore } from './browser/browser-agent-state-store';
 import { BROWSER_AGENT_CHANNELS, type BrowserAgentCommand } from '../shared/browser-agent';
 import { PreviewEngine } from './project/preview-engine';
 import { showEditContextMenu } from './browser/context-menu';
+import { PagesStore } from './pages/pages-store';
+import { PagesEngine } from './pages/pages-engine';
+import { PAGES_CHANNELS, type PagesCommand } from '../shared/pages';
 
 registerInternalScheme();
 
@@ -35,6 +38,8 @@ let workspaceEngine: WorkspaceEngine | null = null;
 let workspaceStore: WorkspaceStore | null = null;
 let taskEngine: TaskEngine | null = null;
 let taskStore: TaskStore | null = null;
+let pagesStore: PagesStore | null = null;
+let pagesEngine: PagesEngine | null = null;
 let browserAgentEngine: BrowserAgentEngine | null = null;
 let previewEngine: PreviewEngine | null = null;
 const pendingExternalUrls: string[] = [];
@@ -92,6 +97,8 @@ async function createWindow(): Promise<void> {
   const git = new GitEngine();
   previewEngine = new PreviewEngine();
   workspaceEngine = new WorkspaceEngine(mainWindow, workspaceStore, browserEngine, git);
+  if (!pagesStore) throw new Error('Pages storage is not ready.');
+  pagesEngine = new PagesEngine(mainWindow, pagesStore);
   browserAgentEngine = new BrowserAgentEngine(mainWindow, browserEngine, (tabId, content) => {
     workspaceEngine?.updateTabContextFromAgent(tabId, content);
   }, new BrowserAgentStateStore(app.getPath('userData')));
@@ -152,6 +159,7 @@ async function createWindow(): Promise<void> {
     mainWindow = null;
     browserEngine = null;
     workspaceEngine = null;
+    pagesEngine = null;
     taskEngine = null;
     browserAgentEngine = null;
     void previewEngine?.stop();
@@ -190,6 +198,7 @@ app.whenReady().then(async () => {
   ]));
   workspaceStore = new WorkspaceStore(path.join(app.getPath('userData'), 'poppin.sqlite'));
   taskStore = new TaskStore(path.join(app.getPath('userData'), 'poppin.sqlite'));
+  pagesStore = new PagesStore(path.join(app.getPath('userData'), 'poppin.sqlite'));
   ipcMain.handle(BROWSER_CHANNELS.getSnapshot, (event) => {
     if (!isTrustedShellSender(event.sender)) throw new Error('Untrusted browser snapshot request.');
     return browserEngine?.getSnapshot();
@@ -205,6 +214,18 @@ app.whenReady().then(async () => {
   ipcMain.handle(WORKSPACE_CHANNELS.command, (event, command: WorkspaceCommand) => {
     if (!isTrustedShellSender(event.sender)) throw new Error('Untrusted workspace command.');
     return workspaceEngine?.execute(command) ?? { ok: false, message: 'Workspace is not ready.' };
+  });
+  ipcMain.handle(PAGES_CHANNELS.getSnapshot, (event) => {
+    if (!isTrustedShellSender(event.sender)) throw new Error('Untrusted Pages snapshot request.');
+    return pagesEngine?.getSnapshot() ?? { pages: [] };
+  });
+  ipcMain.handle(PAGES_CHANNELS.getPage, (event, pageId: string) => {
+    if (!isTrustedShellSender(event.sender)) throw new Error('Untrusted Page request.');
+    return pagesEngine?.getPage(pageId) ?? null;
+  });
+  ipcMain.handle(PAGES_CHANNELS.command, (event, command: PagesCommand) => {
+    if (!isTrustedShellSender(event.sender)) throw new Error('Untrusted Pages command.');
+    return pagesEngine?.execute(command) ?? { ok: false, message: 'Pages are not ready.' };
   });
   ipcMain.handle(TASK_CHANNELS.getSnapshot, (event) => {
     if (!isTrustedShellSender(event.sender)) throw new Error('Untrusted task snapshot request.');
@@ -266,6 +287,8 @@ app.on('quit', () => {
   workspaceStore = null;
   taskStore?.close();
   taskStore = null;
+  pagesStore?.close();
+  pagesStore = null;
 });
 
 app.on('window-all-closed', () => {
