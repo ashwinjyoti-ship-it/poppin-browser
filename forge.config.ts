@@ -13,6 +13,16 @@ const config: ForgeConfig = {
     asar: true,
     icon: './src/renderer/assets/poppin-app-icon',
     protocols: [{ name: 'Poppin Browser', schemes: ['http', 'https'] }],
+    // Fuses mutate Electron's executable before Packager reaches its signing
+    // phase. Sign the complete bundle afterwards so transferable development
+    // builds do not retain Electron's now-stale embedded signature.
+    osxSign: {
+      identity: '-',
+      identityValidation: false,
+      preAutoEntitlements: false,
+      preEmbedProvisioningProfile: false,
+      optionsForFile: () => ({ timestamp: 'none', hardenedRuntime: false }),
+    },
   },
   makers: [
     new MakerZIP({}, ['darwin']),
