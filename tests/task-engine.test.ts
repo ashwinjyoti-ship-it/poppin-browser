@@ -257,6 +257,29 @@ describe('task engine', () => {
     workspaceStore.close();
   });
 
+  it('reopens a fresh browser task space for a short follow-up after completed browser work', async () => {
+    const { engine, fake, browserCommand, browserSnapshot, taskStore, workspaceStore } = await setup({
+      withProject: false, withBrowserAgent: true, withTabContext: false,
+    });
+    await engine.execute({
+      type: 'startTask', prompt: 'Search for acoustic guitars under 10,000 and tell me where to buy them.', model: 'gpt-test', reasoningEffort: 'high', kind: 'work',
+    });
+    fake.emit('notification', { method: 'item/agentMessage/delta', params: { threadId: 'thread-1', turnId: 'turn-1', itemId: 'message-1', delta: 'Initial result.' } });
+    fake.emit('notification', { method: 'turn/completed', params: { threadId: 'thread-1', turn: { id: 'turn-1', status: 'completed', error: null } } });
+    await vi.waitFor(() => expect(engine.getSnapshot().task).toMatchObject({ state: 'Completed' }));
+    browserSnapshot.state = 'completed';
+    browserSnapshot.taskSpace = { ...browserSnapshot.taskSpace!, owner: 'user', status: 'completed' };
+
+    expect(await engine.execute({ type: 'continueTask', prompt: 'continue' })).toEqual({ ok: true });
+    expect(fake.resumeCount).toBe(1);
+    expect(browserCommand).toHaveBeenCalledWith(expect.objectContaining({ type: 'start', mode: 'browser-only', tabIds: [] }));
+    expect(fake.prompt).toContain('TASK-OWNED AGENT TABS');
+    expect(fake.prompt).toContain('"explorationTabs"');
+    await engine.close();
+    taskStore.close();
+    workspaceStore.close();
+  });
+
   it('keeps a critical browser tool call pending until the user approves or rejects that exact action', async () => {
     const { engine, fake, browserSnapshot, browserCommand, taskStore, workspaceStore } = await setup({ withProject: false, withBrowserAgent: true });
     await engine.execute({ type: 'startTask', prompt: 'Send the reply', model: 'gpt-test', reasoningEffort: 'high', kind: 'work' });

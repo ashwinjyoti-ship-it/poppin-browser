@@ -300,7 +300,15 @@ export class TaskEngine {
     if (!model) return { ok: false, message: 'The original Codex model is no longer available.' };
     const server = this.requireServer();
     const workspace = workspaceSnapshot(this.workspaceStore);
-    const wantsBrowserUse = task.kind === 'work' && inferTaskRequirements(prompt, Boolean(project)).browserUse;
+    const priorBrowserSession = this.options.getBrowserAgentSnapshot?.();
+    const priorTaskSpace = priorBrowserSession?.taskSpace;
+    const resumesCompletedBrowserWork = task.kind === 'work'
+      && priorBrowserSession?.state === 'completed'
+      && Boolean(priorTaskSpace)
+      && !priorTaskSpace!.kept;
+    const wantsBrowserUse = task.kind === 'work' && (
+      inferTaskRequirements(prompt, Boolean(project)).browserUse || resumesCompletedBrowserWork
+    );
     if (wantsBrowserUse) {
       if (!this.options.executeBrowserAgentCommand) return { ok: false, message: 'Controlled browser use is not available.' };
       const mode = hasSelectedContext(workspace) ? 'mixed' : 'browser-only';
