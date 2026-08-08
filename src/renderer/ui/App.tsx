@@ -43,6 +43,7 @@ export function App() {
   const [taskSnapshot, setTaskSnapshot] = useState<TaskSnapshot>(EMPTY_TASK);
   const [browserAgentSnapshot, setBrowserAgentSnapshot] = useState<BrowserAgentSnapshot>(EMPTY_BROWSER_AGENT);
   const [commandCollapsed, setCommandCollapsed] = useState(false);
+  const [commandOverlayHeight, setCommandOverlayHeight] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [preferredPaneWidths, setPreferredPaneWidths] = useState(() => loadPaneWidths(window.localStorage));
   const [viewport, setViewport] = useState(() => ({ width: window.innerWidth, height: window.innerHeight }));
@@ -59,6 +60,7 @@ export function App() {
     '--titlebar-left-inset': `${getTitlebarLeftInset(chromeLayout.density, snapshot.isFullScreen)}px`,
     '--workspace-pane-width': `${paneWidths.left}px`,
     '--context-pane-width': `${paneWidths.right}px`,
+    '--command-overlay-height': `${commandOverlayHeight}px`,
   } as CSSProperties;
   const taskAttention = taskAttentionKey(taskSnapshot);
   const browserApprovalAttention = browserApprovalAttentionKey(browserAgentSnapshot);
@@ -124,9 +126,9 @@ export function App() {
       leftInset: workspaceCollapsed ? 46 : paneWidths.left + 14,
       rightInset: visibleContextCollapsed ? 46 : paneWidths.right + 14,
       ...(settingsOpen ? { rightInset: Math.max(visibleContextCollapsed ? 46 : paneWidths.right + 14, 350) } : {}),
-      bottomInset: commandCollapsed ? 0 : 94,
+      bottomInset: commandCollapsed ? 0 : 94 + commandOverlayHeight,
     });
-  }, [chromeLayout.height, commandCollapsed, paneWidths.left, paneWidths.right, settingsOpen, visibleContextCollapsed, workspaceCollapsed]);
+  }, [chromeLayout.height, commandCollapsed, commandOverlayHeight, paneWidths.left, paneWidths.right, settingsOpen, visibleContextCollapsed, workspaceCollapsed]);
 
   const resizePane = (side: PaneSide, requestedWidth: number) => {
     const otherSide = side === 'left' ? 'right' : 'left';
@@ -278,7 +280,7 @@ export function App() {
         />
       ) : null}
       <div className={`browser-stage ${workspaceCollapsed ? 'workspace-collapsed' : ''} ${visibleContextCollapsed ? 'context-collapsed' : ''}`} aria-hidden="true" />
-      <CommandBar snapshot={taskSnapshot} workspace={workspaceSnapshot} collapsed={commandCollapsed} onCollapseChange={setCommandCollapsed} onCommand={sendTaskCommand} />
+      <CommandBar snapshot={taskSnapshot} workspace={workspaceSnapshot} collapsed={commandCollapsed} onCollapseChange={setCommandCollapsed} onCommand={sendTaskCommand} onOverlayHeightChange={setCommandOverlayHeight} />
     </main>
   );
 }

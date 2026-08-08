@@ -1,4 +1,4 @@
-import { type FormEvent, useState } from 'react';
+import { type FormEvent, useLayoutEffect, useRef, useState } from 'react';
 import { ChevronDown, ChevronUp, Send, Square } from 'lucide-react';
 
 import type { TaskCommand, TaskCommandResult, TaskSnapshot } from '../../shared/task';
@@ -12,20 +12,40 @@ interface CommandBarProps {
   collapsed: boolean;
   onCollapseChange: (collapsed: boolean) => void;
   onCommand: (command: TaskCommand) => Promise<TaskCommandResult>;
+  onOverlayHeightChange?: (height: number) => void;
 }
 
-export function CommandBar({ snapshot, workspace, collapsed, onCollapseChange, onCommand }: CommandBarProps) {
+const PREFLIGHT_MIN_HEIGHT = 160;
+
+export function CommandBar({ snapshot, workspace, collapsed, onCollapseChange, onCommand, onOverlayHeightChange }: CommandBarProps) {
   const [prompt, setPrompt] = useState('');
   const [modelId, setModelId] = useState('');
   const [effort, setEffort] = useState('');
   const [error, setError] = useState('');
   const [sending, setSending] = useState(false);
   const [preflight, setPreflight] = useState<TaskRequirements | null>(null);
+  const preflightRef = useRef<HTMLElement>(null);
   const defaultModel = snapshot.connection.models.find((candidate) => candidate.isDefault) ?? snapshot.connection.models[0] ?? null;
   const model = snapshot.connection.models.find((candidate) => candidate.id === modelId) ?? defaultModel;
   const selectedModelId = model?.id ?? '';
   const selectedEffort = model?.reasoningEfforts.includes(effort) ? effort : model?.defaultReasoningEffort ?? '';
   const isActive = snapshot.task?.state === 'Running' || snapshot.task?.state === 'Needs Approval';
+
+  useLayoutEffect(() => {
+    if (!preflight) {
+      onOverlayHeightChange?.(0);
+      return;
+    }
+    const updateHeight = () => {
+      const measuredHeight = Math.ceil(preflightRef.current?.getBoundingClientRect().height ?? 0);
+      onOverlayHeightChange?.(Math.max(PREFLIGHT_MIN_HEIGHT, measuredHeight));
+    };
+    updateHeight();
+    if (!preflightRef.current || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(updateHeight);
+    observer.observe(preflightRef.current);
+    return () => observer.disconnect();
+  }, [onOverlayHeightChange, preflight]);
 
   if (collapsed) {
     return (
@@ -104,7 +124,7 @@ export function CommandBar({ snapshot, workspace, collapsed, onCollapseChange, o
       )}
       <button className="command-collapse" type="button" onClick={() => onCollapseChange(true)} aria-label="Collapse Codex command bar"><ChevronDown size={15} /></button>
       {preflight ? (
-        <section className="task-preflight" aria-label="Task preflight">
+        <section ref={preflightRef} className="task-preflight" aria-label="Task preflight">
           <div><strong>{preflight.kind === 'code' ? 'Code task' : 'Work task'}</strong><span>{selectedContextCount(workspace)} selected context item(s)</span></div>
           <ul>
             <li>{preflight.browserUse ? 'Uses the selected tabs visibly. Only critical actions pause for approval.' : 'Uses only the frozen selected context.'}</li>
