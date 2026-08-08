@@ -25,6 +25,7 @@ class FakeCodexServer extends EventEmitter {
   cwd = '';
   dynamicTools: unknown[] | null = null;
   responses: Array<{ id: number | string; result: unknown }> = [];
+  resumeCount = 0;
 
   async connect() {}
   async getAccount() { return { account: { type: 'chatgpt' as const, email: 'tester@example.com', planType: 'plus' }, requiresOpenaiAuth: true }; }
@@ -41,7 +42,7 @@ class FakeCodexServer extends EventEmitter {
     this.dynamicTools = params.dynamicTools ?? null;
     return { id: 'thread-1', sessionId: 'session-1', preview: '', ephemeral: false };
   }
-  async resumeThread() { return { id: 'thread-1', sessionId: 'session-1', preview: '', ephemeral: false }; }
+  async resumeThread() { this.resumeCount += 1; return { id: 'thread-1', sessionId: 'session-1', preview: '', ephemeral: false }; }
   async startTurn(params: { prompt: string }) {
     this.prompt = params.prompt;
     return { id: 'turn-1', status: 'inProgress' as const, error: null };
@@ -226,8 +227,31 @@ describe('task engine', () => {
     fake.emit('notification', { method: 'item/agentMessage/delta', params: { threadId: 'thread-1', turnId: 'turn-1', itemId: 'message-1', delta: 'Comparison with sources.' } });
     fake.emit('notification', { method: 'turn/completed', params: { threadId: 'thread-1', turn: { id: 'turn-1', status: 'completed', error: null } } });
     await vi.waitFor(() => expect(onResultReady).toHaveBeenCalledWith(expect.objectContaining({
-      kind: 'work', result: 'Comparison with sources.', state: 'Needs Approval',
+      kind: 'work', result: 'Comparison with sources.', state: 'Completed',
     })));
+    await engine.close();
+    taskStore.close();
+    workspaceStore.close();
+  });
+
+  it('continues a completed Work result in the same Codex thread without result approval', async () => {
+    const { engine, fake, browserCommand, taskStore, workspaceStore } = await setup({
+      withProject: false, withBrowserAgent: true, withTabContext: false,
+    });
+    await engine.execute({
+      type: 'startTask', prompt: 'Explain Poppin briefly', model: 'gpt-test', reasoningEffort: 'high', kind: 'work',
+    });
+    expect(fake.dynamicTools).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'poppin_browser_action' })]));
+    fake.emit('notification', { method: 'item/agentMessage/delta', params: { threadId: 'thread-1', turnId: 'turn-1', itemId: 'message-1', delta: 'First answer.' } });
+    fake.emit('notification', { method: 'turn/completed', params: { threadId: 'thread-1', turn: { id: 'turn-1', status: 'completed', error: null } } });
+    await vi.waitFor(() => expect(engine.getSnapshot().task).toMatchObject({ state: 'Completed', threadId: 'thread-1', result: 'First answer.' }));
+
+    expect(await engine.execute({ type: 'continueTask', prompt: 'Now browse and find an example' })).toEqual({ ok: true });
+    expect(fake.resumeCount).toBe(1);
+    expect(engine.getSnapshot().task).toMatchObject({ state: 'Running', threadId: 'thread-1', prompt: 'Now browse and find an example' });
+    expect(browserCommand).toHaveBeenCalledWith(expect.objectContaining({ type: 'start', mode: 'browser-only', tabIds: [] }));
+    expect(fake.prompt).toContain('Continue the existing conversation and answer this follow-up');
+    expect(fake.prompt).toContain('"mode": "browser-only"');
     await engine.close();
     taskStore.close();
     workspaceStore.close();

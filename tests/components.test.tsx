@@ -270,6 +270,25 @@ describe('Codex controls', () => {
     expect(onBrowserAgentCommand).not.toHaveBeenCalled();
   });
 
+  it('sends a follow-up from a completed result without requiring approval', async () => {
+    const user = userEvent.setup();
+    const onCommand = vi.fn().mockResolvedValue({ ok: true });
+    const snapshot: TaskSnapshot = {
+      ...READY_TASK,
+      task: {
+        state: 'Completed', kind: 'work', prompt: 'First question', model: 'gpt-test', reasoningEffort: 'high',
+        threadId: 'thread-1', turnId: 'turn-1', baselineCommit: '', progress: [], pendingApproval: null,
+        result: 'First answer', diff: '', error: null, createdAt: '', updatedAt: '',
+      },
+    };
+    render(<CommandBar snapshot={snapshot} workspace={EMPTY_WORKSPACE} collapsed={false} onCollapseChange={vi.fn()} onCommand={onCommand} />);
+    const prompt = screen.getByRole('textbox', { name: /prompt/i });
+    expect(prompt).toHaveAttribute('placeholder', expect.stringMatching(/same Codex conversation/i));
+    await user.type(prompt, 'Tell me more');
+    await user.click(screen.getByRole('button', { name: /send follow-up to codex/i }));
+    expect(onCommand).toHaveBeenCalledWith({ type: 'continueTask', prompt: 'Tell me more' });
+  });
+
   it('shows exactly what an approval will allow', async () => {
     const user = userEvent.setup();
     const onCommand = vi.fn().mockResolvedValue({ ok: true });

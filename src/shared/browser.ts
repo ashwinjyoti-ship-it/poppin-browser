@@ -64,6 +64,8 @@ export interface BrowserSnapshot {
   isFullScreen: boolean;
   canReopenClosedTab: boolean;
   settings: BrowserSettings;
+  authenticationPopup: { title: string; url: string } | null;
+  linkPreview: { title: string; url: string } | null;
 }
 
 export type BrowserCommand =
@@ -86,6 +88,9 @@ export type BrowserCommand =
   | { type: 'showTabMenu'; tabId: string }
   | { type: 'showGroupMenu'; groupId: string }
   | { type: 'updateSettings'; settings: Partial<BrowserSettings> }
+  | { type: 'cancelAuthenticationPopup' }
+  | { type: 'closeLinkPreview' }
+  | { type: 'openLinkPreviewInTab' }
   | { type: 'openTaskResult' }
   | { type: 'setLayout'; topInset: number; leftInset: number; rightInset: number; bottomInset: number };
 

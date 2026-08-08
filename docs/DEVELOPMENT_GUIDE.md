@@ -19,7 +19,7 @@ It is not a general chat app or IDE. The centre browser is always the primary su
 | Normal browsing | Sandboxed Chromium `WebContentsView` tabs, address/search, back/forward/reload, persistent session, native edit/page/tab menus, default-browser protocol registration, fullscreen, and stable favicons. |
 | Tab organization | Reorder, pin, duplicate, reopen closed tabs, named and color-coded groups, persistent settings, contiguous group ordering, colored group underlines, named/countable collapsed groups, direct rename, and group color selection. |
 | Workspace/context | One workspace; selected tabs and documents; exact frozen context preview; optional localhost visual selection capture; connected project metadata. |
-| Tasks | One active Work or Code task via the installed Codex app-server and the user’s existing account. Work does not require Git; Code requires a connected clean Git project. |
+| Tasks | One active Work or Code conversation via the installed Codex app-server and the user’s existing account. Follow-ups reuse the current Codex thread; Work results do not require approval before the next turn. Work does not require Git; Code requires a connected clean Git project. |
 | Controlled browsing | Browser-use Work tasks receive task-owned Agent Tabs in the existing persistent partition: a fresh exploration tab for browser-only work, or selected-context clones plus a fresh exploration tab for mixed work. Codex uses sanitized semantic snapshots and bounded batches, with pause/takeover, per-step logs, stale-ref rejection, and exact approval gates for critical actions. |
 | Results and delivery | Trusted centre-browser result page, copy/save/export/revise/approve actions, localhost preview, code diff, and reviewed Git/GitHub preparation actions. |
 
@@ -28,6 +28,7 @@ It is not a general chat app or IDE. The centre browser is always the primary su
 - One workspace and one active task.
 - The prompt bar is the only task-entry surface; do not build a separate chat transcript.
 - Context is explicit but optional: no hidden history, page metadata, or automatically collected inputs are sent to Codex. A browser-only request starts from a fresh Agent Tab without inspecting existing user tabs.
+- The prompt bar remains the single conversation entry point. A follow-up resumes the current persisted Codex thread instead of silently starting a new one; the UI still does not become a chat transcript.
 - Work and Code are capability sets, not rigid templates.
 - Critical actions require a visible approval. This includes authentication boundaries, final form submission, sending, publishing, downloads/uploads, purchases, destructive actions, Git push/PR/merge, and destructive external writes. Ordinary selected-tab browsing, typing, and saving a reversible draft do not add another gate.
 - Poppin is local-first. Structured workspace/task metadata is local; user files and repositories stay in their original locations.
@@ -95,6 +96,8 @@ These rules are non-negotiable:
 
 - Never inspect, copy, reveal, export, store, or import passwords, passkeys, cookies, session tokens, Keychain content, Apple Passwords data, or browser authentication from another application.
 - Authentication happens only in Poppin’s persistent browser partition and is performed by the user.
+- Authentication popups open as sandboxed, task-independent overlay windows that preserve the website's opener relationship. Poppin displays a Cancel control but receives no credential-field access.
+- With “Follow website; preview other sites,” ordinary same-site links navigate normally while cross-site links open in an Arc-style Peek overlay. The user can close the preview or promote it to a full tab without losing the source page.
 - Web content has no privileged Poppin API access.
 - User-entered addresses are restricted to HTTP(S). Trusted internal result pages are allowlisted only for Poppin-created/restored tabs; do not open arbitrary custom schemes from the address bar.
 - Explicitly asking for browser use grants ordinary visible actions inside that task's Agent Tabs. Selected tabs, documents, or visual selections provide explicit grounding for mixed work; a browser-only task receives only a fresh exploration tab. Credential forms and critical actions pause for exact approval; reversible draft creation and saving do not.
@@ -103,11 +106,13 @@ These rules are non-negotiable:
 ## Key interaction details and recent regressions
 
 - A result tab uses `poppin://task/current/result`. It must render the result; it must never fall back to an ordinary New Tab.
+- An ordinary Work result is complete when Codex finishes. The trusted result tab opens automatically, while the prompt bar immediately accepts a follow-up on the same Codex thread. Result approval remains a Code review gate, not a per-turn conversation gate.
 - A blocking task or browser approval takes precedence over the user’s collapsed/right-pane-section preference until it is resolved.
 - A critical approval is the first, sticky card in the Task view. Browser-use Work tasks start directly; do not reintroduce a generic browser-access confirmation.
 - Codex receives browser operations as task-scoped dynamic tools. Page reads return sanitized AX/DOM semantic snapshots with generation-scoped refs; raw CDP and arbitrary page JavaScript are never exposed. Batches use a reviewed action vocabulary, stop at control/approval/staleness boundaries, and must end with read or assert verification.
 - Mixed Agent Tabs contain URL-seeded copies of explicitly selected tabs plus one fresh exploration tab; browser-only Agent Tabs contain only the fresh exploration tab. Source tabs are not moved or operated, Agent Tabs remain compact until Watch is chosen, and Keep tabs/Close task tabs makes completion cleanup explicit.
 - The Settings panel belongs above a collapsed right-pane rail. It needs a stacking layer above panes when open.
+- Link-opening settings are stored synchronously in the browser engine and enforced both for website-created windows and future page clicks. Changing the setting never fails because an already-loaded page rejects script execution; the active policy is applied when each page becomes ready.
 - A tab group is a contiguous run. Normalizing only pinned tabs is insufficient: new tabs, drag/drop, restore, duplication, pinning, and group moves must not split a group.
 - A collapsed group must retain name, count, color, expand affordance, and rename affordance. Never rely on `currentColor` for a foreground/background combination that can collapse to an invisible state.
 

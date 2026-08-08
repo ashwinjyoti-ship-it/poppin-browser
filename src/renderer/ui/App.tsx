@@ -26,6 +26,8 @@ import {
 const EMPTY_SNAPSHOT: BrowserSnapshot = {
   tabs: [], groups: [], activeTabId: '', isFullScreen: false, canReopenClosedTab: false,
   settings: { ...DEFAULT_BROWSER_SETTINGS },
+  authenticationPopup: null,
+  linkPreview: null,
 };
 const EMPTY_WORKSPACE: WorkspaceSnapshot = { workspace: null, documents: [], tabContexts: [], project: null, visualSelection: null };
 const EMPTY_TASK: TaskSnapshot = { connection: { state: 'checking', message: 'Connecting to Codex…', accountLabel: null, models: [] }, task: null };
@@ -188,6 +190,19 @@ export function App() {
 
   return (
     <main className={`app-shell chrome-${chromeLayout.density} ${snapshot.isFullScreen ? 'window-fullscreen' : 'window-windowed'} ${commandCollapsed ? 'command-is-collapsed' : ''} ${settingsOpen ? 'settings-open' : ''}`} style={paneStyle}>
+      {snapshot.authenticationPopup ? (
+        <section className="authentication-overlay-status" aria-label="Secure sign-in overlay">
+          <div><strong>{snapshot.authenticationPopup.title}</strong><span>Complete sign-in in the protected overlay. Poppin cannot read credentials.</span></div>
+          <button type="button" onClick={() => { void sendCommand({ type: 'cancelAuthenticationPopup' }); }}>Cancel</button>
+        </section>
+      ) : null}
+      {snapshot.linkPreview ? (
+        <section className="authentication-overlay-status link-preview-status" aria-label="Link preview overlay">
+          <div><strong>{snapshot.linkPreview.title}</strong><span>{snapshot.linkPreview.url}</span></div>
+          <button type="button" onClick={() => { void sendCommand({ type: 'openLinkPreviewInTab' }); }}>Open in tab</button>
+          <button type="button" onClick={() => { void sendCommand({ type: 'closeLinkPreview' }); }}>Close</button>
+        </section>
+      ) : null}
       <header className="browser-chrome">
         <div className="top-row">
           <Brand />
