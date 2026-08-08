@@ -218,7 +218,7 @@ describe('task engine', () => {
       withProject: false, withBrowserAgent: true, withTabContext: false,
     });
     expect(await engine.execute({
-      type: 'startTask', prompt: 'Browse the web and compare five products under ₹10,000', model: 'gpt-test', reasoningEffort: 'high', kind: 'work',
+      type: 'startTask', prompt: 'Can you search the five best acoustic guitars under 10,000 and give me a list and tell me where I can buy them?', model: 'gpt-test', reasoningEffort: 'high', kind: 'work',
     })).toEqual({ ok: true });
     expect(browserCommand).toHaveBeenCalledWith(expect.objectContaining({ type: 'start', mode: 'browser-only', tabIds: [] }));
     expect(fake.dynamicTools).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'poppin_browser_action' })]));

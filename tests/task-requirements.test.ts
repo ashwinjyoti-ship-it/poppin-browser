@@ -21,6 +21,9 @@ describe('task capability inference', () => {
   it('detects requests for visible browser use', () => {
     expect(inferTaskRequirements('Research this using the approved tabs and browse the sources.', false).browserUse).toBe(true);
     expect(inferTaskRequirements('Compare 5 products under 10000 and give me the best choice.', false).browserUse).toBe(true);
+    expect(inferTaskRequirements('Can you search the five best acoustic guitars under 10,000 and give me a list and tell me where I can buy them?', false)).toMatchObject({
+      kind: 'work', browserUse: true, modifiesProject: false,
+    });
     expect(inferTaskRequirements('Use the selected website. Click “More information”, read the destination page, and do not modify my original source tab.', false)).toMatchObject({
       kind: 'work', browserUse: true, modifiesProject: false,
     });
