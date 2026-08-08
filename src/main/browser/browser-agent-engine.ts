@@ -156,7 +156,10 @@ export class BrowserAgentEngine {
     this.pendingBatch = null;
     this.latestSnapshotByTab.clear();
     this.updateTaskSpace({ owner: 'user', status: 'completed' });
-    this.snapshot = { ...this.snapshot, state: 'completed', currentAction: null, pendingApproval: null };
+    // Completion hands the centre stage to the persistent Tandem result page.
+    // Keeping `watching` true races the page snapshot in the renderer and can
+    // immediately deactivate the newly opened native tab.
+    this.snapshot = { ...this.snapshot, state: 'completed', watching: false, currentAction: null, pendingApproval: null };
     this.append(this.snapshot.activeTabId ?? '', 'Agent Tabs completed', '', 'completed', 'Close task tabs is the default cleanup; Keep tabs preserves this collection.');
     void this.persist();
     this.emit();

@@ -135,6 +135,9 @@ function TaskView({ snapshot, browserAgent, onCommand, onBrowserAgentCommand }: 
   onBrowserAgentCommand?: (command: BrowserAgentCommand) => Promise<BrowserAgentCommandResult>;
 }) {
   const task = snapshot.task;
+  const visibleProgress = task?.kind === 'work' && task.state === 'Completed'
+    ? task.progress.filter((item) => item.kind !== 'message')
+    : task?.progress ?? [];
   const [questionAnswer, setQuestionAnswer] = useState('');
   const approvalRef = useRef<HTMLElement>(null);
   useEffect(() => {
@@ -170,9 +173,10 @@ function TaskView({ snapshot, browserAgent, onCommand, onBrowserAgentCommand }: 
       {task && onBrowserAgentCommand ? <BrowserUseView snapshot={browserAgent} onCommand={onBrowserAgentCommand} /> : null}
       {task ? (
         <div className="task-progress-list">
-          {task.progress.map((item) => (
+          {visibleProgress.map((item) => (
             <article key={item.id} className="task-progress-item"><i className={`progress-state progress-${item.status}`} /><div><strong>{item.title}</strong>{item.detail ? <pre>{item.detail}</pre> : null}</div></article>
           ))}
+          {task.kind === 'work' && task.state === 'Completed' ? <p className="context-note">The completed response is formatted in the active Tandem page.</p> : null}
         </div>
       ) : <div className="context-empty">Choose context when it matters, or ask Codex to browse from a fresh Agent Tab.</div>}
       {task?.state === 'Running' || task?.pendingApproval ? <button type="button" className="task-cancel" onClick={() => { void onCommand({ type: 'cancelTask' }); }}>Cancel task</button> : null}

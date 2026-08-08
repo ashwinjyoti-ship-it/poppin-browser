@@ -86,6 +86,18 @@ describe('BrowserAgentEngine', () => {
     expect(pages.activated).toEqual(['agent-exploration', 'agent-approved', 'agent-exploration']);
   });
 
+  it('leaves the live browser view when completed so the Tandem result can become active', async () => {
+    const { engine } = setup();
+    await engine.execute({ type: 'start', taskId: 'task-1', mode: 'browser-only', tabIds: [] });
+    expect(engine.getSnapshot().watching).toBe(true);
+    engine.complete();
+    expect(engine.getSnapshot()).toMatchObject({
+      state: 'completed',
+      watching: false,
+      taskSpace: { owner: 'user', status: 'completed' },
+    });
+  });
+
   it('supports pause, explicit resume, and immediate user takeover', async () => {
     const { engine } = setup();
     await engine.execute({ type: 'start', taskId: 'task-1', mode: 'mixed', tabIds: ['approved'] });

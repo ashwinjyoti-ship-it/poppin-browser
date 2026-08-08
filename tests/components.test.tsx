@@ -311,4 +311,23 @@ describe('Codex controls', () => {
     await user.click(screen.getByRole('button', { name: /allow once/i }));
     expect(onCommand).toHaveBeenCalledWith({ type: 'respondApproval', decision: 'accept' });
   });
+
+  it('keeps completed Work prose out of the activity pane because Tandem renders it', async () => {
+    const user = userEvent.setup();
+    const snapshot: TaskSnapshot = {
+      ...READY_TASK,
+      task: {
+        state: 'Completed', kind: 'work', prompt: 'Research guitars', model: 'gpt-test', reasoningEffort: 'high',
+        documentId: 'document-1', threadId: 'thread-1', turnId: 'turn-1', baselineCommit: '', pendingApproval: null,
+        progress: [{ id: 'message-1', kind: 'message', title: 'Codex response', detail: '| Guitar | Price |', status: 'completed' }],
+        result: '| Guitar | Price |', diff: '', error: null,
+        browserRun: { required: true, state: 'completed', taskSpaceId: 'space-1', successfulActionCount: 1, retryCount: 0, lastActionAt: '', sources: [] },
+        createdAt: '', updatedAt: '',
+      },
+    };
+    render(<ContextPane collapsed={false} snapshot={EMPTY_WORKSPACE} taskSnapshot={snapshot} onCollapseChange={vi.fn()} onRefreshTab={vi.fn()} onTaskCommand={vi.fn()} onOpenResult={vi.fn()} />);
+    await user.click(screen.getByRole('button', { name: /^task/i }));
+    expect(screen.queryByText('| Guitar | Price |')).not.toBeInTheDocument();
+    expect(screen.getByText(/formatted in the active Tandem page/i)).toBeVisible();
+  });
 });
