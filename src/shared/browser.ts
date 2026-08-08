@@ -92,6 +92,7 @@ export type BrowserCommand =
   | { type: 'closeLinkPreview' }
   | { type: 'openLinkPreviewInTab' }
   | { type: 'openTaskResult' }
+  | { type: 'setContentVisible'; visible: boolean }
   | { type: 'setLayout'; topInset: number; leftInset: number; rightInset: number; bottomInset: number };
 
 export interface BrowserCommandResult {

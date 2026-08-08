@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Check, ChevronLeft, ChevronRight, Copy, ExternalLink, FileText, Globe2, RefreshCw, RotateCcw, X } from 'lucide-react';
+import { Check, ChevronLeft, ChevronRight, Copy, Database, ExternalLink, FileText, Globe2, RefreshCw, RotateCcw, X } from 'lucide-react';
 
 import type { TaskCommand, TaskCommandResult, TaskSnapshot } from '../../shared/task';
 import type { WorkspaceSnapshot } from '../../shared/workspace';
@@ -30,7 +30,7 @@ export function ContextPane({ collapsed, snapshot, taskSnapshot, onCollapseChang
   const [internalSection, setInternalSection] = useState<PaneSection>('context');
   const activeSection = section ?? internalSection;
   const selectedDocuments = snapshot.documents.filter((document) => document.selected);
-  const itemCount = snapshot.tabContexts.length + selectedDocuments.length + (snapshot.visualSelection ? 1 : 0);
+  const itemCount = snapshot.tabContexts.length + selectedDocuments.length + (snapshot.pageContexts?.length ?? 0) + (snapshot.visualSelection ? 1 : 0);
 
   if (collapsed) {
     return (
@@ -73,7 +73,7 @@ function ContextView({ snapshot, activeTab, onRefreshTab, onCaptureVisualSelecti
   const [selectionMessage, setSelectionMessage] = useState('');
   const [selecting, setSelecting] = useState(false);
   const documents = snapshot.documents.filter((document) => document.selected);
-  const itemCount = snapshot.tabContexts.length + documents.length + (snapshot.visualSelection ? 1 : 0);
+  const itemCount = snapshot.tabContexts.length + documents.length + (snapshot.pageContexts?.length ?? 0) + (snapshot.visualSelection ? 1 : 0);
   const activeIsLocalhost = Boolean(activeTab && /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?(?:\/|$)/i.test(activeTab.url));
   const capture = async () => {
     if (!activeTab || !onCaptureVisualSelection) return;
@@ -104,6 +104,14 @@ function ContextView({ snapshot, activeTab, onRefreshTab, onCaptureVisualSelecti
             <span className="context-source">{document.path}</span>
             <pre>{document.capturedText ?? '(File metadata only; this format is not read as text.)'}</pre>
             {document.truncated ? <span className="context-note">Captured at the 60,000-character limit.</span> : null}
+          </article>
+        ))}
+        {(snapshot.pageContexts ?? []).map((page) => (
+          <article className="context-card" key={page.pageId}>
+            <div className="context-card-heading">{page.kind === 'database' ? <Database size={14} /> : <FileText size={14} />}<strong>{page.title}</strong></div>
+            <span className="context-source">Native {page.kind}{page.rowCount === null ? '' : ` · ${page.rowCount} rows`}</span>
+            <pre>{page.content || '(Empty page)'}</pre>
+            {page.truncated ? <span className="context-note">Captured at the 60,000-character limit.</span> : null}
           </article>
         ))}
         {snapshot.visualSelection ? (

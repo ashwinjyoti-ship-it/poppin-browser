@@ -2,7 +2,7 @@ import path from 'node:path';
 
 import { mkdir, writeFile } from 'node:fs/promises';
 
-import { app, BrowserWindow, dialog, ipcMain, Menu, screen, session } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, safeStorage, screen, session } from 'electron';
 
 import {
   BROWSER_CHANNELS,
@@ -29,6 +29,7 @@ import { showEditContextMenu } from './browser/context-menu';
 import { PagesStore } from './pages/pages-store';
 import { PagesEngine } from './pages/pages-engine';
 import { PAGES_CHANNELS, type PagesCommand } from '../shared/pages';
+import { querySelectedDatabase, selectedPageContexts } from './pages/page-context';
 
 registerInternalScheme();
 
@@ -96,9 +97,9 @@ async function createWindow(): Promise<void> {
   if (!workspaceStore) throw new Error('Workspace storage is not ready.');
   const git = new GitEngine();
   previewEngine = new PreviewEngine();
-  workspaceEngine = new WorkspaceEngine(mainWindow, workspaceStore, browserEngine, git);
+  workspaceEngine = new WorkspaceEngine(mainWindow, workspaceStore, browserEngine, git, pagesStore ?? undefined, () => pagesEngine?.refresh());
   if (!pagesStore) throw new Error('Pages storage is not ready.');
-  pagesEngine = new PagesEngine(mainWindow, pagesStore);
+  pagesEngine = new PagesEngine(mainWindow, pagesStore, () => workspaceEngine?.refreshPageContexts());
   browserAgentEngine = new BrowserAgentEngine(mainWindow, browserEngine, (tabId, content) => {
     workspaceEngine?.updateTabContextFromAgent(tabId, content);
   }, new BrowserAgentStateStore(app.getPath('userData')));
@@ -108,6 +109,8 @@ async function createWindow(): Promise<void> {
   taskEngine = new TaskEngine(mainWindow, taskStore, workspaceStore, git, {
     workDirectory,
     onResultReady: () => {
+      pagesStore?.deactivateTabs();
+      pagesEngine?.refresh();
       browserEngine?.openTaskResult();
     },
     onTaskEnded: (outcome) => {
@@ -118,7 +121,11 @@ async function createWindow(): Promise<void> {
       await previewEngine?.start(project.repositoryPath, project.devCommand);
       browserEngine?.openExternalUrl(project.previewUrl);
     },
-    onOpenExternal: (url) => browserEngine?.openExternalUrl(url),
+    onOpenExternal: (url) => {
+      pagesStore?.deactivateTabs();
+      pagesEngine?.refresh();
+      browserEngine?.openExternalUrl(url);
+    },
     onExportResult: async (task, format) => {
       if (!mainWindow) return null;
       const extension = format === 'markdown' ? 'md' : 'txt';
@@ -136,6 +143,19 @@ async function createWindow(): Promise<void> {
     },
     executeBrowserAgentCommand: async (command) => browserAgentEngine?.execute(command) ?? {
       ok: false, message: 'Controlled browser use is not ready.',
+    },
+    getPageContexts: () => pagesStore ? selectedPageContexts(pagesStore) : [],
+    querySelectedDatabase: (databaseId, limit) => {
+      if (!pagesStore) throw new Error('Pages storage is not ready.');
+      return querySelectedDatabase(pagesStore, databaseId, limit);
+    },
+    applyPageComment: (commentId, replacement) => {
+      if (!pagesStore) throw new Error('Pages storage is not ready.');
+      const allowed = pagesStore.listSelectedPageIds().some((pageId) => pagesStore?.getPage(pageId)?.comments.some((comment) => comment.id === commentId && comment.status === 'open'));
+      if (!allowed) throw new Error('Select the Page containing this open instruction before applying it.');
+      const comment = pagesStore.applyComment(commentId, replacement);
+      pagesEngine?.refresh();
+      return `Applied the anchored replacement and resolved comment ${comment.id}.`;
     },
   });
   browserEngine.restore(persisted);
@@ -198,7 +218,11 @@ app.whenReady().then(async () => {
   ]));
   workspaceStore = new WorkspaceStore(path.join(app.getPath('userData'), 'poppin.sqlite'));
   taskStore = new TaskStore(path.join(app.getPath('userData'), 'poppin.sqlite'));
-  pagesStore = new PagesStore(path.join(app.getPath('userData'), 'poppin.sqlite'));
+  pagesStore = new PagesStore(path.join(app.getPath('userData'), 'poppin.sqlite'), {
+    available: () => safeStorage.isEncryptionAvailable(),
+    encrypt: (text) => safeStorage.encryptString(text),
+    decrypt: (value) => safeStorage.decryptString(value),
+  });
   ipcMain.handle(BROWSER_CHANNELS.getSnapshot, (event) => {
     if (!isTrustedShellSender(event.sender)) throw new Error('Untrusted browser snapshot request.');
     return browserEngine?.getSnapshot();
@@ -217,11 +241,15 @@ app.whenReady().then(async () => {
   });
   ipcMain.handle(PAGES_CHANNELS.getSnapshot, (event) => {
     if (!isTrustedShellSender(event.sender)) throw new Error('Untrusted Pages snapshot request.');
-    return pagesEngine?.getSnapshot() ?? { pages: [] };
+    return pagesEngine?.getSnapshot() ?? { pages: [], tabs: [], activeTabId: null, selectedPageIds: [] };
   });
   ipcMain.handle(PAGES_CHANNELS.getPage, (event, pageId: string) => {
     if (!isTrustedShellSender(event.sender)) throw new Error('Untrusted Page request.');
     return pagesEngine?.getPage(pageId) ?? null;
+  });
+  ipcMain.handle(PAGES_CHANNELS.exportPage, (event, pageId: string, format: 'pdf' | 'docx' | 'xlsx') => {
+    if (!isTrustedShellSender(event.sender)) throw new Error('Untrusted Page export request.');
+    return pagesEngine?.exportPage(pageId, format) ?? { ok: false, message: 'Pages are not ready.' };
   });
   ipcMain.handle(PAGES_CHANNELS.command, (event, command: PagesCommand) => {
     if (!isTrustedShellSender(event.sender)) throw new Error('Untrusted Pages command.');

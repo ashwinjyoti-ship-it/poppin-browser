@@ -2,6 +2,7 @@ export const PAGES_CHANNELS = {
   command: 'pages:command',
   getSnapshot: 'pages:get-snapshot',
   getPage: 'pages:get-page',
+  exportPage: 'pages:export-page',
   snapshot: 'pages:snapshot',
 } as const;
 
@@ -89,6 +90,14 @@ export interface PageViewStateSnapshot {
   updatedAt: string;
 }
 
+export interface NativePageTabSnapshot {
+  id: string;
+  pageId: string;
+  kind: PageKind;
+  title: string;
+  position: number;
+}
+
 export interface PageDocumentSnapshot {
   page: PageSnapshot;
   blocks: PageBlockSnapshot[];
@@ -103,19 +112,32 @@ export interface PageDocumentSnapshot {
 
 export interface PagesSnapshot {
   pages: PageSnapshot[];
+  tabs: NativePageTabSnapshot[];
+  activeTabId: string | null;
+  selectedPageIds: string[];
 }
 
 export type PagesCommand =
   | { type: 'createPage'; title: string; parentId?: string | null; kind: PageKind }
+  | { type: 'openMemory' }
   | { type: 'renamePage'; pageId: string; title: string }
   | { type: 'movePage'; pageId: string; parentId: string | null }
   | { type: 'deletePage'; pageId: string }
+  | { type: 'openPage'; pageId: string }
+  | { type: 'activateTab'; tabId: string }
+  | { type: 'deactivateTabs' }
+  | { type: 'closeTab'; tabId: string }
+  | { type: 'reorderTab'; tabId: string; beforeTabId: string | null }
+  | { type: 'setPageSelected'; pageId: string; selected: boolean }
   | { type: 'addBlock'; pageId: string; blockType: string; content: PageJsonValue; position?: number }
   | { type: 'updateBlock'; blockId: string; expectedVersion: number; content: PageJsonValue }
   | { type: 'addComment'; pageId: string; blockId: string; selectionQuote: string; instruction: string; start?: number | null; end?: number | null }
   | { type: 'resolveComment'; commentId: string }
+  | { type: 'applyComment'; commentId: string; replacement: string }
   | { type: 'addDatabaseProperty'; databaseId: string; name: string; propertyType: DatabasePropertyType; options?: PageJsonValue[]; position?: number }
   | { type: 'addDatabaseRow'; databaseId: string; properties: Record<string, PageJsonValue>; position?: number }
+  | { type: 'updateDatabaseRow'; rowId: string; properties: Record<string, PageJsonValue> }
+  | { type: 'deleteDatabaseRow'; rowId: string }
   | { type: 'addDatabaseView'; databaseId: string; name: string; viewType?: DatabaseViewType; filters?: PageJsonValue[]; sorts?: PageJsonValue[]; viewState?: Record<string, PageJsonValue>; position?: number }
   | { type: 'saveViewState'; pageId: string; state: Record<string, PageJsonValue> };
 
@@ -129,5 +151,6 @@ export interface PoppinPagesApi {
   getSnapshot: () => Promise<PagesSnapshot>;
   getPage: (pageId: string) => Promise<PageDocumentSnapshot | null>;
   command: (command: PagesCommand) => Promise<PagesCommandResult>;
+  exportPage: (pageId: string, format: 'pdf' | 'docx' | 'xlsx') => Promise<PagesCommandResult>;
   subscribe: (listener: (snapshot: PagesSnapshot) => void) => () => void;
 }

@@ -65,6 +65,7 @@ const pagesApi: PoppinPagesApi = {
   getSnapshot: () => ipcRenderer.invoke(PAGES_CHANNELS.getSnapshot) as Promise<PagesSnapshot>,
   getPage: (pageId) => ipcRenderer.invoke(PAGES_CHANNELS.getPage, pageId) as Promise<PageDocumentSnapshot | null>,
   command: (command: PagesCommand) => ipcRenderer.invoke(PAGES_CHANNELS.command, command),
+  exportPage: (pageId, format) => ipcRenderer.invoke(PAGES_CHANNELS.exportPage, pageId, format),
   subscribe: (listener) => {
     const handler = (_event: Electron.IpcRendererEvent, snapshot: PagesSnapshot) => listener(snapshot);
     ipcRenderer.on(PAGES_CHANNELS.snapshot, handler);

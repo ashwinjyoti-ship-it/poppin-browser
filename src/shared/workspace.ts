@@ -16,6 +16,16 @@ export interface WorkspaceSnapshot {
   tabContexts: TabContextSnapshot[];
   project: WorkspaceProjectSnapshot | null;
   visualSelection: VisualSelectionSnapshot | null;
+  pageContexts?: PageContextSnapshot[];
+}
+
+export interface PageContextSnapshot {
+  pageId: string;
+  title: string;
+  kind: 'page' | 'database';
+  content: string;
+  truncated: boolean;
+  rowCount: number | null;
 }
 
 export interface VisualSelectionSnapshot {
@@ -71,6 +81,7 @@ export type WorkspaceCommand =
   | { type: 'chooseDocuments' }
   | { type: 'removeDocument'; documentId: string }
   | { type: 'setDocumentSelected'; documentId: string; selected: boolean }
+  | { type: 'openDocumentAsDatabase'; documentId: string }
   | { type: 'setTabSelected'; tabId: string; selected: boolean }
   | { type: 'refreshTabContext'; tabId: string }
   | { type: 'captureVisualSelection'; tabId: string }

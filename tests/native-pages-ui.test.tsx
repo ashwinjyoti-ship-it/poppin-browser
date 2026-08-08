@@ -1,0 +1,88 @@
+import { fireEvent, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { NativeDatabaseView } from '../src/renderer/ui/NativeDatabaseView';
+import { NativePageView } from '../src/renderer/ui/NativePageView';
+import { PagesSection } from '../src/renderer/ui/PagesSection';
+import type { PageDocumentSnapshot, PoppinPagesApi } from '../src/shared/pages';
+import type { TaskSnapshot } from '../src/shared/task';
+
+const READY_TASK: TaskSnapshot = {
+  connection: { state: 'ready', message: 'Ready', accountLabel: 'Test', models: [{ id: 'gpt', name: 'GPT', description: '', reasoningEfforts: ['medium'], defaultReasoningEffort: 'medium', isDefault: true }] },
+  task: null,
+};
+
+describe('native Pages UI', () => {
+  beforeEach(() => {
+    Object.defineProperty(window, 'poppinPages', {
+      configurable: true,
+      value: { exportPage: vi.fn().mockResolvedValue({ ok: true }) } as Partial<PoppinPagesApi>,
+    });
+  });
+
+  it('creates, context-selects, and opens items from the Pages tree', async () => {
+    const user = userEvent.setup();
+    const command = vi.fn().mockResolvedValue(null);
+    render(<PagesSection snapshot={{
+      pages: [{ id: 'page-1', title: 'Plan', kind: 'page', parentId: null, createdAt: '', updatedAt: '' }],
+      tabs: [], activeTabId: null, selectedPageIds: [],
+    }} onCommand={command} />);
+    await user.click(screen.getByRole('button', { name: 'Plan' }));
+    await user.click(screen.getByRole('checkbox'));
+    await user.click(screen.getByRole('button', { name: /^Page$/ }));
+    await user.click(screen.getByRole('button', { name: /^Database$/ }));
+    expect(command).toHaveBeenCalledWith({ type: 'openPage', pageId: 'page-1' });
+    expect(command).toHaveBeenCalledWith({ type: 'setPageSelected', pageId: 'page-1', selected: true });
+    expect(command).toHaveBeenCalledWith(expect.objectContaining({ type: 'createPage', kind: 'page' }));
+    expect(command).toHaveBeenCalledWith(expect.objectContaining({ type: 'createPage', kind: 'database' }));
+  });
+
+  it('edits stable blocks, anchors a selection instruction, and can send it through Task', async () => {
+    const user = userEvent.setup();
+    const page: PageDocumentSnapshot = {
+      page: { id: 'page-1', title: 'Plan', kind: 'page', parentId: null, createdAt: '', updatedAt: '' },
+      blocks: [{ id: 'block-1', pageId: 'page-1', type: 'paragraph', content: { text: 'Ship on Monday.' }, position: 0, version: 1, createdAt: '', updatedAt: '' }],
+      comments: [{ id: 'comment-1', pageId: 'page-1', blockId: 'block-1', instruction: 'Move it', status: 'open', createdAt: '', updatedAt: '', resolvedAt: null, selection: { quote: 'Monday', hash: 'hash', blockVersion: 1, start: 8, end: 14 } }],
+      viewState: null, database: null,
+    };
+    Object.assign(window.poppinPages, { getPage: vi.fn().mockResolvedValue(page) });
+    const pageCommand = vi.fn().mockResolvedValue(null);
+    const taskCommand = vi.fn().mockResolvedValue({ ok: true });
+    render(<NativePageView pageId="page-1" revision={0} onCommand={pageCommand} taskSnapshot={READY_TASK} onTaskCommand={taskCommand} />);
+    const editor = await screen.findByRole('textbox', { name: 'Page text block' });
+    await user.clear(editor);
+    await user.type(editor, 'Ship on Tuesday.');
+    fireEvent.blur(editor);
+    expect(pageCommand).toHaveBeenCalledWith(expect.objectContaining({ type: 'updateBlock', blockId: 'block-1', expectedVersion: 1, content: { text: 'Ship on Tuesday.' } }));
+    await user.click(screen.getByRole('button', { name: /Ask Codex/i }));
+    expect(pageCommand).toHaveBeenCalledWith({ type: 'setPageSelected', pageId: 'page-1', selected: true });
+    expect(taskCommand).toHaveBeenCalledWith(expect.objectContaining({ type: 'startTask', kind: 'work', prompt: expect.stringContaining('comment-1') }));
+  });
+
+  it('adds Database columns and rows and edits a cell', async () => {
+    const user = userEvent.setup();
+    const database: PageDocumentSnapshot = {
+      page: { id: 'db-1', title: 'Stock', kind: 'database', parentId: null, createdAt: '', updatedAt: '' },
+      blocks: [], comments: [], viewState: null,
+      database: {
+        properties: [{ id: 'name', databaseId: 'db-1', name: 'Name', type: 'text', options: [], position: 0 }],
+        rows: [{ id: 'row-1', databaseId: 'db-1', properties: { name: 'Guitar' }, position: 0, createdAt: '', updatedAt: '' }],
+        views: [],
+      },
+    };
+    Object.assign(window.poppinPages, { getPage: vi.fn().mockResolvedValue(database) });
+    const command = vi.fn().mockResolvedValue(null);
+    render(<NativeDatabaseView pageId="db-1" revision={0} onCommand={command} />);
+    const cell = await screen.findByRole('textbox', { name: 'Name row 1' });
+    await user.clear(cell);
+    await user.type(cell, 'Acoustic guitar');
+    fireEvent.blur(cell);
+    expect(command).toHaveBeenCalledWith({ type: 'updateDatabaseRow', rowId: 'row-1', properties: { name: 'Acoustic guitar' } });
+    await user.type(screen.getByRole('textbox', { name: 'New column name' }), 'Price');
+    await user.click(screen.getByRole('button', { name: /Add column/i }));
+    expect(command).toHaveBeenCalledWith(expect.objectContaining({ type: 'addDatabaseProperty', databaseId: 'db-1', name: 'Price' }));
+    await user.click(screen.getByRole('button', { name: /Add row/i }));
+    expect(command).toHaveBeenCalledWith({ type: 'addDatabaseRow', databaseId: 'db-1', properties: {} });
+  });
+});

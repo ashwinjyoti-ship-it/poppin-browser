@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { open, stat } from 'node:fs/promises';
+import { open, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 
 import { dialog, type BrowserWindow } from 'electron';
@@ -13,11 +13,18 @@ import {
 import { WorkspaceStore } from './workspace-store';
 import { BrowserEngine } from '../browser/browser-engine';
 import { GitEngine } from '../project/git-engine';
+import { PagesStore } from '../pages/pages-store';
+import { selectedPageContexts } from '../pages/page-context';
+import * as XLSX from 'xlsx';
 
 const MAX_DOCUMENT_BYTES = 60_000;
 const TEXT_DOCUMENT_EXTENSIONS = new Set([
   '.css', '.csv', '.html', '.htm', '.js', '.json', '.jsx', '.md', '.mjs', '.scss', '.text', '.ts', '.tsx', '.txt', '.xml', '.yaml', '.yml',
 ]);
+const EXCEL_DOCUMENT_EXTENSIONS = new Set(['.xlsx', '.xls']);
+const MAX_WORKBOOK_BYTES = 20 * 1024 * 1024;
+const MAX_DATABASE_IMPORT_ROWS = 5_000;
+const MAX_DATABASE_IMPORT_COLUMNS = 100;
 
 export class WorkspaceEngine {
   constructor(
@@ -25,6 +32,8 @@ export class WorkspaceEngine {
     private readonly store: WorkspaceStore,
     private readonly browser: BrowserEngine,
     private readonly git: GitEngine,
+    private readonly pagesStore?: PagesStore,
+    private readonly onPagesChanged?: () => void,
   ) {}
 
   getSnapshot(): WorkspaceSnapshot {
@@ -34,6 +43,7 @@ export class WorkspaceEngine {
       tabContexts: this.store.listTabContexts(),
       project: this.store.getProject(),
       visualSelection: this.store.getVisualSelection(),
+      pageContexts: this.pagesStore ? selectedPageContexts(this.pagesStore) : [],
     };
   }
 
@@ -65,6 +75,8 @@ export class WorkspaceEngine {
         break;
       case 'setDocumentSelected':
         return this.setDocumentSelected(command.documentId, command.selected);
+      case 'openDocumentAsDatabase':
+        return this.openDocumentAsDatabase(command.documentId);
       case 'setTabSelected':
         if (command.selected) return this.captureTab(command.tabId);
         this.store.removeTabContext(command.tabId);
@@ -138,6 +150,32 @@ export class WorkspaceEngine {
     this.store.setDocumentContext(documentId, true, capture.text, capture.truncated);
     this.emitSnapshot();
     return { ok: true };
+  }
+
+  private async openDocumentAsDatabase(documentId: string): Promise<WorkspaceCommandResult> {
+    if (!this.pagesStore) return { ok: false, message: 'Native Databases are not ready.' };
+    const document = this.store.listDocuments().find((candidate) => candidate.id === documentId);
+    if (!document) return { ok: false, message: 'Document not found.' };
+    if (!EXCEL_DOCUMENT_EXTENSIONS.has(path.extname(document.path).toLowerCase())) return { ok: false, message: 'Only .xlsx and .xls documents can open as Databases.' };
+    try {
+      const matrix = await readWorkbookMatrix(document.path, document.sizeBytes);
+      const title = path.basename(document.name, path.extname(document.name));
+      this.pagesStore.runInTransaction((store) => {
+        const database = store.createPage({ title: title || 'Imported workbook', kind: 'database' });
+        const headers = uniqueHeaders(matrix[0] ?? []);
+        const properties = headers.map((name) => store.addDatabaseProperty(database.id, { name, type: 'text' }));
+        for (const values of matrix.slice(1, MAX_DATABASE_IMPORT_ROWS + 1)) {
+          const row = Object.fromEntries(properties.map((property, index) => [property.id, values[index] ?? '']));
+          store.addDatabaseRow(database.id, row);
+        }
+        store.addDatabaseView(database.id, { name: 'Table', viewType: 'table' });
+        store.openPage(database.id);
+      });
+      this.onPagesChanged?.();
+      return { ok: true, message: 'Workbook opened as an editable native Database.' };
+    } catch (error) {
+      return { ok: false, message: error instanceof Error ? error.message : 'Poppin could not import this workbook.' };
+    }
   }
 
   private async captureTab(tabId: string): Promise<WorkspaceCommandResult> {
@@ -223,6 +261,10 @@ export class WorkspaceEngine {
       this.window.webContents.send(WORKSPACE_CHANNELS.snapshot, this.getSnapshot());
     }
   }
+
+  refreshPageContexts(): void {
+    this.emitSnapshot();
+  }
 }
 
 function normalizePreviewUrl(input: string): string | null {
@@ -236,7 +278,16 @@ function normalizePreviewUrl(input: string): string | null {
 }
 
 async function captureDocument(filePath: string, sizeBytes: number): Promise<{ text: string | null; truncated: boolean }> {
-  if (!TEXT_DOCUMENT_EXTENSIONS.has(path.extname(filePath).toLowerCase())) return { text: null, truncated: false };
+  const extension = path.extname(filePath).toLowerCase();
+  if (EXCEL_DOCUMENT_EXTENSIONS.has(extension)) {
+    const workbook = await readWorkbook(filePath, sizeBytes);
+    const text = workbook.SheetNames.map((name) => {
+      const sheet = workbook.Sheets[name];
+      return sheet ? `# Sheet: ${name}\n${XLSX.utils.sheet_to_csv(sheet, { blankrows: false })}` : '';
+    }).join('\n\n').trim();
+    return { text: text.slice(0, MAX_DOCUMENT_BYTES), truncated: text.length > MAX_DOCUMENT_BYTES };
+  }
+  if (!TEXT_DOCUMENT_EXTENSIONS.has(extension)) return { text: null, truncated: false };
   const handle = await open(filePath, 'r');
   try {
     const buffer = Buffer.alloc(Math.min(MAX_DOCUMENT_BYTES + 1, Math.max(1, sizeBytes)));
@@ -246,4 +297,28 @@ async function captureDocument(filePath: string, sizeBytes: number): Promise<{ t
   } finally {
     await handle.close();
   }
+}
+
+async function readWorkbook(filePath: string, sizeBytes: number): Promise<XLSX.WorkBook> {
+  if (sizeBytes > MAX_WORKBOOK_BYTES) throw new Error('Workbook is larger than the 20 MB local import limit.');
+  return XLSX.read(await readFile(filePath), { type: 'buffer', cellDates: true, dense: true });
+}
+
+async function readWorkbookMatrix(filePath: string, sizeBytes: number): Promise<string[][]> {
+  const workbook = await readWorkbook(filePath, sizeBytes);
+  const first = workbook.SheetNames[0];
+  if (!first || !workbook.Sheets[first]) throw new Error('Workbook has no readable worksheets.');
+  return (XLSX.utils.sheet_to_json(workbook.Sheets[first], { header: 1, raw: false, blankrows: false }) as unknown[][])
+    .slice(0, MAX_DATABASE_IMPORT_ROWS + 1)
+    .map((row) => row.slice(0, MAX_DATABASE_IMPORT_COLUMNS).map((value) => String(value ?? '')));
+}
+
+function uniqueHeaders(values: string[]): string[] {
+  const used = new Map<string, number>();
+  return (values.length ? values : ['Name']).slice(0, MAX_DATABASE_IMPORT_COLUMNS).map((value, index) => {
+    const base = value.trim() || `Column ${index + 1}`;
+    const count = used.get(base) ?? 0;
+    used.set(base, count + 1);
+    return count === 0 ? base : `${base} ${count + 1}`;
+  });
 }

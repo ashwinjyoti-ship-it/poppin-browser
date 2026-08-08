@@ -89,4 +89,69 @@ describe('pages store', () => {
     });
     restored.close();
   });
+
+  it('persists native Page/Database tabs, active kind, tree organization, and context selection', async () => {
+    const { store, filePath } = await createStore();
+    const parent = store.createPage({ id: 'parent', title: 'Planning' });
+    const child = store.createPage({ id: 'child', title: 'Tracker', kind: 'database', parentId: parent.id });
+    const pageTab = store.openPage(parent.id);
+    const databaseTab = store.openPage(child.id);
+    store.renamePage(parent.id, 'Launch planning');
+    store.setPageSelected(parent.id, true);
+    store.reorderTab(databaseTab.id, pageTab.id);
+    expect(store.getActiveTabId()).toBe(databaseTab.id);
+    store.close();
+
+    const restored = new PagesStore(filePath);
+    expect(restored.listPages()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'parent', title: 'Launch planning', kind: 'page' }),
+      expect.objectContaining({ id: 'child', parentId: 'parent', kind: 'database' }),
+    ]));
+    expect(restored.listTabs().map((tab) => [tab.id, tab.kind])).toEqual([[databaseTab.id, 'database'], [pageTab.id, 'page']]);
+    expect(restored.getActiveTabId()).toBe(databaseTab.id);
+    expect(restored.listSelectedPageIds()).toEqual(['parent']);
+    expect(() => restored.movePage(parent.id, child.id)).toThrow(/descendant/i);
+    restored.movePage(child.id, null);
+    restored.deletePage(parent.id);
+    expect(restored.listSelectedPageIds()).toEqual([]);
+    restored.close();
+  });
+
+  it('applies anchored comments atomically and rejects stale block selections', async () => {
+    const { store } = await createStore();
+    const page = store.createPage({ title: 'Brief' });
+    const block = store.addBlock({ pageId: page.id, type: 'paragraph', content: { text: 'Ship on Monday.' } });
+    const comment = store.addComment({ pageId: page.id, blockId: block.id, selectionQuote: 'Monday', instruction: 'Move to Tuesday', start: 8, end: 14 });
+    expect(store.applyComment(comment.id, 'Tuesday')).toMatchObject({ status: 'resolved' });
+    expect(store.getPage(page.id)?.blocks[0]).toMatchObject({ version: 2, content: { text: 'Ship on Tuesday.' } });
+
+    const stale = store.addComment({ pageId: page.id, blockId: block.id, selectionQuote: 'Tuesday', instruction: 'Move again', start: 8, end: 15 });
+    store.updateBlock(block.id, 2, { text: 'Ship next week.' });
+    expect(() => store.applyComment(stale.id, 'Friday')).toThrow(/changed/i);
+    expect(store.getPage(page.id)?.comments.find((item) => item.id === stale.id)?.status).toBe('open');
+    store.close();
+  });
+
+  it('stores Memory block content only through the injected OS protector', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'poppin-memory-'));
+    const filePath = path.join(directory, 'poppin.sqlite');
+    const protector = {
+      available: () => true,
+      encrypt: (text: string) => Buffer.from(`protected:${Buffer.from(text).toString('base64')}`),
+      decrypt: (value: Buffer) => Buffer.from(value.toString().slice('protected:'.length), 'base64').toString(),
+    };
+    const store = new PagesStore(filePath, protector);
+    const tab = store.openMemory();
+    const memory = store.getPage(tab.pageId)!;
+    expect(memory.page.title).toBe('Memory');
+    expect(memory.blocks[0]?.content).toEqual({ text: 'Keep durable notes, preferences, and working context here.' });
+    store.updateBlock(memory.blocks[0]!.id, 1, { text: 'Private preference: quiet mornings.' });
+    store.close();
+
+    const bytes = await import('node:fs/promises').then(({ readFile }) => readFile(filePath));
+    expect(bytes.toString()).not.toContain('Private preference: quiet mornings.');
+    const restored = new PagesStore(filePath, protector);
+    expect(restored.getPage(tab.pageId)?.blocks[0]?.content).toEqual({ text: 'Private preference: quiet mornings.' });
+    restored.close();
+  });
 });

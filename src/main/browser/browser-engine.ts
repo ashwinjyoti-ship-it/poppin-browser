@@ -80,6 +80,7 @@ export class BrowserEngine {
   private closeConfirmed = false;
   private authenticationWindow: BrowserWindow | null = null;
   private overlayKind: 'authentication' | 'preview' | null = null;
+  private contentVisible = true;
 
   constructor(
     private readonly window: BrowserWindow,
@@ -584,6 +585,10 @@ export class BrowserEngine {
         return this.openLinkPreviewInTab();
       case 'openTaskResult':
         this.openTaskResult();
+        return { ok: true };
+      case 'setContentVisible':
+        this.contentVisible = command.visible;
+        this.layoutViews();
         return { ok: true };
       case 'setLayout':
         this.viewInsets = {
@@ -1263,12 +1268,12 @@ export class BrowserEngine {
     if (this.window.isDestroyed()) return;
     const [width = 1, height = 1] = this.window.getContentSize();
     const isHtmlFullscreen = this.htmlFullscreen.isActiveFor(this.activeTabId);
-    const bounds: Rectangle = {
+    const bounds: Rectangle = this.contentVisible ? {
       x: isHtmlFullscreen ? 0 : PAGE_MARGIN + this.viewInsets.left,
       y: isHtmlFullscreen ? 0 : this.viewInsets.top,
       width: isHtmlFullscreen ? width : Math.max(1, width - PAGE_MARGIN * 2 - this.viewInsets.left - this.viewInsets.right),
       height: isHtmlFullscreen ? height : Math.max(1, height - this.viewInsets.top - PAGE_MARGIN - this.viewInsets.bottom),
-    };
+    } : { x: 0, y: 0, width: 0, height: 0 };
     for (const tab of this.tabs.values()) {
       tab.view.setBounds(bounds);
       tab.view.setBorderRadius(isHtmlFullscreen && tab.snapshot.id === this.activeTabId ? 0 : 18);

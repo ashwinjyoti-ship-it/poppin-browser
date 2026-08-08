@@ -7,6 +7,7 @@ import type {
   DatabaseRowSnapshot,
   DatabaseViewSnapshot,
   DatabaseViewType,
+  NativePageTabSnapshot,
   PageBlockSnapshot,
   PageCommentSnapshot,
   PageDocumentSnapshot,
@@ -115,11 +116,17 @@ export interface AddCommentInput {
   end?: number | null;
 }
 
+export interface PageContentProtector {
+  available: () => boolean;
+  encrypt: (text: string) => Buffer;
+  decrypt: (value: Buffer) => string;
+}
+
 export class PagesStore {
   private readonly database: DatabaseSync;
   private transactionDepth = 0;
 
-  constructor(filePath: string) {
+  constructor(filePath: string, private readonly protector?: PageContentProtector) {
     this.database = new DatabaseSync(filePath);
     this.database.exec(`
       PRAGMA journal_mode = WAL;
@@ -199,6 +206,26 @@ export class PagesStore {
         state_json TEXT NOT NULL DEFAULT '{}',
         updated_at TEXT NOT NULL
       ) STRICT;
+      CREATE TABLE IF NOT EXISTS page_tabs (
+        id TEXT PRIMARY KEY,
+        page_id TEXT NOT NULL UNIQUE REFERENCES pages(id) ON DELETE CASCADE,
+        position REAL NOT NULL,
+        active INTEGER NOT NULL DEFAULT 0 CHECK (active IN (0, 1))
+      ) STRICT;
+      CREATE INDEX IF NOT EXISTS idx_page_tabs_position ON page_tabs(position);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_page_tabs_one_active ON page_tabs(active) WHERE active = 1;
+      CREATE TABLE IF NOT EXISTS page_context (
+        page_id TEXT PRIMARY KEY REFERENCES pages(id) ON DELETE CASCADE,
+        selected INTEGER NOT NULL DEFAULT 0 CHECK (selected IN (0, 1))
+      ) STRICT;
+      CREATE TABLE IF NOT EXISTS protected_pages (
+        page_id TEXT PRIMARY KEY REFERENCES pages(id) ON DELETE CASCADE,
+        purpose TEXT NOT NULL UNIQUE CHECK (purpose IN ('memory'))
+      ) STRICT;
+      CREATE TABLE IF NOT EXISTS page_block_secrets (
+        block_id TEXT PRIMARY KEY REFERENCES page_blocks(id) ON DELETE CASCADE,
+        ciphertext BLOB NOT NULL
+      ) STRICT;
     `);
   }
 
@@ -227,6 +254,120 @@ export class PagesStore {
     return rows.map(pageSnapshot);
   }
 
+  openMemory(): NativePageTabSnapshot {
+    return this.transaction(() => {
+      const existing = this.database.prepare("SELECT page_id FROM protected_pages WHERE purpose = 'memory'").get() as { page_id: string } | undefined;
+      const pageId = existing?.page_id ?? this.createPage({ title: 'Memory', kind: 'page' }).id;
+      if (!existing) {
+        if (!this.protector?.available()) throw new Error('OS-backed encryption is not available, so Memory was not created.');
+        this.database.prepare("INSERT INTO protected_pages (page_id, purpose) VALUES (?, 'memory')").run(pageId);
+        this.addBlock({ pageId, type: 'paragraph', content: { text: 'Keep durable notes, preferences, and working context here.' } });
+      }
+      return this.openPage(pageId);
+    });
+  }
+
+  renamePage(pageId: string, title: string): PageSnapshot {
+    const now = new Date().toISOString();
+    const result = this.database.prepare('UPDATE pages SET title = ?, updated_at = ? WHERE id = ?')
+      .run(requiredText(title, 'Page title'), now, pageId);
+    if (result.changes === 0) throw new Error('Page not found.');
+    return this.requirePage(pageId);
+  }
+
+  movePage(pageId: string, parentId: string | null): PageSnapshot {
+    this.requirePage(pageId);
+    if (parentId === pageId) throw new Error('A page cannot be its own parent.');
+    if (parentId) {
+      this.requirePage(parentId);
+      let cursor: string | null = parentId;
+      while (cursor) {
+        if (cursor === pageId) throw new Error('A page cannot be moved inside one of its descendants.');
+        cursor = this.requirePage(cursor).parentId;
+      }
+    }
+    this.database.prepare('UPDATE pages SET parent_id = ?, updated_at = ? WHERE id = ?')
+      .run(parentId, new Date().toISOString(), pageId);
+    return this.requirePage(pageId);
+  }
+
+  deletePage(pageId: string): void {
+    const result = this.database.prepare('DELETE FROM pages WHERE id = ?').run(pageId);
+    if (result.changes === 0) throw new Error('Page not found.');
+    this.ensureActiveTab();
+  }
+
+  listTabs(): NativePageTabSnapshot[] {
+    return (this.database.prepare(`
+      SELECT t.id, t.page_id, p.kind, p.title, t.position
+      FROM page_tabs t JOIN pages p ON p.id = t.page_id ORDER BY t.position
+    `).all() as unknown as Array<{ id: string; page_id: string; kind: PageKind; title: string; position: number }>).map((row) => ({
+      id: row.id, pageId: row.page_id, kind: row.kind, title: row.title, position: row.position,
+    }));
+  }
+
+  getActiveTabId(): string | null {
+    const row = this.database.prepare('SELECT id FROM page_tabs WHERE active = 1').get() as { id: string } | undefined;
+    return row?.id ?? null;
+  }
+
+  openPage(pageId: string): NativePageTabSnapshot {
+    return this.transaction(() => {
+      const page = this.requirePage(pageId);
+      const existing = this.database.prepare('SELECT id FROM page_tabs WHERE page_id = ?').get(pageId) as { id: string } | undefined;
+      const id = existing?.id ?? randomUUID();
+      if (!existing) {
+        const position = this.nextTabPosition();
+        this.database.prepare('INSERT INTO page_tabs (id, page_id, position, active) VALUES (?, ?, ?, 0)')
+          .run(id, pageId, position);
+      }
+      this.activateTab(id);
+      return { id, pageId, kind: page.kind, title: page.title, position: this.tabPosition(id) };
+    });
+  }
+
+  activateTab(tabId: string): void {
+    const exists = this.database.prepare('SELECT 1 AS present FROM page_tabs WHERE id = ?').get(tabId);
+    if (!exists) throw new Error('Page tab not found.');
+    this.database.prepare('UPDATE page_tabs SET active = 0 WHERE active = 1').run();
+    this.database.prepare('UPDATE page_tabs SET active = 1 WHERE id = ?').run(tabId);
+  }
+
+  deactivateTabs(): void {
+    this.database.prepare('UPDATE page_tabs SET active = 0 WHERE active = 1').run();
+  }
+
+  closeTab(tabId: string): void {
+    const wasActive = this.getActiveTabId() === tabId;
+    const result = this.database.prepare('DELETE FROM page_tabs WHERE id = ?').run(tabId);
+    if (result.changes === 0) throw new Error('Page tab not found.');
+    if (wasActive) this.ensureActiveTab();
+  }
+
+  reorderTab(tabId: string, beforeTabId: string | null): void {
+    const ordered = this.listTabs().map((tab) => tab.id);
+    const from = ordered.indexOf(tabId);
+    if (from < 0) throw new Error('Page tab not found.');
+    ordered.splice(from, 1);
+    const before = beforeTabId ? ordered.indexOf(beforeTabId) : -1;
+    ordered.splice(before < 0 ? ordered.length : before, 0, tabId);
+    this.transaction(() => ordered.forEach((id, index) => {
+      this.database.prepare('UPDATE page_tabs SET position = ? WHERE id = ?').run(index, id);
+    }));
+  }
+
+  setPageSelected(pageId: string, selected: boolean): void {
+    this.requirePage(pageId);
+    this.database.prepare(`
+      INSERT INTO page_context (page_id, selected) VALUES (?, ?)
+      ON CONFLICT(page_id) DO UPDATE SET selected = excluded.selected
+    `).run(pageId, Number(selected));
+  }
+
+  listSelectedPageIds(): string[] {
+    return (this.database.prepare('SELECT page_id FROM page_context WHERE selected = 1 ORDER BY page_id').all() as unknown as Array<{ page_id: string }>).map((row) => row.page_id);
+  }
+
   getPage(pageId: string): PageDocumentSnapshot | null {
     const page = this.findPage(pageId);
     if (!page) return null;
@@ -252,19 +393,25 @@ export class PagesStore {
       this.database.prepare(`
         INSERT INTO page_blocks (id, page_id, type, content_json, position, version, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, 1, ?, ?)
-      `).run(id, input.pageId, requiredText(input.type, 'Block type'), json(input.content), position, now, now);
+      `).run(id, input.pageId, requiredText(input.type, 'Block type'), this.isProtectedPage(input.pageId) ? json({ protected: true }) : json(input.content), position, now, now);
+      if (this.isProtectedPage(input.pageId)) this.writeSecret(id, input.content);
       return this.requireBlock(id);
     });
   }
 
   updateBlock(blockId: string, expectedVersion: number, content: PageJsonValue): PageBlockSnapshot {
-    const now = new Date().toISOString();
-    const result = this.database.prepare(`
-      UPDATE page_blocks SET content_json = ?, version = version + 1, updated_at = ?
-      WHERE id = ? AND version = ?
-    `).run(json(content), now, blockId, expectedVersion);
-    if (result.changes === 0) throw new Error('The block changed since this edit was prepared.');
-    return this.requireBlock(blockId);
+    return this.transaction(() => {
+      const block = this.requireBlock(blockId);
+      const protectedPage = this.isProtectedPage(block.pageId);
+      const now = new Date().toISOString();
+      const result = this.database.prepare(`
+        UPDATE page_blocks SET content_json = ?, version = version + 1, updated_at = ?
+        WHERE id = ? AND version = ?
+      `).run(protectedPage ? json({ protected: true }) : json(content), now, blockId, expectedVersion);
+      if (result.changes === 0) throw new Error('The block changed since this edit was prepared.');
+      if (protectedPage) this.writeSecret(blockId, content);
+      return this.requireBlock(blockId);
+    });
   }
 
   listBlocks(pageId: string): PageBlockSnapshot[] {
@@ -272,7 +419,7 @@ export class PagesStore {
       SELECT id, page_id, type, content_json, position, version, created_at, updated_at
       FROM page_blocks WHERE page_id = ? ORDER BY position, created_at
     `).all(pageId) as unknown as BlockRow[];
-    return rows.map(blockSnapshot);
+    return rows.map((row) => this.blockSnapshot(row));
   }
 
   addComment(input: AddCommentInput): PageCommentSnapshot {
@@ -305,6 +452,23 @@ export class PagesStore {
     `).run(now, now, commentId);
     if (result.changes === 0) throw new Error('Comment not found.');
     return this.requireComment(commentId);
+  }
+
+  applyComment(commentId: string, replacement: string): PageCommentSnapshot {
+    return this.transaction(() => {
+      const comment = this.requireComment(commentId);
+      if (comment.status !== 'open') throw new Error('This comment is already resolved.');
+      const block = this.requireBlock(comment.blockId);
+      if (block.version !== comment.selection.blockVersion) throw new Error('The selected block changed after this comment was created.');
+      const text = blockText(block.content);
+      const start = comment.selection.start ?? text.indexOf(comment.selection.quote);
+      const end = comment.selection.end ?? (start >= 0 ? start + comment.selection.quote.length : -1);
+      if (start < 0 || end < start || text.slice(start, end) !== comment.selection.quote) {
+        throw new Error('The selected text no longer matches this comment.');
+      }
+      this.updateBlock(block.id, block.version, { text: `${text.slice(0, start)}${replacement}${text.slice(end)}` });
+      return this.resolveComment(commentId);
+    });
   }
 
   listComments(pageId: string, status?: 'open' | 'resolved'): PageCommentSnapshot[] {
@@ -340,6 +504,20 @@ export class PagesStore {
       `).run(id, databaseId, json(properties), position, now, now);
       return this.requireDatabaseRow(id);
     });
+  }
+
+  updateDatabaseRow(rowId: string, properties: Record<string, PageJsonValue>): DatabaseRowSnapshot {
+    const row = this.requireDatabaseRow(rowId);
+    this.validateDatabasePropertyIds(row.databaseId, properties);
+    const result = this.database.prepare('UPDATE database_rows SET properties_json = ?, updated_at = ? WHERE id = ?')
+      .run(json(properties), new Date().toISOString(), rowId);
+    if (result.changes === 0) throw new Error('Database row not found.');
+    return this.requireDatabaseRow(rowId);
+  }
+
+  deleteDatabaseRow(rowId: string): void {
+    const result = this.database.prepare('DELETE FROM database_rows WHERE id = ?').run(rowId);
+    if (result.changes === 0) throw new Error('Database row not found.');
   }
 
   addDatabaseView(databaseId: string, input: {
@@ -437,7 +615,7 @@ export class PagesStore {
       FROM page_blocks WHERE id = ?
     `).get(blockId) as unknown as BlockRow | undefined;
     if (!row) throw new Error('Block not found.');
-    return blockSnapshot(row);
+    return this.blockSnapshot(row);
   }
 
   private requireComment(commentId: string): PageCommentSnapshot {
@@ -505,6 +683,44 @@ export class PagesStore {
   private nextPosition(table: 'page_blocks' | 'database_properties' | 'database_rows' | 'database_views', ownerColumn: 'page_id' | 'database_id', ownerId: string): number {
     const row = this.database.prepare(`SELECT COALESCE(MAX(position), -1) + 1 AS position FROM ${table} WHERE ${ownerColumn} = ?`).get(ownerId) as { position: number };
     return row.position;
+  }
+
+  private nextTabPosition(): number {
+    const row = this.database.prepare('SELECT COALESCE(MAX(position), -1) + 1 AS position FROM page_tabs').get() as { position: number };
+    return row.position;
+  }
+
+  private tabPosition(tabId: string): number {
+    const row = this.database.prepare('SELECT position FROM page_tabs WHERE id = ?').get(tabId) as { position: number } | undefined;
+    if (!row) throw new Error('Page tab not found.');
+    return row.position;
+  }
+
+  private ensureActiveTab(): void {
+    if (this.getActiveTabId()) return;
+    const row = this.database.prepare('SELECT id FROM page_tabs ORDER BY position LIMIT 1').get() as { id: string } | undefined;
+    if (row) this.activateTab(row.id);
+  }
+
+  private isProtectedPage(pageId: string): boolean {
+    return Boolean(this.database.prepare('SELECT 1 AS protected FROM protected_pages WHERE page_id = ?').get(pageId));
+  }
+
+  private writeSecret(blockId: string, content: PageJsonValue): void {
+    if (!this.protector?.available()) throw new Error('OS-backed encryption is unavailable. Memory was not saved.');
+    const ciphertext = this.protector.encrypt(json(content));
+    this.database.prepare(`
+      INSERT INTO page_block_secrets (block_id, ciphertext) VALUES (?, ?)
+      ON CONFLICT(block_id) DO UPDATE SET ciphertext = excluded.ciphertext
+    `).run(blockId, ciphertext);
+  }
+
+  private blockSnapshot(row: BlockRow): PageBlockSnapshot {
+    if (!this.isProtectedPage(row.page_id)) return blockSnapshot(row);
+    if (!this.protector?.available()) throw new Error('OS-backed encryption is unavailable. Memory cannot be opened.');
+    const secret = this.database.prepare('SELECT ciphertext FROM page_block_secrets WHERE block_id = ?').get(row.id) as { ciphertext: Uint8Array } | undefined;
+    if (!secret) throw new Error('Encrypted Memory content is missing.');
+    return blockSnapshot({ ...row, content_json: this.protector.decrypt(Buffer.from(secret.ciphertext)) });
   }
 }
 
@@ -577,4 +793,13 @@ function parseObject(value: string): Record<string, PageJsonValue> {
   const parsed = JSON.parse(value) as unknown;
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Stored value is not a JSON object.');
   return parsed as Record<string, PageJsonValue>;
+}
+
+function blockText(content: PageJsonValue): string {
+  if (typeof content === 'string') return content;
+  if (content && typeof content === 'object' && !Array.isArray(content)) {
+    const text = content.text;
+    if (typeof text === 'string') return text;
+  }
+  throw new Error('This block does not contain editable text.');
 }

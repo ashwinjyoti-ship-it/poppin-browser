@@ -3,18 +3,22 @@ import { type FormEvent, useState } from 'react';
 
 import type { WorkspaceSnapshot } from '../../shared/workspace';
 import type { BrowserTabSnapshot } from '../../shared/browser';
+import type { PagesCommand, PagesSnapshot } from '../../shared/pages';
 import { ProjectSection } from './ProjectSection';
+import { PagesSection } from './PagesSection';
 
 interface WorkspacePaneProps {
   collapsed: boolean;
   snapshot: WorkspaceSnapshot;
   tabs: BrowserTabSnapshot[];
+  pages: PagesSnapshot;
   onCollapseChange: (collapsed: boolean) => void;
   onCreate: (name: string) => Promise<string | null>;
   onCommand: (command: import('../../shared/workspace').WorkspaceCommand) => Promise<string | null>;
+  onPagesCommand: (command: PagesCommand) => Promise<string | null>;
 }
 
-export function WorkspacePane({ collapsed, snapshot, tabs, onCollapseChange, onCreate, onCommand }: WorkspacePaneProps) {
+export function WorkspacePane({ collapsed, snapshot, tabs, pages, onCollapseChange, onCreate, onCommand, onPagesCommand }: WorkspacePaneProps) {
   const [name, setName] = useState('My Workspace');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -51,6 +55,7 @@ export function WorkspacePane({ collapsed, snapshot, tabs, onCollapseChange, onC
       </div>
       {snapshot.workspace ? (
         <div className="workspace-content">
+          <PagesSection snapshot={pages} onCommand={onPagesCommand} />
           <section className="workspace-section">
             <div className="section-heading"><span>Tabs</span><span>{tabs.length}</span></div>
             <div className="selection-list">
@@ -78,6 +83,7 @@ export function WorkspacePane({ collapsed, snapshot, tabs, onCollapseChange, onC
                     <FileText size={14} />
                     <span>{document.name}</span>
                   </label>
+                  {/\.(?:xlsx|xls)$/i.test(document.name) ? <button type="button" className="document-open-database" onClick={() => { void onCommand({ type: 'openDocumentAsDatabase', documentId: document.id }); }} aria-label={`Open ${document.name} as Database`}>DB</button> : <span />}
                   <button type="button" onClick={() => { void onCommand({ type: 'removeDocument', documentId: document.id }); }} aria-label={`Remove ${document.name}`}><X size={13} /></button>
                 </div>
               ))}
