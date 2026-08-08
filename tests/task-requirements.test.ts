@@ -20,6 +20,9 @@ describe('task capability inference', () => {
 
   it('detects requests for visible browser use', () => {
     expect(inferTaskRequirements('Research this using the approved tabs and browse the sources.', false).browserUse).toBe(true);
+    expect(inferTaskRequirements('Use the selected website. Click “More information”, read the destination page, and do not modify my original source tab.', false)).toMatchObject({
+      kind: 'work', browserUse: true, modifiesProject: false,
+    });
     expect(inferTaskRequirements('Draft an email reply and save the draft.', false)).toMatchObject({
       kind: 'work', browserUse: true, consequentialActions: [],
     });

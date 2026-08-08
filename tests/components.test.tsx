@@ -239,10 +239,12 @@ describe('Codex controls', () => {
   it('sends the selected model, reasoning, and prompt', async () => {
     const user = userEvent.setup();
     const onCommand = vi.fn().mockResolvedValue({ ok: true });
-    render(<CommandBar snapshot={READY_TASK} workspace={PROJECT_WORKSPACE} collapsed={false} onCollapseChange={vi.fn()} onCommand={onCommand} />);
+    const onOverlayHeightChange = vi.fn();
+    render(<CommandBar snapshot={READY_TASK} workspace={PROJECT_WORKSPACE} collapsed={false} onCollapseChange={vi.fn()} onCommand={onCommand} onOverlayHeightChange={onOverlayHeightChange} />);
     await user.type(screen.getByRole('textbox', { name: /prompt/i }), 'Make the button amber');
     await user.click(screen.getByRole('button', { name: /send to codex/i }));
     expect(screen.getByRole('region', { name: /task preflight/i })).toBeVisible();
+    expect(onOverlayHeightChange).toHaveBeenLastCalledWith(160);
     await user.click(screen.getByRole('button', { name: /start code/i }));
     expect(onCommand).toHaveBeenCalledWith({
       type: 'startTask', prompt: 'Make the button amber', model: 'gpt-test', reasoningEffort: 'high', kind: 'code',

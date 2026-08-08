@@ -364,7 +364,7 @@ button { color: inherit; }
 .browser-stage {
   position: absolute;
   z-index: 1;
-  inset: var(--chrome-height) calc(var(--context-pane-width) + 24px) 104px calc(var(--workspace-pane-width) + 24px);
+  inset: var(--chrome-height) calc(var(--context-pane-width) + 24px) calc(104px + var(--command-overlay-height, 0px)) calc(var(--workspace-pane-width) + 24px);
   border: 1px solid rgba(226, 216, 204, .9);
   border-radius: 20px;
   background: var(--surface);
