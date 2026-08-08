@@ -7,6 +7,7 @@ export const TASK_CHANNELS = {
 export type TaskState = 'Running' | 'Needs Approval' | 'Completed' | 'Failed' | 'Cancelled' | 'Discarded';
 export type TaskKind = 'work' | 'code';
 export type CodexConnectionState = 'checking' | 'ready' | 'notInstalled' | 'signedOut' | 'error';
+export type TaskBrowserRunState = 'not-required' | 'awaiting-action' | 'retrying' | 'action-observed' | 'completed' | 'incomplete';
 
 export interface CodexModelSnapshot {
   id: string;
@@ -42,6 +43,15 @@ export interface TaskDeliverySnapshot {
   message: string;
 }
 
+export interface TaskBrowserRunSnapshot {
+  required: boolean;
+  state: TaskBrowserRunState;
+  taskSpaceId: string | null;
+  successfulActionCount: number;
+  retryCount: number;
+  lastActionAt: string | null;
+}
+
 export interface TaskRecordSnapshot {
   kind: TaskKind;
   state: TaskState;
@@ -56,6 +66,7 @@ export interface TaskRecordSnapshot {
   result: string;
   diff: string;
   error: string | null;
+  browserRun: TaskBrowserRunSnapshot;
   delivery?: TaskDeliverySnapshot;
   createdAt: string;
   updatedAt: string;

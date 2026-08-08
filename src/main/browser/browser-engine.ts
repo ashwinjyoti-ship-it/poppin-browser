@@ -236,6 +236,15 @@ export class BrowserEngine {
     const tab = this.tabs.get(tabId);
     if (!tab || tab.view.webContents.isDestroyed() || tab.snapshot.taskSpaceId !== taskSpaceId) throw new Error('That task-owned tab is no longer available.');
     const contents = tab.view.webContents;
+    const currentUrl = contents.getURL();
+    if (!currentUrl || currentUrl.startsWith(NEW_TAB_URL)) {
+      this.semanticReferences.set(snapshotId, { tabId, documentGeneration: tab.documentGeneration, nodes: new Map() });
+      for (const [id, record] of this.semanticReferences) if (record.tabId === tabId && id !== snapshotId) this.semanticReferences.delete(id);
+      return {
+        snapshotId, taskSpaceId, tabId, documentId: `${tabId}:${tab.documentGeneration}`,
+        url: currentUrl || NEW_TAB_URL, title: contents.getTitle() || 'New Tab', createdAt: new Date().toISOString(), nodes: [],
+      };
+    }
     if (!contents.debugger.isAttached()) contents.debugger.attach('1.3');
     await Promise.all([
       contents.debugger.sendCommand('Accessibility.enable'),

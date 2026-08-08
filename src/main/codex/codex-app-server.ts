@@ -116,6 +116,11 @@ export class CodexAppServer extends EventEmitter<CodexAppServerEvents> {
     return response.thread;
   }
 
+  async injectThreadItems(threadId: string, items: JsonObject[]): Promise<void> {
+    if (items.length === 0) return;
+    await this.request('thread/inject_items', { threadId, items }, 60_000);
+  }
+
   async startTurn(params: {
     threadId: string;
     prompt: string;

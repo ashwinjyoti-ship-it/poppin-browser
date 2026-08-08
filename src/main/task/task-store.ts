@@ -1,6 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 
-import type { TaskApprovalSnapshot, TaskDeliverySnapshot, TaskKind, TaskProgressSnapshot, TaskRecordSnapshot, TaskState } from '../../shared/task';
+import type { TaskApprovalSnapshot, TaskBrowserRunSnapshot, TaskDeliverySnapshot, TaskKind, TaskProgressSnapshot, TaskRecordSnapshot, TaskState } from '../../shared/task';
 
 interface TaskRow {
   kind: TaskKind;
@@ -16,6 +16,7 @@ interface TaskRow {
   result: string;
   diff: string;
   error: string | null;
+  browser_run_json: string | null;
   delivery_json: string | null;
   created_at: string;
   updated_at: string;
@@ -43,6 +44,7 @@ export class TaskStore {
         result TEXT NOT NULL,
         diff TEXT NOT NULL,
         error TEXT,
+        browser_run_json TEXT,
         delivery_json TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
@@ -55,12 +57,15 @@ export class TaskStore {
     if (!columns.some((column) => column.name === 'delivery_json')) {
       this.database.exec('ALTER TABLE active_task ADD COLUMN delivery_json TEXT');
     }
+    if (!columns.some((column) => column.name === 'browser_run_json')) {
+      this.database.exec('ALTER TABLE active_task ADD COLUMN browser_run_json TEXT');
+    }
   }
 
   load(): TaskRecordSnapshot | null {
     const row = this.database.prepare(`
       SELECT state, kind, prompt, model, reasoning_effort, thread_id, turn_id, baseline_commit,
-        progress_json, approval_json, result, diff, error, delivery_json, created_at, updated_at
+        progress_json, approval_json, result, diff, error, browser_run_json, delivery_json, created_at, updated_at
       FROM active_task WHERE id = 'primary'
     `).get() as unknown as TaskRow | undefined;
     if (!row) return null;
@@ -70,6 +75,9 @@ export class TaskStore {
         ? JSON.parse(row.approval_json) as TaskApprovalSnapshot
         : null;
       const delivery = row.delivery_json ? JSON.parse(row.delivery_json) as TaskDeliverySnapshot : undefined;
+      const browserRun = row.browser_run_json
+        ? parseBrowserRun(JSON.parse(row.browser_run_json))
+        : emptyBrowserRun();
       if (!Array.isArray(progress)) throw new Error('Invalid progress');
       return {
         state: row.state,
@@ -85,6 +93,7 @@ export class TaskStore {
         result: row.result,
         diff: row.diff,
         error: row.error,
+        browserRun,
         ...(delivery ? { delivery } : {}),
         createdAt: row.created_at,
         updatedAt: row.updated_at,
@@ -99,8 +108,8 @@ export class TaskStore {
     this.database.prepare(`
       INSERT INTO active_task (
         id, state, kind, prompt, model, reasoning_effort, thread_id, turn_id, baseline_commit,
-        progress_json, approval_json, result, diff, error, delivery_json, created_at, updated_at
-      ) VALUES ('primary', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        progress_json, approval_json, result, diff, error, browser_run_json, delivery_json, created_at, updated_at
+      ) VALUES ('primary', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         state = excluded.state,
         kind = excluded.kind,
@@ -115,6 +124,7 @@ export class TaskStore {
         result = excluded.result,
         diff = excluded.diff,
         error = excluded.error,
+        browser_run_json = excluded.browser_run_json,
         delivery_json = excluded.delivery_json,
         created_at = excluded.created_at,
         updated_at = excluded.updated_at
@@ -132,6 +142,7 @@ export class TaskStore {
       task.result,
       task.diff,
       task.error,
+      JSON.stringify(task.browserRun),
       task.delivery ? JSON.stringify(task.delivery) : null,
       task.createdAt,
       task.updatedAt,
@@ -145,4 +156,27 @@ export class TaskStore {
   close(): void {
     this.database.close();
   }
+}
+
+function emptyBrowserRun(): TaskBrowserRunSnapshot {
+  return {
+    required: false,
+    state: 'not-required',
+    taskSpaceId: null,
+    successfulActionCount: 0,
+    retryCount: 0,
+    lastActionAt: null,
+  };
+}
+
+function parseBrowserRun(value: unknown): TaskBrowserRunSnapshot {
+  if (!value || typeof value !== 'object') throw new Error('Invalid browser run');
+  const candidate = value as Partial<TaskBrowserRunSnapshot>;
+  const states = new Set<TaskBrowserRunSnapshot['state']>(['not-required', 'awaiting-action', 'retrying', 'action-observed', 'completed', 'incomplete']);
+  if (typeof candidate.required !== 'boolean' || !candidate.state || !states.has(candidate.state)) throw new Error('Invalid browser run');
+  if (candidate.taskSpaceId !== null && typeof candidate.taskSpaceId !== 'string') throw new Error('Invalid browser run');
+  if (!Number.isInteger(candidate.successfulActionCount) || candidate.successfulActionCount! < 0) throw new Error('Invalid browser run');
+  if (!Number.isInteger(candidate.retryCount) || candidate.retryCount! < 0) throw new Error('Invalid browser run');
+  if (candidate.lastActionAt !== null && typeof candidate.lastActionAt !== 'string') throw new Error('Invalid browser run');
+  return candidate as TaskBrowserRunSnapshot;
 }

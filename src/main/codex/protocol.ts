@@ -21,6 +21,13 @@ export interface CodexThread {
   sessionId: string;
   preview: string;
   ephemeral: boolean;
+  turns?: Array<{
+    items: Array<{
+      type: string;
+      content?: Array<{ type: string; text?: string }>;
+      text?: string;
+    }>;
+  }>;
 }
 
 export interface CodexTurn {
