@@ -20,14 +20,14 @@ It is not a general chat app or IDE. The centre browser is always the primary su
 | Tab organization | Reorder, pin, duplicate, reopen closed tabs, named and color-coded groups, persistent settings, contiguous group ordering, colored group underlines, named/countable collapsed groups, direct rename, and group color selection. |
 | Workspace/context | One workspace; selected tabs and documents; exact frozen context preview; optional localhost visual selection capture; connected project metadata. |
 | Tasks | One active Work or Code task via the installed Codex app-server and the user’s existing account. Work does not require Git; Code requires a connected clean Git project. |
-| Controlled browsing | Eligible Work tasks receive task-owned Agent Tabs cloned from selected URLs in the existing persistent partition. Codex uses sanitized semantic snapshots and bounded batches, with pause/takeover, per-step logs, stale-ref rejection, and exact approval gates for critical actions. |
+| Controlled browsing | Browser-use Work tasks receive task-owned Agent Tabs in the existing persistent partition: a fresh exploration tab for browser-only work, or selected-context clones plus a fresh exploration tab for mixed work. Codex uses sanitized semantic snapshots and bounded batches, with pause/takeover, per-step logs, stale-ref rejection, and exact approval gates for critical actions. |
 | Results and delivery | Trusted centre-browser result page, copy/save/export/revise/approve actions, localhost preview, code diff, and reviewed Git/GitHub preparation actions. |
 
 ## Deliberate product constraints
 
 - One workspace and one active task.
 - The prompt bar is the only task-entry surface; do not build a separate chat transcript.
-- Context is explicit: no hidden history, page metadata, or automatically collected inputs are sent to Codex.
+- Context is explicit but optional: no hidden history, page metadata, or automatically collected inputs are sent to Codex. A browser-only request starts from a fresh Agent Tab without inspecting existing user tabs.
 - Work and Code are capability sets, not rigid templates.
 - Critical actions require a visible approval. This includes authentication boundaries, final form submission, sending, publishing, downloads/uploads, purchases, destructive actions, Git push/PR/merge, and destructive external writes. Ordinary selected-tab browsing, typing, and saving a reversible draft do not add another gate.
 - Poppin is local-first. Structured workspace/task metadata is local; user files and repositories stay in their original locations.
@@ -84,7 +84,7 @@ Electron main process (src/main/index.ts)
 | Data | Storage | Notes |
 | --- | --- | --- |
 | Browser tabs, groups, settings, active tab, window geometry | versioned JSON through `BrowserStateStore` | Current persisted format is version 2; task-owned tabs carry an optional task-space ID. |
-| Active Agent Tabs ownership and lifecycle | versioned JSON through `BrowserAgentStateStore` | Interrupted work restores paused and user-controlled; automation never resumes on launch. |
+| Active Agent Tabs ownership and lifecycle | versioned JSON through `BrowserAgentStateStore` | Version 2 records browser-only/mixed mode and context/exploration roles. Interrupted work restores paused and user-controlled; automation never resumes on launch. |
 | Workspace, documents, selected context, project metadata, task state | SQLite through `WorkspaceStore` and `TaskStore` | Stored under Electron user data. |
 | Browser cookies and login session | Electron partition `persist:poppin-browser` | Do not import sessions from another browser/app. |
 | Task exports | user-selected filesystem location | Never overwrite an attachment without explicit approval. |
@@ -97,7 +97,7 @@ These rules are non-negotiable:
 - Authentication happens only in Poppin’s persistent browser partition and is performed by the user.
 - Web content has no privileged Poppin API access.
 - User-entered addresses are restricted to HTTP(S). Trusted internal result pages are allowlisted only for Poppin-created/restored tabs; do not open arbitrary custom schemes from the address bar.
-- Explicitly selecting a tab and asking for browser use grants ordinary visible actions in that task. Credential forms and critical actions pause for exact approval; reversible draft creation and saving do not.
+- Explicitly asking for browser use grants ordinary visible actions inside that task's Agent Tabs. Selected tabs, documents, or visual selections provide explicit grounding for mixed work; a browser-only task receives only a fresh exploration tab. Credential forms and critical actions pause for exact approval; reversible draft creation and saving do not.
 - Task approvals must automatically make the right Task pane visible. Preserve the browser page and tab state while doing so.
 
 ## Key interaction details and recent regressions
@@ -106,7 +106,7 @@ These rules are non-negotiable:
 - A blocking task or browser approval takes precedence over the user’s collapsed/right-pane-section preference until it is resolved.
 - A critical approval is the first, sticky card in the Task view. Browser-use Work tasks start directly; do not reintroduce a generic browser-access confirmation.
 - Codex receives browser operations as task-scoped dynamic tools. Page reads return sanitized AX/DOM semantic snapshots with generation-scoped refs; raw CDP and arbitrary page JavaScript are never exposed. Batches use a reviewed action vocabulary, stop at control/approval/staleness boundaries, and must end with read or assert verification.
-- Agent Tabs are URL-seeded copies of explicitly selected tabs. Source tabs are not moved or operated, Agent Tabs remain compact until Watch is chosen, and Keep tabs/Close task tabs makes completion cleanup explicit.
+- Mixed Agent Tabs contain URL-seeded copies of explicitly selected tabs plus one fresh exploration tab; browser-only Agent Tabs contain only the fresh exploration tab. Source tabs are not moved or operated, Agent Tabs remain compact until Watch is chosen, and Keep tabs/Close task tabs makes completion cleanup explicit.
 - The Settings panel belongs above a collapsed right-pane rail. It needs a stacking layer above panes when open.
 - A tab group is a contiguous run. Normalizing only pinned tabs is insufficient: new tabs, drag/drop, restore, duplication, pinning, and group moves must not split a group.
 - A collapsed group must retain name, count, color, expand affordance, and rename affordance. Never rely on `currentColor` for a foreground/background combination that can collapse to an invisible state.
@@ -164,15 +164,17 @@ Only do this when the user explicitly asks for deployment/release work.
 2. Inspect `git status` and stage only the intended files.
 3. Commit the coherent change.
 4. Run the checks above.
-5. Build the Apple Silicon DMG using Node 22:
+5. Build the requested Apple Silicon and Intel DMGs using Node 22:
 
    ```bash
    npx --yes --package=node@22 --call='npm run make -- --arch=arm64'
+   npx --yes --package=node@22 --call='npm run make -- --arch=x64'
    ```
 
-6. Replace the one stable `Poppin-Browser-arm64.dmg` in the local outputs folder atomically; do not accumulate duplicate installers.
-7. Run `hdiutil verify` and record the SHA-256.
-8. Push the branch, create a ready PR, verify it is mergeable with no failed/pending required checks, and merge only when the user explicitly requested merge.
+6. Verify both packaged app bundles and DMGs before publication.
+7. Push the branch, create a ready PR, verify it is mergeable with no failed/pending required checks, and merge only when the user explicitly requested merge.
+8. After merge, atomically replace the stable `Poppin-Browser-arm64.dmg` and `Poppin-Browser-x64.dmg` outputs; keep one installer per architecture and do not accumulate versioned duplicates.
+9. Run `hdiutil verify` and record the SHA-256 for both stable installers.
 
 ## How to work on a change
 

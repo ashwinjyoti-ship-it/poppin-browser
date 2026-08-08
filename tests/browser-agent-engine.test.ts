@@ -19,6 +19,7 @@ class FakePages implements BrowserAgentPageController {
   createTaskSpaceTabs(taskSpaceId: string, sourceTabIds: string[]) {
     return sourceTabIds.map((tabId) => { const id = `agent-${tabId}`; this.tabs.add(id); return id; });
   }
+  createTaskSpaceExplorationTab() { const id = 'agent-exploration'; this.tabs.add(id); return id; }
   prepareTabForAgent(tabId: string) { return this.tabs.has(tabId) && tabId.startsWith('agent-'); }
   watchTaskSpace(_taskSpaceId: string, tabId: string | null) { if (tabId) this.activated.push(tabId); return Boolean(tabId && this.tabs.has(tabId)); }
   closeTaskSpaceTabs() { for (const id of [...this.tabs]) if (id.startsWith('agent-')) this.tabs.delete(id); }
@@ -45,9 +46,12 @@ function setup() {
 describe('BrowserAgentEngine', () => {
   it('limits every action to explicitly approved tabs and revokes access on stop', async () => {
     const { engine, pages } = setup();
-    expect(await engine.execute({ type: 'start', taskId: 'task-1', tabIds: ['approved'] })).toMatchObject({ ok: true });
-    expect(engine.getSnapshot().taskSpace?.tabIds).toEqual(['agent-approved']);
-    expect(pages.tabs).toEqual(new Set(['approved', 'other', 'agent-approved']));
+    expect(await engine.execute({ type: 'start', taskId: 'task-1', mode: 'mixed', tabIds: ['approved'] })).toMatchObject({ ok: true });
+    expect(engine.getSnapshot().taskSpace).toMatchObject({
+      mode: 'mixed', tabIds: ['agent-approved', 'agent-exploration'],
+      contextTabIds: ['agent-approved'], explorationTabIds: ['agent-exploration'], activeTabId: 'agent-exploration',
+    });
+    expect(pages.tabs).toEqual(new Set(['approved', 'other', 'agent-approved', 'agent-exploration']));
     const denied = await agentAct(engine, { type: 'read' }, 'other');
     expect(denied).toMatchObject({ ok: false, message: expect.stringMatching(/not approved|task-owned/i) });
     expect(pages.performed).toHaveLength(0);
@@ -55,9 +59,19 @@ describe('BrowserAgentEngine', () => {
     expect(engine.getSnapshot()).toMatchObject({ state: 'stopped', taskSpace: { owner: 'user', status: 'failed-stopped' } });
   });
 
+  it('starts browser-only work from a fresh exploration tab without selected tabs', async () => {
+    const { engine, pages } = setup();
+    expect(await engine.execute({ type: 'start', taskId: 'task-1', mode: 'browser-only', tabIds: [] })).toMatchObject({ ok: true });
+    expect(engine.getSnapshot().taskSpace).toMatchObject({
+      mode: 'browser-only', tabIds: ['agent-exploration'], contextTabIds: [], explorationTabIds: ['agent-exploration'],
+    });
+    expect((await agentAct(engine, { type: 'navigate', url: 'https://example.com' }, 'agent-exploration')).ok).toBe(true);
+    expect(pages.performed).toContainEqual({ tabId: 'agent-exploration', action: { type: 'navigate', url: 'https://example.com' } });
+  });
+
   it('supports pause, explicit resume, and immediate user takeover', async () => {
     const { engine } = setup();
-    await engine.execute({ type: 'start', taskId: 'task-1', tabIds: ['approved'] });
+    await engine.execute({ type: 'start', taskId: 'task-1', mode: 'mixed', tabIds: ['approved'] });
     expect(await engine.execute({ type: 'takeOver' })).toEqual({ ok: true });
     expect(engine.getSnapshot().state).toBe('paused');
     expect((await agentAct(engine, { type: 'scroll', deltaY: 500 })).ok).toBe(false);
@@ -67,7 +81,7 @@ describe('BrowserAgentEngine', () => {
 
   it('never operates credential fields or accepts credential-like typing', async () => {
     const { engine, pages } = setup();
-    await engine.execute({ type: 'start', taskId: 'task-1', tabIds: ['approved'] });
+    await engine.execute({ type: 'start', taskId: 'task-1', mode: 'mixed', tabIds: ['approved'] });
     expect((await agentAct(engine, { type: 'type', selector: '#field', text: 'one-time verification code' })).message).toMatch(/never types/i);
     pages.inspection = { credential: true, consequential: null, target: 'password input' };
     expect((await agentAct(engine, { type: 'click', selector: '#password' })).message).toMatch(/takeover required/i);
@@ -77,7 +91,7 @@ describe('BrowserAgentEngine', () => {
 
   it('binds semantic references to only the latest read snapshot', async () => {
     const { engine, pages } = setup();
-    await engine.execute({ type: 'start', taskId: 'task-1', tabIds: ['approved'] });
+    await engine.execute({ type: 'start', taskId: 'task-1', mode: 'mixed', tabIds: ['approved'] });
     const read = await agentAct(engine, { type: 'read' });
     const snapshot = JSON.parse(read.data!) as { snapshotId: string };
     expect((await agentAct(engine, { type: 'click', ref: 'r1', snapshotId: 'older-snapshot' })).message).toMatch(/stale/i);
@@ -87,7 +101,7 @@ describe('BrowserAgentEngine', () => {
 
   it('runs a bounded batch and requires terminal page-state verification', async () => {
     const { engine, pages } = setup();
-    await engine.execute({ type: 'start', taskId: 'task-1', tabIds: ['approved'] });
+    await engine.execute({ type: 'start', taskId: 'task-1', mode: 'mixed', tabIds: ['approved'] });
     const read = await agentAct(engine, { type: 'read' });
     const snapshotId = (JSON.parse(read.data!) as { snapshotId: string }).snapshotId;
     const scope = engine.getSnapshot().taskSpace!;
@@ -103,7 +117,7 @@ describe('BrowserAgentEngine', () => {
 
   it('stops a batch exactly before a critical step and skips it on rejection', async () => {
     const { engine, pages } = setup();
-    await engine.execute({ type: 'start', taskId: 'task-1', tabIds: ['approved'] });
+    await engine.execute({ type: 'start', taskId: 'task-1', mode: 'mixed', tabIds: ['approved'] });
     const read = await agentAct(engine, { type: 'read' });
     const snapshotId = (JSON.parse(read.data!) as { snapshotId: string }).snapshotId;
     pages.inspection = { credential: false, consequential: 'This action may send a message.', target: 'Send' };
@@ -121,7 +135,7 @@ describe('BrowserAgentEngine', () => {
 
   it('pauses consequential actions and performs them only after exact approval', async () => {
     const { engine, pages } = setup();
-    await engine.execute({ type: 'start', taskId: 'task-1', tabIds: ['approved'] });
+    await engine.execute({ type: 'start', taskId: 'task-1', mode: 'mixed', tabIds: ['approved'] });
     pages.inspection = { credential: false, consequential: 'This action may submit a form.', target: 'Send report' };
     const requested = await agentAct(engine, { type: 'click', selector: '#send' });
     expect(requested).toEqual({ ok: false, message: 'Approval required.' });
@@ -136,7 +150,7 @@ describe('BrowserAgentEngine', () => {
 
   it('reports a rejected critical action as not performed', async () => {
     const { engine, pages } = setup();
-    await engine.execute({ type: 'start', taskId: 'task-1', tabIds: ['approved'] });
+    await engine.execute({ type: 'start', taskId: 'task-1', mode: 'mixed', tabIds: ['approved'] });
     pages.inspection = { credential: false, consequential: 'This action may send a message.', target: 'Send' };
     await agentAct(engine, { type: 'click', selector: '#send' });
     expect(await engine.execute({ type: 'respondApproval', decision: 'reject' })).toEqual({
@@ -147,7 +161,7 @@ describe('BrowserAgentEngine', () => {
 
   it('stores captured rendered content without exposing another tab', async () => {
     const { engine, captured } = setup();
-    await engine.execute({ type: 'start', taskId: 'task-1', tabIds: ['approved'] });
+    await engine.execute({ type: 'start', taskId: 'task-1', mode: 'mixed', tabIds: ['approved'] });
     await agentAct(engine, { type: 'captureTranscript' });
     expect(captured).toHaveBeenCalledWith('agent-approved', 'visible page content');
     expect(engine.getSnapshot().log.at(-1)).toMatchObject({ action: 'Read visible transcript', outcome: 'completed' });
@@ -158,8 +172,8 @@ describe('BrowserAgentEngine', () => {
     const store = new BrowserAgentStateStore(directory);
     const now = new Date().toISOString();
     await store.save({
-      id: 'space-restored', taskId: 'task-restored', name: 'Restored research', owner: 'agent', status: 'agent-controlling',
-      tabIds: ['agent-approved'], activeTabId: 'agent-approved', createdAt: now, updatedAt: now, kept: false,
+      id: 'space-restored', taskId: 'task-restored', name: 'Restored research', mode: 'mixed', owner: 'agent', status: 'agent-controlling',
+      tabIds: ['agent-approved'], contextTabIds: ['agent-approved'], explorationTabIds: [], activeTabId: 'agent-approved', createdAt: now, updatedAt: now, kept: false,
     });
     const pages = new FakePages();
     pages.tabs.add('agent-approved');

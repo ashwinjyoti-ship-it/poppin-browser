@@ -8,14 +8,18 @@ export type BrowserAgentState = 'idle' | 'running' | 'paused' | 'needs-approval'
 
 export type BrowserTaskSpaceOwner = 'agent' | 'user';
 export type BrowserTaskSpaceStatus = 'agent-controlling' | 'waiting-for-approval' | 'user-controlling' | 'paused' | 'completed' | 'failed-stopped';
+export type BrowserTaskSpaceMode = 'browser-only' | 'mixed';
 
 export interface BrowserTaskSpace {
   id: string;
   taskId: string;
   name: string;
+  mode: BrowserTaskSpaceMode;
   owner: BrowserTaskSpaceOwner;
   status: BrowserTaskSpaceStatus;
   tabIds: string[];
+  contextTabIds: string[];
+  explorationTabIds: string[];
   activeTabId: string | null;
   createdAt: string;
   updatedAt: string;
@@ -94,7 +98,7 @@ export interface BrowserAgentSnapshot {
 }
 
 export type BrowserAgentCommand =
-  | { type: 'start'; taskId: string; name?: string; tabIds: string[] }
+  | { type: 'start'; taskId: string; name?: string; mode: BrowserTaskSpaceMode; tabIds: string[] }
   | { type: 'pause' }
   | { type: 'resume' }
   | { type: 'stop' }

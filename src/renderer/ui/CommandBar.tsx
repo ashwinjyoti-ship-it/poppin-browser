@@ -127,7 +127,7 @@ export function CommandBar({ snapshot, workspace, collapsed, onCollapseChange, o
         <section ref={preflightRef} className="task-preflight" aria-label="Task preflight">
           <div><strong>{preflight.kind === 'code' ? 'Code task' : 'Work task'}</strong><span>{selectedContextCount(workspace)} selected context item(s)</span></div>
           <ul>
-            <li>{preflight.browserUse ? 'Uses the selected tabs visibly. Only critical actions pause for approval.' : 'Uses only the frozen selected context.'}</li>
+            <li>{preflight.browserUse ? 'Uses task-owned Agent Tabs visibly. Only critical actions pause for approval.' : 'Uses only the frozen selected context.'}</li>
             <li>{preflight.modifiesProject ? `May modify ${workspace.project?.repositoryPath ?? 'the connected project'}.` : 'Will not modify the connected project.'}</li>
             {preflight.consequentialActions.map((action) => <li key={action}>{action} will pause for separate approval.</li>)}
           </ul>

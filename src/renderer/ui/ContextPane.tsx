@@ -166,7 +166,7 @@ function TaskView({ snapshot, browserAgent, onCommand, onBrowserAgentCommand }: 
             <article key={item.id} className="task-progress-item"><i className={`progress-state progress-${item.status}`} /><div><strong>{item.title}</strong>{item.detail ? <pre>{item.detail}</pre> : null}</div></article>
           ))}
         </div>
-      ) : <div className="context-empty">Choose visible context, then ask for a summary, report, research, or a project change.</div>}
+      ) : <div className="context-empty">Choose context when it matters, or ask Codex to browse from a fresh Agent Tab.</div>}
       {task?.state === 'Running' || task?.pendingApproval ? <button type="button" className="task-cancel" onClick={() => { void onCommand({ type: 'cancelTask' }); }}>Cancel task</button> : null}
       {task?.error ? <p className="task-error">{task.error}</p> : null}
     </div>
@@ -180,7 +180,7 @@ function BrowserUseView({ snapshot, onCommand }: { snapshot?: BrowserAgentSnapsh
     <section className="browser-use-card" aria-label="Controlled browser use">
       <div className="browser-use-heading"><div><span className="eyebrow">Agent Tabs</span><h3>{snapshot?.currentAction ?? snapshot?.taskSpace?.name ?? titleCase(snapshot?.state ?? 'idle')}</h3></div><span className={`task-state browser-state-${snapshot?.state ?? 'idle'}`}>{snapshot?.taskSpace?.status ?? snapshot?.state ?? 'idle'}</span></div>
       {!snapshot?.taskSpace ? <p className="context-note">This task is using frozen context only. Eligible browser-use tasks create Agent Tabs automatically.</p> : null}
-      {snapshot?.taskSpace ? <p className="context-note">{snapshot.taskSpace.tabIds.length} task-owned tab{snapshot.taskSpace.tabIds.length === 1 ? '' : 's'} · {snapshot.taskSpace.owner === 'agent' ? 'Agent controlling' : 'User controlling'}</p> : null}
+      {snapshot?.taskSpace ? <p className="context-note">{snapshot.taskSpace.contextTabIds.length} context · {snapshot.taskSpace.explorationTabIds.length} exploration · {snapshot.taskSpace.owner === 'agent' ? 'Agent controlling' : 'User controlling'}</p> : null}
       {snapshot?.taskSpace ? <div className="browser-controls"><button type="button" onClick={() => { void onCommand({ type: 'watch' }); }}>Watch</button>{canControl ? <button type="button" onClick={() => { void onCommand({ type: 'pause' }); }}>Pause</button> : null}{canControl ? <button type="button" onClick={() => { void onCommand({ type: 'takeOver' }); }}>Take over</button> : null}{snapshot.state === 'paused' ? <button type="button" onClick={() => { void onCommand({ type: 'resume' }); }}>Resume agent</button> : null}{!canCleanUp ? <button type="button" onClick={() => { void onCommand({ type: 'stop' }); }}>Stop</button> : null}</div> : null}
       {canCleanUp ? <div className="browser-controls browser-cleanup-controls"><button type="button" className="primary-button" onClick={() => { void onCommand({ type: 'closeTaskTabs' }); }}>Close task tabs</button><button type="button" onClick={() => { void onCommand({ type: 'keepTabs' }); }}>Keep tabs</button></div> : null}
       {snapshot?.log.length ? <ol className="browser-action-log">{snapshot.log.slice(-12).map((entry) => <li key={entry.id}><span>{entry.action}</span><small>{entry.outcome} · {entry.detail}</small></li>)}</ol> : null}

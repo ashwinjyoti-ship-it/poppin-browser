@@ -212,10 +212,11 @@ describe('packaged browser workflow', () => {
     await address.press('Enter');
     await expect.poll(() => exactPageInfo(application!, `${origin}/agent`)).toMatchObject({ title: 'Browser agent fixture' });
     const agentTabId = await shell.evaluate(async () => (await window.poppinBrowser.getSnapshot()).activeTabId);
-    expect(await shell.evaluate((tabId) => window.poppinBrowserAgent.command({ type: 'start', taskId: 'smoke-browser-task', tabIds: [tabId] }), agentTabId)).toMatchObject({ ok: true });
+    expect(await shell.evaluate((tabId) => window.poppinBrowserAgent.command({ type: 'start', taskId: 'smoke-browser-task', mode: 'mixed', tabIds: [tabId] }), agentTabId)).toMatchObject({ ok: true });
     const agentScope = await shell.evaluate(async () => {
       const snapshot = await window.poppinBrowserAgent.getSnapshot();
-      return { taskSpaceId: snapshot.taskSpace!.id, tabId: snapshot.taskSpace!.tabIds[0]! };
+      if (snapshot.taskSpace?.contextTabIds.length !== 1 || snapshot.taskSpace.explorationTabIds.length !== 1) throw new Error('Mixed Agent Tabs were not created.');
+      return { taskSpaceId: snapshot.taskSpace.id, tabId: snapshot.taskSpace.contextTabIds[0]! };
     });
     const readResult = await shell.evaluate((scope) => window.poppinBrowserAgent.command({ type: 'act', ...scope, action: { type: 'read' } }), agentScope);
     expect(readResult).toMatchObject({ ok: true, data: expect.stringContaining('"snapshotId"') });
@@ -243,6 +244,19 @@ describe('packaged browser workflow', () => {
       const candidates = webContents.getAllWebContents().filter((candidate) => candidate.getURL() === targetUrl);
       return await Promise.all(candidates.map((contents) => contents.executeJavaScript('document.body.dataset.sent || null')));
     }, `${origin}/agent`)).not.toContain('true');
+    expect(await shell.evaluate(() => window.poppinBrowserAgent.command({ type: 'stop' }))).toMatchObject({ ok: true });
+    expect(await shell.evaluate(() => window.poppinBrowserAgent.command({ type: 'closeTaskTabs' }))).toMatchObject({ ok: true });
+
+    expect(await shell.evaluate(() => window.poppinBrowserAgent.command({ type: 'start', taskId: 'smoke-browser-only-task', mode: 'browser-only', tabIds: [] }))).toMatchObject({ ok: true });
+    const explorationScope = await shell.evaluate(async () => {
+      const snapshot = await window.poppinBrowserAgent.getSnapshot();
+      if (snapshot.taskSpace?.contextTabIds.length !== 0 || snapshot.taskSpace.explorationTabIds.length !== 1) throw new Error('Browser-only Agent Tab was not created.');
+      return { taskSpaceId: snapshot.taskSpace.id, tabId: snapshot.taskSpace.explorationTabIds[0]! };
+    });
+    const explorationNavigation = await shell.evaluate(({ scope, url }) => window.poppinBrowserAgent.command({ type: 'act', ...scope, action: { type: 'navigate', url } }), { scope: explorationScope, url: origin });
+    if (!explorationNavigation.ok) throw new Error(explorationNavigation.message ?? 'Browser-only navigation failed.');
+    const explorationRead = await shell.evaluate((scope) => window.poppinBrowserAgent.command({ type: 'act', ...scope, action: { type: 'read' } }), explorationScope);
+    expect(explorationRead).toMatchObject({ ok: true, data: expect.stringContaining('Local fixture') });
     expect(await shell.evaluate(() => window.poppinBrowserAgent.command({ type: 'stop' }))).toMatchObject({ ok: true });
     expect(await shell.evaluate(() => window.poppinBrowserAgent.command({ type: 'closeTaskTabs' }))).toMatchObject({ ok: true });
 
