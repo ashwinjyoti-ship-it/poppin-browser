@@ -1,6 +1,7 @@
 import { type FormEvent, useLayoutEffect, useRef, useState } from 'react';
 import { ChevronDown, ChevronUp, Send, Square } from 'lucide-react';
 
+import type { AgentHarnessId } from '../../shared/agent';
 import type { TaskCommand, TaskCommandResult, TaskSnapshot } from '../../shared/task';
 import type { WorkspaceSnapshot } from '../../shared/workspace';
 import { inferTaskRequirements, type TaskRequirements } from '../../shared/task-requirements';
@@ -33,6 +34,9 @@ export function CommandBar({ snapshot, workspace, collapsed, onCollapseChange, o
   const requestedEffort = canContinue ? snapshot.task?.reasoningEffort ?? '' : effort;
   const selectedEffort = model?.reasoningEfforts.includes(requestedEffort) ? requestedEffort : model?.defaultReasoningEffort ?? '';
   const isBlocking = snapshot.task?.state === 'Running' || Boolean(snapshot.task?.pendingApproval);
+  const agents = snapshot.connection.availableAgents ?? (snapshot.connection.agent ? [snapshot.connection.agent] : []);
+  const selectedAgentId = snapshot.connection.agent?.id ?? agents[0]?.id ?? '';
+  const controls = snapshot.connection.controls ?? { model: true, reasoning: true };
 
   useLayoutEffect(() => {
     if (!preflight) {
@@ -99,26 +103,48 @@ export function CommandBar({ snapshot, workspace, collapsed, onCollapseChange, o
         <Brand compact />
       </div>
       <label className="command-select">
-        <span>Provider</span>
-        <select value="codex" disabled><option value="codex">Codex</option></select>
-      </label>
-      <label className="command-select command-model">
-        <span>Model</span>
-        <select value={selectedModelId} onChange={(event) => {
-          const next = snapshot.connection.models.find((candidate) => candidate.id === event.target.value);
-          setModelId(event.target.value);
-          setEffort(next?.defaultReasoningEffort ?? '');
-        }} disabled={snapshot.connection.state !== 'ready' || isBlocking || canContinue}>
-          {snapshot.connection.models.length === 0 ? <option value="">Unavailable</option> : null}
-          {snapshot.connection.models.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.name}</option>)}
+        <span>Agent</span>
+        <select
+          value={selectedAgentId}
+          onChange={(event) => {
+            setModelId('');
+            setEffort('');
+            void onCommand({ type: 'selectAgent', agentId: event.target.value as AgentHarnessId }).then((result) => {
+              if (!result.ok) setError(result.message ?? 'Poppin could not switch agent.');
+            });
+          }}
+          disabled={isBlocking || agents.length < 2}
+        >
+          {agents.map((agent) => (
+            <option key={agent.id} value={agent.id} title={agent.summary}>
+              {agent.availability === 'preview' ? `${agent.name} · preview` : agent.name}
+            </option>
+          ))}
         </select>
       </label>
-      <label className="command-select">
-        <span>Reasoning</span>
-        <select value={selectedEffort} onChange={(event) => setEffort(event.target.value)} disabled={!model || isBlocking || canContinue}>
-          {(model?.reasoningEfforts ?? []).map((value) => <option key={value} value={value}>{titleCase(value)}</option>)}
-        </select>
-      </label>
+      {/* Model and reasoning selectors only appear when the selected harness
+          actually exposes them. ACP agents commonly do not. */}
+      {controls.model ? (
+        <label className="command-select command-model">
+          <span>Model</span>
+          <select value={selectedModelId} onChange={(event) => {
+            const next = snapshot.connection.models.find((candidate) => candidate.id === event.target.value);
+            setModelId(event.target.value);
+            setEffort(next?.defaultReasoningEffort ?? '');
+          }} disabled={snapshot.connection.state !== 'ready' || isBlocking || canContinue}>
+            {snapshot.connection.models.length === 0 ? <option value="">Unavailable</option> : null}
+            {snapshot.connection.models.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.name}</option>)}
+          </select>
+        </label>
+      ) : null}
+      {controls.reasoning ? (
+        <label className="command-select">
+          <span>Reasoning</span>
+          <select value={selectedEffort} onChange={(event) => setEffort(event.target.value)} disabled={!model || isBlocking || canContinue}>
+            {(model?.reasoningEfforts ?? []).map((value) => <option key={value} value={value}>{titleCase(value)}</option>)}
+          </select>
+        </label>
+      ) : null}
       <label className="command-prompt">
         <span className="sr-only">Prompt</span>
         <input

@@ -66,6 +66,25 @@ export class TaskStore {
       this.database.exec("ALTER TABLE active_task ADD COLUMN document_id TEXT NOT NULL DEFAULT ''");
     }
     this.database.exec("UPDATE active_task SET document_id = thread_id WHERE document_id = ''");
+    this.database.exec(`
+      CREATE TABLE IF NOT EXISTS task_settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      ) STRICT;
+    `);
+  }
+
+  /** Remembers which agent harness the user selected, across restarts. */
+  getSelectedAgentId(): string | null {
+    const row = this.database.prepare("SELECT value FROM task_settings WHERE key = 'agent_id'").get() as { value?: string } | undefined;
+    return row?.value ?? null;
+  }
+
+  setSelectedAgentId(agentId: string): void {
+    this.database.prepare(`
+      INSERT INTO task_settings (key, value) VALUES ('agent_id', ?)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value
+    `).run(agentId);
   }
 
   load(): TaskRecordSnapshot | null {
