@@ -133,15 +133,36 @@ Switching harness switches the session, not the task.
 | Phase | Scope | Status |
 |---|---|---|
 | 1 | AgentAdapter boundary + ACP proof of concept | **Done** |
-| 2 | Capability/environment model | Planned |
-| 3 | Automatic Browser Use provisioning, persistent contexts | Planned |
-| 4 | Tandem capability adapter | Planned |
-| 5 | Tandem World hosting + theme | Planned |
-| 6 | Tandem as context | Planned |
-| 7 | Cross-capability workflows | Planned |
-| 8 | ACP parity evaluation vs direct Codex | Planned |
+| 2 | Capability/environment model | **Done** |
+| 3 | Automatic Browser Use provisioning; reason codes | **Done**; persistent browsing-context identity still open (below) |
+| 4 | Tandem capability adapter | **Done** |
+| 5 | Tandem World hosting + theme | **Done** |
+| 6 | Tandem as context | **Done** |
+| 7 | Cross-capability workflows | **Wired**: browser → Tandem and context → Tandem run through one task with both capabilities provisioned up front |
+| 8 | ACP parity evaluation vs direct Codex | Open — needs a live Codex ACP run on a Mac |
 | 9 | Remove superseded Tandem code | Deferred until 4–7 are proven in daily use |
 | 10 | Architecture/tests/docs cleanup | Ongoing |
+
+### Known gaps, stated plainly
+
+- **Poppin capability tools over ACP.** ACP has no client-defined tool
+  mechanism, so Browser Use and Tandem are not yet reachable by an ACP agent.
+  The route is an MCP stdio server listed in `session/new`. Until it exists the
+  ACP adapter reports `clientTools: false` and Poppin refuses browser-required
+  tasks on that harness instead of starting one it cannot serve.
+- **`SOURCE_TAB_STATE_NOT_TRANSFERRED`.** The reason code exists and is part of
+  the shared vocabulary, but Poppin does not yet detect the mismatch: context
+  tabs are still URL-seeded clones (`createTaskSpaceTabs`). Real detection needs
+  clone↔source pairing carried into `BrowserAgentEngine` and a comparison at
+  first read. Until then Poppin does not claim the clone reproduces the source
+  tab's live state.
+- **Persistent browsing-context identity** (SPA route, dialog, scroll, focus,
+  frame hierarchy) beyond URL reconstruction is not implemented.
+- **ACP `elicitation/create`** is not advertised, so blocking questions from an
+  ACP agent are refused rather than surfaced.
+- **Tandem cleanup (Part V)** has not started: the native Pages implementation
+  still works and is still used. Removing it before Tandem World and the Tandem
+  capability have been exercised in daily use would break working behaviour.
 
 Poppin stays runnable at every phase, and the working Codex path is never
 removed while the ACP path is being proved.
