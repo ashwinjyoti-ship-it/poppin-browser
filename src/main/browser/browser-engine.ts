@@ -54,6 +54,7 @@ interface BrowserTabRecord {
   snapshot: BrowserTabSnapshot;
   lastExternalUrl: string;
   documentGeneration: number;
+  pauseYoutubeAutoplay: boolean;
 }
 
 interface SemanticReferenceRecord {
@@ -682,7 +683,13 @@ export class BrowserEngine {
       canGoForward: false,
       failure: null,
     };
-    const record: BrowserTabRecord = { view, snapshot, lastExternalUrl: initialUrl, documentGeneration: 0 };
+    const record: BrowserTabRecord = {
+      view,
+      snapshot,
+      lastExternalUrl: initialUrl,
+      documentGeneration: 0,
+      pauseYoutubeAutoplay: isYoutubeUrl(initialUrl),
+    };
     this.tabs.set(id, record);
     this.insertTabId(id, position);
     this.window.contentView.addChildView(view);
@@ -744,6 +751,10 @@ export class BrowserEngine {
       this.authenticationWindow = popup;
       this.overlayKind = kind;
       popup.setTitle(kind === 'authentication' ? 'Secure sign-in' : 'Link preview');
+      // Publish the recovery controls before the child has painted. Some external
+      // sites delay their first paint or title update; waiting for either left a
+      // frameless preview above the app with no reachable Close/Open-in-tab UI.
+      this.emitSnapshot();
       popup.webContents.on('will-navigate', (event, url) => {
         const protocol = safeProtocol(url);
         if (protocol !== 'http:' && protocol !== 'https:' && protocol !== 'about:') event.preventDefault();
@@ -768,7 +779,8 @@ export class BrowserEngine {
         this.emitSnapshot();
       });
       popup.webContents.on('before-input-event', (_event, input) => {
-        if (input.type === 'keyDown' && input.key === 'Escape') popup.close();
+        if (input.type !== 'keyDown') return;
+        if (input.key === 'Escape' || (input.meta && input.key.toLowerCase() === 'w')) popup.close();
       });
     });
     contents.on('context-menu', (_event, params) => {
@@ -816,7 +828,11 @@ export class BrowserEngine {
       this.syncNavigationState(tab);
       this.updateTab(tab, { isLoading: false });
     });
-    contents.on('dom-ready', () => this.applyLinkOpeningPreference(tab));
+    contents.on('dom-ready', () => {
+      this.applyLinkOpeningPreference(tab);
+      this.pauseYoutubeMedia(tab);
+    });
+    contents.on('media-started-playing', () => this.pauseYoutubeMedia(tab));
     contents.on('did-navigate', (_event, url) => this.handleNavigation(tab, url, true));
     contents.on('did-navigate-in-page', (_event, url) => this.handleNavigation(tab, url, false));
     contents.on('page-title-updated', (_event, title) => {
@@ -855,6 +871,7 @@ export class BrowserEngine {
   private handleNavigation(tab: BrowserTabRecord, url: string, resetFavicon: boolean): void {
     if (url.startsWith('poppin://error')) return;
     if (resetFavicon) {
+      tab.pauseYoutubeAutoplay = isYoutubeUrl(url);
       tab.documentGeneration += 1;
       for (const [id, record] of this.semanticReferences) if (record.tabId === tab.snapshot.id) this.semanticReferences.delete(id);
     }
@@ -872,6 +889,14 @@ export class BrowserEngine {
         : {}),
     });
     this.scheduleSave();
+  }
+
+  private pauseYoutubeMedia(tab: BrowserTabRecord): void {
+    if (!tab.pauseYoutubeAutoplay || !isYoutubeUrl(tab.view.webContents.getURL())) return;
+    // Consume the guard before evaluating so a user who presses Play after the
+    // initial autoplay attempt is never fought by Poppin.
+    tab.pauseYoutubeAutoplay = false;
+    void tab.view.webContents.executeJavaScript('document.querySelectorAll("video").forEach((video) => video.pause())', true).catch(() => undefined);
   }
 
   private activateTab(tabId: string): BrowserCommandResult {
@@ -1272,11 +1297,14 @@ export class BrowserEngine {
     const popup = this.authenticationWindow;
     if (!popup || popup.isDestroyed() || this.window.isDestroyed()) return;
     const parent = this.window.getContentBounds();
-    const width = Math.min(720, Math.max(420, parent.width - 96));
-    const height = Math.min(760, Math.max(420, parent.height - 170));
+    // Preview windows are deliberately large enough to feel like an in-app
+    // Arc-style surface, while leaving a clear, persistent control rail in
+    // the parent window for Close and Open in tab.
+    const width = Math.min(1_280, Math.max(420, parent.width - 160));
+    const height = Math.min(920, Math.max(420, parent.height - 132));
     popup.setBounds({
       x: parent.x + Math.round((parent.width - width) / 2),
-      y: parent.y + Math.min(112, Math.max(72, Math.round(parent.height * 0.12))),
+      y: parent.y + Math.max(58, Math.round((parent.height - height) / 2)),
       width,
       height,
     });
@@ -1367,6 +1395,15 @@ export function isExternalLinkPreview(value: string, openerValue: string): boole
     const allowedTarget = target.protocol === 'https:' || isLocalhostUrl(value);
     const allowedOpener = opener.protocol === 'https:' || isLocalhostUrl(openerValue);
     return allowedTarget && allowedOpener && target.origin !== opener.origin;
+  } catch {
+    return false;
+  }
+}
+
+export function isYoutubeUrl(value: string): boolean {
+  try {
+    const hostname = new URL(value).hostname.toLowerCase();
+    return hostname === 'youtube.com' || hostname.endsWith('.youtube.com') || hostname === 'youtu.be';
   } catch {
     return false;
   }

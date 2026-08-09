@@ -1,3 +1,4 @@
+import { ExternalLink, X } from 'lucide-react';
 import { type CSSProperties, type FormEvent, useEffect, useRef, useState } from 'react';
 
 import { DEFAULT_BROWSER_SETTINGS, type BrowserCommand, type BrowserSnapshot } from '../../shared/browser';
@@ -43,8 +44,10 @@ export function App() {
   const [addressIssue, setAddressIssue] = useState<AddressIssue | null>(null);
   const [isEditingAddress, setIsEditingAddress] = useState(false);
   const [workspaceSnapshot, setWorkspaceSnapshot] = useState<WorkspaceSnapshot>(EMPTY_WORKSPACE);
-  const [workspaceCollapsed, setWorkspaceCollapsed] = useState(false);
-  const [contextCollapsed, setContextCollapsed] = useState(false);
+  // A fresh browser opens for browsing first. Work panes expand on demand or
+  // whenever an agent needs attention.
+  const [workspaceCollapsed, setWorkspaceCollapsed] = useState(true);
+  const [contextCollapsed, setContextCollapsed] = useState(true);
   const [contextSection, setContextSection] = useState<PaneSection>('context');
   const [taskSnapshot, setTaskSnapshot] = useState<TaskSnapshot>(EMPTY_TASK);
   const [browserAgentSnapshot, setBrowserAgentSnapshot] = useState<BrowserAgentSnapshot>(EMPTY_BROWSER_AGENT);
@@ -238,9 +241,9 @@ export function App() {
       ) : null}
       {snapshot.linkPreview ? (
         <section className="authentication-overlay-status link-preview-status" aria-label="Link preview overlay">
-          <div><strong>{snapshot.linkPreview.title}</strong><span>{snapshot.linkPreview.url}</span></div>
-          <button type="button" onClick={() => { void sendCommand({ type: 'openLinkPreviewInTab' }); }}>Open in tab</button>
-          <button type="button" onClick={() => { void sendCommand({ type: 'closeLinkPreview' }); }}>Close</button>
+          <div className="link-preview-description"><strong>{snapshot.linkPreview.title}</strong><span>{snapshot.linkPreview.url}</span></div>
+          <button type="button" aria-label="Close" title="Close preview (Esc)" onClick={() => { void sendCommand({ type: 'closeLinkPreview' }); }}><X size={17} /></button>
+          <button type="button" aria-label="Open in tab" title="Open preview in a tab" onClick={() => { void sendCommand({ type: 'openLinkPreviewInTab' }); }}><ExternalLink size={16} /></button>
         </section>
       ) : null}
       <header className="browser-chrome">
