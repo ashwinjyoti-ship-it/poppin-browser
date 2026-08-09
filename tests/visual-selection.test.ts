@@ -6,7 +6,7 @@ import path from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { isAuthenticationPopup, isExternalLinkPreview, isLocalhostUrl } from '../src/main/browser/browser-engine';
+import { isAuthenticationPopup, isExternalLinkPreview, isLocalhostUrl, isYoutubeUrl } from '../src/main/browser/browser-engine';
 import { WorkspaceStore } from '../src/main/workspace/workspace-store';
 import type { VisualSelectionSnapshot } from '../src/shared/workspace';
 
@@ -55,5 +55,11 @@ describe('Arc-style link preview policy', () => {
     expect(isExternalLinkPreview('http://localhost:4000/preview', 'http://localhost:3000/article')).toBe(true);
     expect(isExternalLinkPreview('http://example.net/', 'https://example.com/')).toBe(false);
     expect(isExternalLinkPreview('javascript:alert(1)', 'https://example.com/')).toBe(false);
+  });
+
+  it('recognises YouTube hosts for the one-time autoplay pause guard', () => {
+    expect(isYoutubeUrl('https://www.youtube.com/watch?v=abc')).toBe(true);
+    expect(isYoutubeUrl('https://youtu.be/abc')).toBe(true);
+    expect(isYoutubeUrl('https://notyoutube.com/watch?v=abc')).toBe(false);
   });
 });

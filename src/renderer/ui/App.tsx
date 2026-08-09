@@ -44,8 +44,10 @@ export function App() {
   const [addressIssue, setAddressIssue] = useState<AddressIssue | null>(null);
   const [isEditingAddress, setIsEditingAddress] = useState(false);
   const [workspaceSnapshot, setWorkspaceSnapshot] = useState<WorkspaceSnapshot>(EMPTY_WORKSPACE);
-  const [workspaceCollapsed, setWorkspaceCollapsed] = useState(false);
-  const [contextCollapsed, setContextCollapsed] = useState(false);
+  // A fresh browser opens for browsing first. Work panes expand on demand or
+  // whenever an agent needs attention.
+  const [workspaceCollapsed, setWorkspaceCollapsed] = useState(true);
+  const [contextCollapsed, setContextCollapsed] = useState(true);
   const [contextSection, setContextSection] = useState<PaneSection>('context');
   const [taskSnapshot, setTaskSnapshot] = useState<TaskSnapshot>(EMPTY_TASK);
   const [browserAgentSnapshot, setBrowserAgentSnapshot] = useState<BrowserAgentSnapshot>(EMPTY_BROWSER_AGENT);
