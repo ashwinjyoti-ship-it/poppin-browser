@@ -32,6 +32,13 @@ import {
   type PoppinPagesApi,
 } from '../shared/pages';
 
+import {
+  TANDEM_CHANNELS,
+  type PoppinTandemApi,
+  type TandemCommand,
+  type TandemSnapshot,
+} from '../shared/tandem';
+
 const api: PoppinBrowserApi = {
   getSnapshot: () => ipcRenderer.invoke(BROWSER_CHANNELS.getSnapshot) as Promise<BrowserSnapshot>,
   command: (command: BrowserCommand) => ipcRenderer.invoke(BROWSER_CHANNELS.command, command),
@@ -98,3 +105,15 @@ const browserAgentApi: PoppinBrowserAgentApi = {
 };
 
 contextBridge.exposeInMainWorld('poppinBrowserAgent', browserAgentApi);
+
+const tandemApi: PoppinTandemApi = {
+  getSnapshot: () => ipcRenderer.invoke(TANDEM_CHANNELS.getSnapshot) as Promise<TandemSnapshot>,
+  command: (command: TandemCommand) => ipcRenderer.invoke(TANDEM_CHANNELS.command, command),
+  subscribe: (listener) => {
+    const handler = (_event: Electron.IpcRendererEvent, snapshot: TandemSnapshot) => listener(snapshot);
+    ipcRenderer.on(TANDEM_CHANNELS.snapshot, handler);
+    return () => ipcRenderer.removeListener(TANDEM_CHANNELS.snapshot, handler);
+  },
+};
+
+contextBridge.exposeInMainWorld('poppinTandem', tandemApi);

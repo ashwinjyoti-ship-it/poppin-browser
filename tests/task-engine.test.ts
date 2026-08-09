@@ -285,6 +285,52 @@ describe('task engine', () => {
     workspaceStore.close();
   });
 
+  it('hands the agent a truthful machine-readable environment before it plans', async () => {
+    const { engine, fake, taskStore, workspaceStore } = await setup({ withProject: false, withBrowserAgent: true, withTabContext: true });
+    await engine.execute({
+      type: 'startTask', prompt: 'Research current NVMe prices under 5,000.', model: 'gpt-test', reasoningEffort: 'high', kind: 'work',
+    });
+    expect(fake.prompt).toContain('POPPIN ENVIRONMENT');
+    const environment = JSON.parse(fake.prompt.split('POPPIN ENVIRONMENT (what you can actually read and control right now)\n')[1]!.split('\n\nSELECTED CONTEXT')[0]!) as Record<string, unknown>;
+    expect(environment).toMatchObject({
+      browser: { state: 'agent_controlling', taskSpaceId: 'space-1', mode: 'exploration' },
+      tandem: { available: false, read: false, write: false },
+      project: { connected: false },
+      context: { items: 1, kinds: ['browser-tab'] },
+    });
+    await engine.close();
+    taskStore.close();
+    workspaceStore.close();
+  });
+
+  it('asks before starting when live web access is genuinely uncertain', async () => {
+    const { engine, browserCommand, taskStore, workspaceStore } = await setup({ withProject: false, withBrowserAgent: true, withTabContext: false });
+    const asked = await engine.execute({
+      type: 'startTask', prompt: 'Compare the two options and recommend one.', model: 'gpt-test', reasoningEffort: 'high', kind: 'work',
+    });
+    expect(asked).toMatchObject({ ok: false, question: { kind: 'browser' } });
+    expect(browserCommand).not.toHaveBeenCalled();
+    expect(engine.getSnapshot().task).toBeNull();
+
+    const started = await engine.execute({
+      type: 'startTask', prompt: 'Compare the two options and recommend one.', model: 'gpt-test', reasoningEffort: 'high', kind: 'work', useBrowser: true,
+    });
+    expect(started).toEqual({ ok: true });
+    expect(browserCommand).toHaveBeenCalledWith(expect.objectContaining({ type: 'start' }));
+    await engine.close();
+    taskStore.close();
+    workspaceStore.close();
+  });
+
+  it('refuses browser work on a harness that cannot receive Poppin capability tools', async () => {
+    const { engine, taskStore, workspaceStore } = await setup({ withProject: false, withBrowserAgent: true, withTabContext: false });
+    const acp = await engine.execute({ type: 'selectAgent', agentId: 'codex-acp' });
+    expect(acp.ok).toBe(false);
+    await engine.close();
+    taskStore.close();
+    workspaceStore.close();
+  });
+
   it('continues a completed Work result in the same Codex thread without result approval', async () => {
     const { engine, fake, browserCommand, taskStore, workspaceStore } = await setup({
       withProject: false, withBrowserAgent: true, withTabContext: false,

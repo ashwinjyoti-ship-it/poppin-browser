@@ -15,6 +15,8 @@ import {
 import { BrowserAgentStateStore } from './browser-agent-state-store';
 
 const MAX_LOG_ENTRIES = 300;
+import { BROWSER_REASON_CODES } from '../../shared/capabilities';
+
 const CREDENTIAL_SELECTOR = /password|passkey|credential|one[-_ ]?time|otp|verification[-_ ]?code/i;
 const AUTH_URL = /\b(sign[-_ ]?in|log[-_ ]?in|authenticate|oauth|passkey|password)\b/i;
 
@@ -291,7 +293,7 @@ export class BrowserAgentEngine {
   }
 
   private async act(taskSpaceId: string, tabId: string, action: BrowserAgentAction): Promise<BrowserAgentCommandResult> {
-    if (this.snapshot.state !== 'running') return { ok: false, message: 'Resume browser use before the next action.' };
+    if (this.snapshot.state !== 'running') return { ok: false, message: `Resume browser use before the next action (${this.snapshot.state === 'paused' && this.snapshot.taskSpace?.owner === 'user' ? BROWSER_REASON_CODES.userTakeoverActive : BROWSER_REASON_CODES.browserNotProvisioned}).` };
     if (!this.snapshot.taskSpace || this.snapshot.taskSpace.owner !== 'agent' || taskSpaceId !== this.snapshot.taskSpace.id) {
       return { ok: false, message: 'That action is outside the active task space.' };
     }
@@ -299,27 +301,27 @@ export class BrowserAgentEngine {
     if (!this.snapshot.allowedTabIds.includes(tabId) || !this.pages.hasTab(tabId) || !this.pages.prepareTabForAgent(tabId, taskSpaceId)) {
       this.append(tabId, label(action), target(action), 'rejected', 'The tab is not approved for this task.');
       this.emit();
-      return { ok: false, message: 'That tab is not approved for this task.' };
+      return { ok: false, message: `That tab is not approved for this task (${this.pages.hasTab(tabId) ? BROWSER_REASON_CODES.browserContextDisconnected : BROWSER_REASON_CODES.taskTabExpired}).` };
     }
     if ((action.type === 'click' || action.type === 'type') && action.ref) {
       if (!action.snapshotId || this.latestSnapshotByTab.get(tabId) !== action.snapshotId) {
         this.append(tabId, label(action), action.ref, 'rejected', 'The semantic reference is stale. Read the page again.');
         this.emit();
-        return { ok: false, message: 'That semantic reference is stale. Read the page again.' };
+        return { ok: false, message: `That semantic reference is stale. Read the page again (${BROWSER_REASON_CODES.snapshotStale}).` };
       }
     }
     if (action.type === 'type' && (CREDENTIAL_SELECTOR.test(action.selector ?? '') || CREDENTIAL_SELECTOR.test(action.text))) {
       this.append(tabId, label(action), action.selector ?? action.ref ?? 'editable field', 'rejected', 'Credential fields and credential data are never accessible.');
       this.emit();
-      return { ok: false, message: 'Poppin never types into or inspects credential fields.' };
+      return { ok: false, message: `Poppin never types into or inspects credential fields (${BROWSER_REASON_CODES.credentialAccessBlocked}).` };
     }
     if (action.type === 'navigate' && AUTH_URL.test(action.url)) {
-      return this.requestTakeover(tabId, action.url, 'Authentication must be completed by the user.');
+      return this.requestTakeover(tabId, action.url, `Authentication must be completed by the user (${BROWSER_REASON_CODES.authSubmitApprovalRequired}).`);
     }
     const inspection = await this.pages.inspectAction(tabId, action);
-    if (epoch !== this.controlEpoch || this.snapshot.state !== 'running' || this.snapshot.taskSpace?.owner !== 'agent') return { ok: false, message: 'Browser control changed before the action could run.' };
+    if (epoch !== this.controlEpoch || this.snapshot.state !== 'running' || this.snapshot.taskSpace?.owner !== 'agent') return { ok: false, message: `Browser control changed before the action could run (${BROWSER_REASON_CODES.userTakeoverActive}).` };
     if (inspection.credential) {
-      return this.requestTakeover(tabId, inspection.target, 'Credential entry must be completed by the user. Poppin does not read or operate the field.');
+      return this.requestTakeover(tabId, inspection.target, `Credential entry must be completed by the user. Poppin does not read or operate the field (${BROWSER_REASON_CODES.credentialAccessBlocked}).`);
     }
     if (inspection.takeover) return this.requestTakeover(tabId, inspection.target, inspection.takeover);
     if (inspection.consequential) return this.requestApproval(tabId, action, inspection.target, inspection.consequential);
@@ -392,7 +394,7 @@ export class BrowserAgentEngine {
     if (steps.length === 0 || steps.length > 20) return { ok: false, message: 'A browser batch requires 1–20 reviewed steps.' };
     const finalStep = steps.at(-1);
     if (finalStep?.action !== 'read' && finalStep?.action !== 'assert') return { ok: false, message: 'End each browser batch with read or assert verification.' };
-    if (this.latestSnapshotByTab.get(tabId) !== snapshotId) return { ok: false, message: 'The batch snapshot is stale. Read the page again.' };
+    if (this.latestSnapshotByTab.get(tabId) !== snapshotId) return { ok: false, message: `The batch snapshot is stale. Read the page again (${BROWSER_REASON_CODES.snapshotStale}).` };
     this.pendingBatch = { taskSpaceId, tabId, snapshotId, steps: steps.map((step) => ({ ...step })), index: 0, results: [] };
     return await this.continueBatch();
   }

@@ -10,6 +10,7 @@ Read [docs/DEVELOPMENT_GUIDE.md](docs/DEVELOPMENT_GUIDE.md) before changing this
 - Context is explicit and inspectable. Browser automation is visible, task-scoped, and approval-gated.
 - Reuse the existing main-process engines and narrow IPC contracts. Do not add broad renderer-to-main access.
 - One workspace and one active task are deliberate MVP constraints.
+- Poppin decides the required environment before the agent starts. The user must never need a phrase like "use browser", and Poppin must never advertise a capability the selected harness cannot actually receive.
 - Do not add product features beyond an approved roadmap phase or explicit user request.
 
 ## Change discipline
@@ -17,12 +18,14 @@ Read [docs/DEVELOPMENT_GUIDE.md](docs/DEVELOPMENT_GUIDE.md) before changing this
 1. Inspect the affected engine, shared contract, renderer component, and existing tests before editing.
 2. Prefer small, cohesive changes. Update `POPPIN_MVP_ROADMAP.md` only for meaningful approved decisions or user feedback.
 3. Add or adjust tests at the appropriate level. Run `npm run lint`, `npm run typecheck`, and `npm test`.
-4. For browser-shell, Electron, packaging, or visual behavior, also run the Node 22 packaged smoke flow documented in the development guide.
+4. For browser-shell, Electron, packaging, or visual behavior, also run the Node 22 packaged smoke flow documented in the development guide. Local DMG builds are documented in [docs/BUILD_DMG.md](docs/BUILD_DMG.md).
 5. Do not push, open a PR, merge, or replace the stable DMG unless the user explicitly asks for release/deploy work.
 
 ## Fast orientation
 
-- `src/main/` owns Electron, persistence, engines, permissions, task lifecycle, and Codex app-server integration.
+- `src/main/` owns Electron, persistence, engines, permissions, and task lifecycle.
+- `src/main/agent/` is the harness boundary (`AgentAdapter`). Codex app-server and ACP live behind it; nothing above it may assume a specific harness. See `docs/architecture/ACP_TANDEM_BROWSER_PLAN.md`.
+- `src/main/tandem/` connects to the Tandem application over its REST API. Poppin hosts Tandem, it never re-implements or duplicates it.
 - `src/shared/` owns typed IPC snapshots and command contracts.
 - `src/preload/index.ts` exposes the narrow renderer bridge.
 - `src/renderer/` owns the React shell only.

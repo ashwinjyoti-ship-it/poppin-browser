@@ -913,3 +913,16 @@ body.pane-is-resizing * { cursor: col-resize !important; user-select: none !impo
 .agent-tabs-entry-label { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .agent-tabs-entry-count { display: grid; place-items: center; flex: 0 0 auto; min-width: 17px; height: 17px; border-radius: 9px; color: white; background: #d78421; font-size: 10px; }
 .agent-tabs-entry-active { box-shadow: inset 0 0 0 1px rgba(210, 132, 31, .25); background: #ffeed2; }
+
+/* Tandem: left-pane context source and the Tandem World surface button. */
+.tandem-section .section-subheading { display: block; margin: 10px 0 4px; color: #a69a8d; font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.tandem-field { display: block; margin-bottom: 8px; }
+.tandem-field > span { display: block; margin-bottom: 4px; color: #6f665d; font-size: 11px; font-weight: 600; }
+.tandem-field input,
+.tandem-field select { width: 100%; height: 30px; padding: 0 9px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: #34302b; font: inherit; font-size: 12px; }
+.tandem-actions { display: flex; gap: 8px; margin-top: 8px; }
+.tandem-search { display: grid; grid-template-columns: 16px minmax(0, 1fr); align-items: center; gap: 7px; height: 30px; margin-bottom: 8px; padding: 0 9px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: #988f86; }
+.tandem-search input { min-width: 0; border: 0; outline: 0; background: transparent; color: #34302b; font: inherit; font-size: 12px; }
+.tandem-world-button { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; height: 36px; margin-top: auto; border: 1px solid rgba(210, 136, 45, .3); border-radius: 10px; color: #7b4b16; background: #fff6e8; font: 650 12px/1 inherit; }
+.tandem-world-button:hover:not(:disabled) { background: #ffeed2; }
+.tandem-world-button:disabled { opacity: .5; }

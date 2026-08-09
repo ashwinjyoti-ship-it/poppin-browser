@@ -6,6 +6,7 @@ import type { WorkspaceCommand, WorkspaceSnapshot } from '../../shared/workspace
 import type { TaskCommand, TaskCommandResult, TaskSnapshot } from '../../shared/task';
 import type { BrowserAgentCommand, BrowserAgentCommandResult, BrowserAgentSnapshot } from '../../shared/browser-agent';
 import type { PagesCommand, PagesSnapshot } from '../../shared/pages';
+import { EMPTY_TANDEM_SNAPSHOT, type TandemCommand, type TandemSnapshot } from '../../shared/tandem';
 import { Brand } from './Brand';
 import { BrowserToolbar } from './BrowserToolbar';
 import { TabStrip } from './TabStrip';
@@ -52,6 +53,7 @@ export function App() {
   const [taskSnapshot, setTaskSnapshot] = useState<TaskSnapshot>(EMPTY_TASK);
   const [browserAgentSnapshot, setBrowserAgentSnapshot] = useState<BrowserAgentSnapshot>(EMPTY_BROWSER_AGENT);
   const [pagesSnapshot, setPagesSnapshot] = useState<PagesSnapshot>(EMPTY_PAGES);
+  const [tandemSnapshot, setTandemSnapshot] = useState<TandemSnapshot>(EMPTY_TANDEM_SNAPSHOT);
   const [pagesRevision, setPagesRevision] = useState(0);
   const [commandCollapsed, setCommandCollapsed] = useState(false);
   const [commandOverlayHeight, setCommandOverlayHeight] = useState(0);
@@ -119,6 +121,12 @@ export function App() {
       setPagesSnapshot(nextSnapshot);
       setPagesRevision((value) => value + 1);
     });
+    void window.poppinTandem.getSnapshot().then((initialSnapshot) => {
+      if (mounted) setTandemSnapshot(initialSnapshot);
+    });
+    const unsubscribeTandem = window.poppinTandem.subscribe((nextSnapshot) => {
+      if (mounted) setTandemSnapshot(nextSnapshot);
+    });
     const unsubscribeFocus = window.poppinBrowser.onFocusAddress(() => {
       addressInputRef.current?.focus();
       addressInputRef.current?.select();
@@ -130,6 +138,7 @@ export function App() {
       unsubscribeTask();
       unsubscribeBrowserAgent();
       unsubscribePages();
+      unsubscribeTandem();
       unsubscribeFocus();
     };
   }, []);
@@ -204,6 +213,15 @@ export function App() {
       return result.ok ? null : result.message ?? 'Poppin could not update Pages.';
     } catch {
       return 'Poppin could not update Pages.';
+    }
+  };
+
+  const sendTandemCommand = async (command: TandemCommand): Promise<string | null> => {
+    try {
+      const result = await window.poppinTandem.command(command);
+      return result.ok ? null : result.message ?? 'Poppin could not complete that Tandem action.';
+    } catch {
+      return 'Poppin could not reach Tandem.';
     }
   };
 
@@ -314,6 +332,8 @@ export function App() {
         onCreate={(name) => sendWorkspaceCommand({ type: 'createWorkspace', name })}
         onCommand={sendWorkspaceCommand}
         onPagesCommand={sendPagesCommand}
+        tandem={tandemSnapshot}
+        onTandemCommand={sendTandemCommand}
       />
       <ContextPane
         collapsed={visibleContextCollapsed}
@@ -333,6 +353,11 @@ export function App() {
         onBrowserAgentCommand={sendBrowserAgentCommand}
         section={visibleContextSection}
         onSectionChange={setContextSection}
+        tandem={tandemSnapshot}
+        onOpenTandemWorld={() => {
+          void sendPagesCommand({ type: 'deactivateTabs' });
+          void sendTandemCommand({ type: 'openWorld' });
+        }}
       />
       {!workspaceCollapsed ? (
         <PaneResizer

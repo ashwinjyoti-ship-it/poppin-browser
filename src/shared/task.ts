@@ -1,3 +1,5 @@
+import type { AgentControlSupport, AgentHarnessDescriptor, AgentHarnessId, AgentModelOption } from './agent';
+
 export const TASK_CHANNELS = {
   command: 'task:command',
   getSnapshot: 'task:get-snapshot',
@@ -6,17 +8,12 @@ export const TASK_CHANNELS = {
 
 export type TaskState = 'Running' | 'Needs Approval' | 'Completed' | 'Failed' | 'Cancelled' | 'Discarded';
 export type TaskKind = 'work' | 'code';
+/** Connection state of the selected agent harness, whatever that harness is. */
 export type CodexConnectionState = 'checking' | 'ready' | 'notInstalled' | 'signedOut' | 'error';
 export type TaskBrowserRunState = 'not-required' | 'awaiting-action' | 'retrying' | 'action-observed' | 'completed' | 'incomplete';
 
-export interface CodexModelSnapshot {
-  id: string;
-  name: string;
-  description: string;
-  reasoningEfforts: string[];
-  defaultReasoningEffort: string;
-  isDefault: boolean;
-}
+/** @deprecated Naming kept for compatibility; models are harness-agnostic. */
+export type CodexModelSnapshot = AgentModelOption;
 
 export interface TaskProgressSnapshot {
   id: string;
@@ -79,19 +76,39 @@ export interface TaskRecordSnapshot {
   updatedAt: string;
 }
 
+export interface TaskConnectionSnapshot {
+  state: CodexConnectionState;
+  message: string;
+  accountLabel: string | null;
+  models: AgentModelOption[];
+  /** The harness Poppin is currently driving. */
+  agent?: AgentHarnessDescriptor;
+  /** Every harness the user can pick in the Agent selector. */
+  availableAgents?: AgentHarnessDescriptor[];
+  /** Which selectors this harness actually supports; never assume both. */
+  controls?: AgentControlSupport;
+}
+
 export interface TaskSnapshot {
-  connection: {
-    state: CodexConnectionState;
-    message: string;
-    accountLabel: string | null;
-    models: CodexModelSnapshot[];
-  };
+  connection: TaskConnectionSnapshot;
   task: TaskRecordSnapshot | null;
 }
 
 export type TaskCommand =
   | { type: 'refreshConnection' }
-  | { type: 'startTask'; prompt: string; model: string; reasoningEffort: string; kind: TaskKind }
+  | { type: 'selectAgent'; agentId: AgentHarnessId }
+  | {
+      type: 'startTask';
+      prompt: string;
+      model: string;
+      reasoningEffort: string;
+      kind: TaskKind;
+      /**
+       * Answer to Poppin's "does this need live web access?" question. Omitted
+       * means Poppin should ask when it is genuinely uncertain.
+       */
+      useBrowser?: boolean;
+    }
   | { type: 'continueTask'; prompt: string }
   | { type: 'respondApproval'; decision: 'accept' | 'decline' | 'cancel' }
   | { type: 'respondQuestion'; answer: string }
@@ -109,6 +126,8 @@ export type TaskCommand =
 export interface TaskCommandResult {
   ok: boolean;
   message?: string;
+  /** Poppin needs a decision before it can provision the environment. */
+  question?: { kind: 'browser'; text: string };
 }
 
 export interface PoppinTaskApi {
