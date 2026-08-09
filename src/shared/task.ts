@@ -97,7 +97,18 @@ export interface TaskSnapshot {
 export type TaskCommand =
   | { type: 'refreshConnection' }
   | { type: 'selectAgent'; agentId: AgentHarnessId }
-  | { type: 'startTask'; prompt: string; model: string; reasoningEffort: string; kind: TaskKind }
+  | {
+      type: 'startTask';
+      prompt: string;
+      model: string;
+      reasoningEffort: string;
+      kind: TaskKind;
+      /**
+       * Answer to Poppin's "does this need live web access?" question. Omitted
+       * means Poppin should ask when it is genuinely uncertain.
+       */
+      useBrowser?: boolean;
+    }
   | { type: 'continueTask'; prompt: string }
   | { type: 'respondApproval'; decision: 'accept' | 'decline' | 'cancel' }
   | { type: 'respondQuestion'; answer: string }
@@ -115,6 +126,8 @@ export type TaskCommand =
 export interface TaskCommandResult {
   ok: boolean;
   message?: string;
+  /** Poppin needs a decision before it can provision the environment. */
+  question?: { kind: 'browser'; text: string };
 }
 
 export interface PoppinTaskApi {

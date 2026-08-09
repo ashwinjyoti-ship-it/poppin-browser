@@ -13,9 +13,11 @@ describe('task capability inference', () => {
   });
 
   it('identifies project changes and consequential delivery separately', () => {
-    expect(inferTaskRequirements('Fix this UI and create a pull request.', true)).toEqual({
+    expect(inferTaskRequirements('Fix this UI and create a pull request.', true)).toMatchObject({
       kind: 'code', browserUse: false, modifiesProject: true, consequentialActions: ['create a pull request'],
     });
+    expect(inferTaskRequirements('Fix this UI and create a pull request.', true).plan.capabilities)
+      .toEqual(expect.arrayContaining(['local_project', 'filesystem']));
   });
 
   it('detects requests for visible browser use', () => {

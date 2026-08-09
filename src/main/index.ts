@@ -148,6 +148,15 @@ async function createWindow(): Promise<void> {
       ok: false, message: 'Controlled browser use is not ready.',
     },
     getPageContexts: () => pagesStore ? selectedPageContexts(pagesStore) : [],
+    // The page the user is looking at. Lets the capability router tell
+    // "act on this open page" apart from "go and research something".
+    getActiveBrowsableTabId: () => {
+      const snapshot = browserEngine?.getSnapshot();
+      if (!snapshot) return null;
+      const tab = snapshot.tabs.find((candidate) => candidate.id === snapshot.activeTabId);
+      if (!tab || tab.taskSpaceId || !/^https?:\/\//i.test(tab.url)) return null;
+      return tab.id;
+    },
     querySelectedDatabase: (databaseId, limit) => {
       if (!pagesStore) throw new Error('Pages storage is not ready.');
       return querySelectedDatabase(pagesStore, databaseId, limit);
