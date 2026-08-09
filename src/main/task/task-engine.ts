@@ -260,6 +260,8 @@ export class TaskEngine {
     } catch (error) {
       await adapter.close();
       this.adapter = null;
+      // A harness that failed to connect must not leave stale capabilities behind.
+      this.agentCapabilities = { clientTools: false, resumeSession: false };
       const message = error instanceof Error ? error.message : `Poppin could not connect to ${descriptor.name}.`;
       if (error instanceof AgentNotInstalledError) this.setConnection('notInstalled', message, null, []);
       else if (error instanceof AgentSignedOutError) this.setConnection('signedOut', message, null, []);
