@@ -121,17 +121,6 @@ async function createWindow(): Promise<void> {
   await mkdir(workDirectory, { recursive: true });
   taskEngine = new TaskEngine(mainWindow, taskStore, workspaceStore, git, {
     workDirectory,
-    onResultReady: (task) => {
-      pagesStore?.appendTaskTurn({
-        threadId: task.documentId,
-        turnId: task.turnId,
-        prompt: task.prompt,
-        result: task.result,
-        createdAt: task.updatedAt,
-        sources: task.browserRun.sources,
-      });
-      pagesEngine?.refresh();
-    },
     onTaskEnded: (outcome) => {
       if (outcome === 'completed') browserAgentEngine?.complete();
       else void browserAgentEngine?.execute({ type: 'stop' });
@@ -195,18 +184,6 @@ async function createWindow(): Promise<void> {
       return `Applied the anchored replacement and resolved comment ${comment.id}.`;
     },
   });
-  const restoredTask = taskEngine.getSnapshot().task;
-  if (restoredTask?.result && ['Completed', 'Needs Approval'].includes(restoredTask.state)) {
-    pagesStore.appendTaskTurn({
-      threadId: restoredTask.documentId,
-      turnId: restoredTask.turnId,
-      prompt: restoredTask.prompt,
-      result: restoredTask.result,
-      createdAt: restoredTask.updatedAt,
-      sources: restoredTask.browserRun.sources,
-    });
-    pagesEngine.refresh();
-  }
   browserEngine.restore(persisted);
   void tandemEngine.initialize();
   await browserAgentEngine.restore();

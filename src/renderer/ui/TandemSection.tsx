@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Database, FileText, Folder, RefreshCw, Search, Shapes } from 'lucide-react';
 
-import type { TandemCommand, TandemPageSnapshot, TandemSnapshot } from '../../shared/tandem';
+import type { TandemCommand, TandemContextSnapshot, TandemPageSnapshot, TandemSnapshot } from '../../shared/tandem';
 
 interface TandemSectionProps {
   snapshot: TandemSnapshot;
@@ -60,7 +60,7 @@ export function TandemSection({ snapshot, onCommand }: TandemSectionProps) {
     );
   }
 
-  const selectedIds = new Set(snapshot.selected.map((item) => item.pageId));
+  const selectedById = new Map(snapshot.selected.map((item) => [item.pageId, item]));
   const results = snapshot.searchQuery.trim() ? snapshot.searchResults : null;
   const tree = snapshot.pages.filter((page) => page.kind !== 'folder' || snapshot.pages.some((child) => child.parentId === page.id));
 
@@ -95,16 +95,16 @@ export function TandemSection({ snapshot, onCommand }: TandemSectionProps) {
         {results ? (
           results.length === 0
             ? <span className="section-empty">No Tandem pages matched.</span>
-            : results.map((page) => <TandemRow key={page.id} page={page} checked={selectedIds.has(page.id)} busy={busy} onToggle={(selected) => { void run({ type: 'setPageSelected', pageId: page.id, selected }); }} onOpen={() => { void run({ type: 'openWorld', pageId: page.id }); }} />)
+            : results.map((page) => <TandemRow key={page.id} page={page} context={selectedById.get(page.id)} busy={busy} onToggle={(selected) => { void run({ type: 'setPageSelected', pageId: page.id, selected }); }} onOpen={() => { void run({ type: 'openWorld', pageId: page.id }); }} />)
         ) : (
           <>
             {snapshot.recent.length ? <span className="section-subheading">Recent</span> : null}
             {snapshot.recent.slice(0, 6).map((page) => (
-              <TandemRow key={`recent-${page.id}`} page={page} checked={selectedIds.has(page.id)} busy={busy} onToggle={(selected) => { void run({ type: 'setPageSelected', pageId: page.id, selected }); }} onOpen={() => { void run({ type: 'openWorld', pageId: page.id }); }} />
+              <TandemRow key={`recent-${page.id}`} page={page} context={selectedById.get(page.id)} busy={busy} onToggle={(selected) => { void run({ type: 'setPageSelected', pageId: page.id, selected }); }} onOpen={() => { void run({ type: 'openWorld', pageId: page.id }); }} />
             ))}
             {tree.length ? <span className="section-subheading">Pages</span> : null}
             {tree.slice(0, 200).map((page) => (
-              <TandemRow key={page.id} page={page} checked={selectedIds.has(page.id)} busy={busy} onToggle={(selected) => { void run({ type: 'setPageSelected', pageId: page.id, selected }); }} onOpen={() => { void run({ type: 'openWorld', pageId: page.id }); }} />
+              <TandemRow key={page.id} page={page} context={selectedById.get(page.id)} busy={busy} onToggle={(selected) => { void run({ type: 'setPageSelected', pageId: page.id, selected }); }} onOpen={() => { void run({ type: 'openWorld', pageId: page.id }); }} />
             ))}
             {tree.length === 0 && snapshot.recent.length === 0 ? <span className="section-empty">This Tandem workspace has no pages yet.</span> : null}
           </>
@@ -115,23 +115,34 @@ export function TandemSection({ snapshot, onCommand }: TandemSectionProps) {
   );
 }
 
-function TandemRow({ page, checked, busy, onToggle, onOpen }: {
+function TandemRow({ page, context, busy, onToggle, onOpen }: {
   page: TandemPageSnapshot;
-  checked: boolean;
+  context?: TandemContextSnapshot;
   busy: boolean;
   onToggle: (selected: boolean) => void;
   onOpen: () => void;
 }) {
   const selectable = page.kind === 'page' || page.kind === 'database';
   return (
-    <div className="document-row">
-      <label className={`selection-row ${selectable ? '' : 'selection-row-disabled'}`}>
-        <input type="checkbox" checked={checked} disabled={busy || !selectable} onChange={(event) => onToggle(event.target.checked)} />
-        <PageIcon kind={page.kind} />
-        <span>{page.icon ? `${page.icon} ` : ''}{page.title}</span>
-      </label>
-      <span />
-      <button type="button" onClick={onOpen} aria-label={`Open ${page.title} in Tandem World`} title="Open in Tandem World">↗</button>
+    <div>
+      <div className="document-row">
+        <label className={`selection-row ${selectable ? '' : 'selection-row-disabled'}`}>
+          <input type="checkbox" checked={Boolean(context)} disabled={busy || !selectable} onChange={(event) => onToggle(event.target.checked)} />
+          <PageIcon kind={page.kind} />
+          <span>{page.icon ? `${page.icon} ` : ''}{page.title}</span>
+        </label>
+        <span />
+        <button type="button" onClick={onOpen} aria-label={`Open ${page.title} in Tandem World`} title="Open in Tandem World">↗</button>
+      </div>
+      {context ? (
+        <div className="context-preview">
+          <pre>{context.capturedMarkdown || '(Empty Tandem page)'}</pre>
+          <span className="context-note">
+            Frozen {new Date(context.capturedAt).toLocaleString()}.{context.stale ? ' This snapshot could not be refreshed.' : ''}
+            {context.truncated ? ' Captured at the 60,000-character limit.' : ''}
+          </span>
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { BrowserToolbar } from '../src/renderer/ui/BrowserToolbar';
 import { TabStrip } from '../src/renderer/ui/TabStrip';
 import { CommandBar } from '../src/renderer/ui/CommandBar';
-import { ContextPane } from '../src/renderer/ui/ContextPane';
+import { TaskTabView } from '../src/renderer/ui/TaskTabView';
 import { PaneResizer } from '../src/renderer/ui/PaneResizer';
 import { DEFAULT_BROWSER_SETTINGS, type BrowserTabSnapshot } from '../src/shared/browser';
 import type { TaskSnapshot } from '../src/shared/task';
@@ -182,6 +182,59 @@ describe('browser chrome', () => {
     expect(screen.getByRole('button', { name: /expand research tab group/i })).toHaveAttribute('aria-expanded', 'false');
   });
 
+  it('tints the task tab like the agent-owned browsing tabs and keeps it closable', async () => {
+    const user = userEvent.setup();
+    const onActivate = vi.fn();
+    const onClose = vi.fn();
+    const { container } = render(
+      <TabStrip
+        tabs={[
+          { id: 'agent-ctx', title: 'Docs', kind: 'browser', taskSpaceId: 'space-1' },
+          { id: 'task-reply', title: 'Reply', kind: 'task', taskKind: 'work', taskSpaceId: 'space-1' },
+        ]}
+        groups={[]}
+        activeTabId="task-reply"
+        onActivate={onActivate}
+        onClose={onClose}
+        onCreate={vi.fn()}
+        onReorder={vi.fn()}
+        onShowTabMenu={vi.fn()}
+        onToggleGroup={vi.fn()}
+        onRenameGroup={vi.fn()}
+        onShowGroupMenu={vi.fn()}
+      />,
+    );
+    const tabs = container.querySelectorAll('.tab-agent');
+    expect(tabs).toHaveLength(2);
+    const closeButton = screen.getByRole('button', { name: /close reply/i });
+    await user.click(closeButton);
+    expect(onClose).toHaveBeenCalledWith('task-reply');
+  });
+
+  it('offers a pinned Tandem World launcher independent of the tab list', async () => {
+    const user = userEvent.setup();
+    const onOpenTandemWorld = vi.fn();
+    render(
+      <TabStrip
+        tabs={[TAB]}
+        groups={[]}
+        activeTabId={TAB.id}
+        onActivate={vi.fn()}
+        onClose={vi.fn()}
+        onCreate={vi.fn()}
+        onReorder={vi.fn()}
+        onShowTabMenu={vi.fn()}
+        onToggleGroup={vi.fn()}
+        onRenameGroup={vi.fn()}
+        onShowGroupMenu={vi.fn()}
+        tandemReady
+        onOpenTandemWorld={onOpenTandemWorld}
+      />,
+    );
+    await user.click(screen.getByRole('button', { name: /open tandem world/i }));
+    expect(onOpenTandemWorld).toHaveBeenCalledOnce();
+  });
+
   it('reflects navigation availability and submits the address form', async () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn((event: React.FormEvent) => event.preventDefault());
@@ -316,7 +369,7 @@ describe('Codex controls', () => {
     expect(onCommand).toHaveBeenCalledWith({ type: 'continueTask', prompt: 'Tell me more' });
   });
 
-  it('shows exactly what an approval will allow', async () => {
+  it('shows exactly what an approval will allow, in the task tab', async () => {
     const user = userEvent.setup();
     const onCommand = vi.fn().mockResolvedValue({ ok: true });
     const snapshot: TaskSnapshot = {
@@ -330,29 +383,27 @@ describe('Codex controls', () => {
         createdAt: '', updatedAt: '',
       },
     };
-    render(<ContextPane collapsed={false} snapshot={EMPTY_WORKSPACE} taskSnapshot={snapshot} onCollapseChange={vi.fn()} onRefreshTab={vi.fn()} onTaskCommand={onCommand} onOpenResult={vi.fn()} />);
-    await user.click(screen.getByRole('button', { name: /^task/i }));
+    render(<TaskTabView taskSnapshot={snapshot} workspace={EMPTY_WORKSPACE} onTaskCommand={onCommand} />);
     expect(screen.getByText('npm test', { exact: false })).toBeVisible();
     await user.click(screen.getByRole('button', { name: /allow once/i }));
     expect(onCommand).toHaveBeenCalledWith({ type: 'respondApproval', decision: 'accept' });
   });
 
-  it('keeps completed Work prose out of the activity pane because Tandem renders it', async () => {
-    const user = userEvent.setup();
+  it('renders a completed Work reply once, without duplicating it as live progress', () => {
     const snapshot: TaskSnapshot = {
       ...READY_TASK,
       task: {
         state: 'Completed', kind: 'work', prompt: 'Research guitars', model: 'gpt-test', reasoningEffort: 'high',
         documentId: 'document-1', threadId: 'thread-1', turnId: 'turn-1', baselineCommit: '', pendingApproval: null,
-        progress: [{ id: 'message-1', kind: 'message', title: 'Codex response', detail: '| Guitar | Price |', status: 'completed' }],
-        result: '| Guitar | Price |', diff: '', error: null,
+        progress: [{ id: 'message-1', kind: 'message', title: 'Codex response', detail: 'Guitar options', status: 'completed' }],
+        result: '# Guitar options\n\nHere is the shortlist.', diff: '', error: null,
         browserRun: { required: true, state: 'completed', taskSpaceId: 'space-1', successfulActionCount: 1, retryCount: 0, lastActionAt: '', sources: [] },
         createdAt: '', updatedAt: '',
       },
     };
-    render(<ContextPane collapsed={false} snapshot={EMPTY_WORKSPACE} taskSnapshot={snapshot} onCollapseChange={vi.fn()} onRefreshTab={vi.fn()} onTaskCommand={vi.fn()} onOpenResult={vi.fn()} />);
-    await user.click(screen.getByRole('button', { name: /^task/i }));
-    expect(screen.queryByText('| Guitar | Price |')).not.toBeInTheDocument();
-    expect(screen.getByText(/formatted in the active Tandem page/i)).toBeVisible();
+    render(<TaskTabView taskSnapshot={snapshot} workspace={EMPTY_WORKSPACE} onTaskCommand={vi.fn()} />);
+    expect(screen.getByRole('heading', { name: /guitar options/i })).toBeVisible();
+    expect(screen.queryByText('Codex response')).not.toBeInTheDocument();
+    expect(screen.queryByText(/tandem/i)).not.toBeInTheDocument();
   });
 });

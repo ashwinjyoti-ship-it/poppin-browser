@@ -1,41 +1,40 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import {
-  clampResizedPaneWidth,
-  DEFAULT_PANE_WIDTHS,
-  loadPaneWidths,
-  normalizePaneWidths,
-  savePaneWidths,
+  clampResizedLeftPaneWidth,
+  DEFAULT_LEFT_PANE_WIDTH,
+  loadLeftPaneWidth,
+  normalizeLeftPaneWidth,
+  saveLeftPaneWidth,
 } from '../src/renderer/ui/pane-layout';
 
-describe('resizable pane layout', () => {
-  it('preserves default widths when the browser has enough room', () => {
-    expect(normalizePaneWidths(DEFAULT_PANE_WIDTHS, 1440)).toEqual(DEFAULT_PANE_WIDTHS);
+describe('resizable left pane layout', () => {
+  it('preserves the default width when the browser has enough room', () => {
+    expect(normalizeLeftPaneWidth(DEFAULT_LEFT_PANE_WIDTH, 1440)).toBe(DEFAULT_LEFT_PANE_WIDTH);
   });
 
-  it('shrinks panes together to preserve the central browser on a narrow window', () => {
-    const widths = normalizePaneWidths(DEFAULT_PANE_WIDTHS, 900);
-    expect(widths.left).toBeGreaterThanOrEqual(240);
-    expect(widths.right).toBeGreaterThanOrEqual(260);
-    expect(widths.left + widths.right).toBeLessThanOrEqual(528);
+  it('shrinks the pane to preserve the central browser on a narrow window', () => {
+    const width = normalizeLeftPaneWidth(DEFAULT_LEFT_PANE_WIDTH, 500);
+    expect(width).toBeGreaterThanOrEqual(240);
+    expect(width).toBeLessThanOrEqual(DEFAULT_LEFT_PANE_WIDTH);
   });
 
   it('clamps a dragged pane against its own limits and the browser minimum', () => {
-    expect(clampResizedPaneWidth('left', 100, 1440, 316)).toBe(240);
-    expect(clampResizedPaneWidth('left', 900, 1000, 316)).toBe(312);
-    expect(clampResizedPaneWidth('right', 900, 1600, 286)).toBe(520);
+    expect(clampResizedLeftPaneWidth(100, 1440)).toBe(240);
+    expect(clampResizedLeftPaneWidth(900, 1000)).toBe(480);
+    expect(clampResizedLeftPaneWidth(900, 600)).toBe(240);
   });
 
-  it('loads only finite widths and falls back safely for corrupt storage', () => {
-    expect(loadPaneWidths({ getItem: () => '{bad json' })).toEqual(DEFAULT_PANE_WIDTHS);
-    expect(loadPaneWidths({ getItem: () => JSON.stringify({ left: 320, right: 410 }) })).toEqual({ left: 320, right: 410 });
-    expect(loadPaneWidths({ getItem: () => JSON.stringify({ left: 'wide', right: 410 }) })).toEqual(DEFAULT_PANE_WIDTHS);
+  it('loads only a finite width and falls back safely for corrupt storage', () => {
+    expect(loadLeftPaneWidth({ getItem: () => '{bad json' })).toBe(DEFAULT_LEFT_PANE_WIDTH);
+    expect(loadLeftPaneWidth({ getItem: () => JSON.stringify(320) })).toBe(320);
+    expect(loadLeftPaneWidth({ getItem: () => JSON.stringify('wide') })).toBe(DEFAULT_LEFT_PANE_WIDTH);
   });
 
-  it('persists both preferred widths without making storage mandatory', () => {
+  it('persists the preferred width without making storage mandatory', () => {
     const setItem = vi.fn();
-    savePaneWidths({ setItem }, { left: 330, right: 370 });
-    expect(setItem).toHaveBeenCalledWith('poppin:pane-widths:v1', '{"left":330,"right":370}');
-    expect(() => savePaneWidths({ setItem: () => { throw new Error('blocked'); } }, DEFAULT_PANE_WIDTHS)).not.toThrow();
+    saveLeftPaneWidth({ setItem }, 330);
+    expect(setItem).toHaveBeenCalledWith('poppin:pane-width:v2', '330');
+    expect(() => saveLeftPaneWidth({ setItem: () => { throw new Error('blocked'); } }, DEFAULT_LEFT_PANE_WIDTH)).not.toThrow();
   });
 });

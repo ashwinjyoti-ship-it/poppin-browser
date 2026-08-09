@@ -66,7 +66,7 @@ Electron main process (src/main/index.ts)
 | Path | Owns |
 | --- | --- |
 | `src/main/browser/browser-engine.ts` | tab lifecycle, navigation, tab grouping/order, browser settings, view layout, favicon state, and persistence scheduling |
-| `src/main/browser/internal-pages.ts` | trusted `poppin://` pages, including the current task result page |
+| `src/main/browser/internal-pages.ts` | trusted `poppin://` pages (new tab, navigation error) |
 | `src/main/browser/permissions.ts` | browser permission allowlist |
 | `src/main/browser/browser-agent-engine.ts` | tab-scoped controlled browsing, approval gates, logs, pause/takeover/teardown |
 | `src/main/workspace/workspace-engine.ts` | workspace, documents, captured tab context, project connection, and visual selection |
@@ -76,7 +76,8 @@ Electron main process (src/main/index.ts)
 | `src/renderer/ui/App.tsx` | shell composition, pane state/layout, snapshot subscriptions, and command routing |
 | `src/renderer/ui/TabStrip.tsx` | tab and group interaction UI |
 | `src/renderer/ui/WorkspacePane.tsx` | left-pane workspace UI |
-| `src/renderer/ui/ContextPane.tsx` | right-pane Context, Task/Approval, and Result UI |
+| `src/renderer/ui/TaskTabView.tsx` | task tab's live progress/approval, Work reply, and Code review UI |
+| `src/renderer/ui/AgentDock.tsx` | floating status dock for approvals and running-task/browser-use status, reachable from any tab |
 | `src/renderer/ui/CommandBar.tsx` | bottom task-entry and preflight UI |
 | `src/renderer/styles.css` | Poppin visual tokens, responsive browser chrome, pane and tab styling |
 
@@ -98,24 +99,24 @@ These rules are non-negotiable:
 - Authentication happens only in Poppin’s persistent browser partition and is performed by the user.
 - Authentication popups open as sandboxed, task-independent overlay windows that preserve the website's opener relationship. Poppin displays a Cancel control but receives no credential-field access.
 - With “Follow website; preview other sites,” ordinary same-site links navigate normally while cross-site links open in an Arc-style Peek overlay. The user can close the preview or promote it to a full tab without losing the source page.
-- Browser-use Work tasks open their isolated Agent Tabs in live view immediately. Poppin follows the active task-owned tab while the user is watching; selecting a normal tab leaves live view without pausing Codex, and “Agent Tabs” returns to the current live page. The thread's native Tandem task Page opens only after the browser turn completes.
+- Browser-use Work tasks open their isolated Agent Tabs in live view immediately. Poppin follows the active task-owned tab while the user is watching; selecting a normal tab leaves live view without pausing Codex, and “Agent Tabs” returns to the current live page. The task's dedicated tab (grouped with its Agent Tabs) shows live progress while the turn runs and switches to the reply/review once it completes.
 - Web content has no privileged Poppin API access.
 - User-entered addresses are restricted to HTTP(S). Do not open arbitrary custom schemes from the address bar.
 - Explicitly asking for browser use grants ordinary visible actions inside that task's Agent Tabs. Selected tabs, documents, or visual selections provide explicit grounding for mixed work; a browser-only task receives only a fresh exploration tab. Credential forms and critical actions pause for exact approval; reversible draft creation and saving do not.
-- Task approvals must automatically make the right Task pane visible. Preserve the browser page and tab state while doing so.
+- Task approvals must remain reachable regardless of which tab is active: a new blocking approval or question switches to the task's tab once, and the floating agent dock always offers an escape hatch back to it. Preserve the browser page and tab state while doing so.
 
 ## Key interaction details and recent regressions
 
-- Every task has a stable document identity independent of its replaceable Codex thread ID. A completed turn is appended to the same persisted native Tandem Page as `task-prompt` and `task-result` blocks.
+- Every task has a stable document identity independent of its replaceable Codex thread ID. The task's reply/review is rendered live in its dedicated tab, not persisted as a cross-task document; only the current task's result is available once a new task starts.
 - Tandem's exact GFM renderer formats headings, links, emphasis, lists, code, and tables. Poppin sanitizes the generated HTML at the native renderer boundary; HTTP(S) links open in normal Poppin tabs.
-- An ordinary Work result is complete when Codex finishes. Its Tandem Page opens automatically, while the prompt bar immediately accepts a follow-up in the same conversation. Result approval remains a Code review gate, not a per-turn conversation gate.
+- An ordinary Work result is complete when Codex finishes. Its Reply tab becomes available automatically, while the prompt bar immediately accepts a follow-up in the same conversation. Result approval remains a Code review gate, not a per-turn conversation gate.
 - Assistant streaming is kept per Codex message item. A progress/preamble message can never be concatenated into the final document result.
-- A blocking task or browser approval takes precedence over the user’s collapsed/right-pane-section preference until it is resolved.
+- A blocking task or browser approval takes precedence over the user's current tab/section preference until it is resolved.
 - A critical approval is the first, sticky card in the Task view. Browser-use Work tasks start directly; do not reintroduce a generic browser-access confirmation.
 - Codex receives browser operations as task-scoped dynamic tools. Page reads return sanitized AX/DOM semantic snapshots with generation-scoped refs; raw CDP and arbitrary page JavaScript are never exposed. Batches use a reviewed action vocabulary, stop at control/approval/staleness boundaries, and must end with read or assert verification.
 - Every Work thread registers dormant browser dynamic tools so a later browser-required follow-up can reuse the same persisted Codex conversation. Because Codex currently accepts dynamic tools only on `thread/start`, a browser-required continuation after an app-server restart transparently starts a replacement tool-enabled thread and injects the resumed user/assistant message history before the new turn; stale historical Agent Tabs identifiers are removed. TaskEngine activates tools only after creating current task-owned Agent Tabs, persists the browser requirement and run state, and refuses to complete a browser-required turn until a meaningful browser action succeeds. A zero-action completion retries once with an explicit browser instruction; a second zero-action completion remains failed/incomplete with its task tabs retained.
 - Mixed Agent Tabs contain URL-seeded copies of explicitly selected tabs plus one fresh exploration tab; browser-only Agent Tabs contain only the fresh exploration tab. Source tabs are not moved or operated, Agent Tabs remain compact until Watch is chosen, and Keep tabs/Close task tabs makes completion cleanup explicit.
-- The Settings panel belongs above a collapsed right-pane rail. It needs a stacking layer above panes when open.
+- The Settings panel needs a stacking layer above the left pane and tab content when open.
 - Link-opening settings are stored synchronously in the browser engine and enforced both for website-created windows and future page clicks. Changing the setting never fails because an already-loaded page rejects script execution; the active policy is applied when each page becomes ready.
 - A tab group is a contiguous run. Normalizing only pinned tabs is insufficient: new tabs, drag/drop, restore, duplication, pinning, and group moves must not split a group.
 - A collapsed group must retain name, count, color, expand affordance, and rename affordance. Never rely on `currentColor` for a foreground/background combination that can collapse to an invisible state.

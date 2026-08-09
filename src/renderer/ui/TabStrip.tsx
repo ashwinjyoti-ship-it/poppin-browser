@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight, Database, FileText, Globe2, Pencil, Plus, TriangleAlert, X } from 'lucide-react';
+import { BookOpenText, ChevronDown, ChevronRight, Database, FileDiff, FileText, Globe2, MessageSquareText, Pencil, Plus, TriangleAlert, X } from 'lucide-react';
 import { type DragEvent, useMemo, useRef, useState } from 'react';
 
 import type { BrowserFailure, BrowserTabGroup } from '../../shared/browser';
@@ -19,12 +19,18 @@ interface TabStripProps {
   agentTaskSpace?: BrowserTaskSpace | null;
   watchingAgentTabs?: boolean;
   onWatchAgentTabs?: () => void;
+  /** Tandem World is always reachable as a pinned launcher, not a right-pane button. */
+  tandemReady?: boolean;
+  tandemMessage?: string;
+  onOpenTandemWorld?: () => void;
 }
 
 export interface TabStripTabSnapshot {
   id: string;
   title: string;
-  kind?: 'browser' | 'page' | 'database';
+  kind?: 'browser' | 'page' | 'database' | 'task';
+  /** Picks the task tab's icon: a reply bubble for Work, a diff mark for Code. */
+  taskKind?: 'work' | 'code';
   faviconUrls?: string[];
   pinned?: boolean;
   groupId?: string | null;
@@ -48,6 +54,9 @@ export function TabStrip({
   agentTaskSpace,
   watchingAgentTabs,
   onWatchAgentTabs,
+  tandemReady,
+  tandemMessage,
+  onOpenTandemWorld,
 }: TabStripProps) {
   const groupsById = useMemo(() => new Map(groups.map((group) => [group.id, group])), [groups]);
   const tabCountByGroup = useMemo(() => {
@@ -88,6 +97,18 @@ export function TabStrip({
         onDragOver={(event) => event.preventDefault()}
         onDrop={(event) => dropTab(event, null, onReorder)}
       >
+        {onOpenTandemWorld ? (
+          <button
+            type="button"
+            className="tab tab-pinned tab-tandem-world"
+            aria-label="Open Tandem World"
+            title={tandemReady ? 'Tandem World' : tandemMessage ?? 'Connect Tandem to use Tandem World'}
+            disabled={!tandemReady}
+            onClick={onOpenTandemWorld}
+          >
+            <span className="tab-icon" aria-hidden="true"><BookOpenText size={15} /></span>
+          </button>
+        ) : null}
         {agentTaskSpace ? (
           <button
             type="button"
@@ -127,15 +148,15 @@ export function TabStrip({
             ) : null,
             hideTab ? null : (
               <div
-                className={`tab ${isActive ? 'tab-active' : ''} ${tab.pinned ? 'tab-pinned' : ''}${groupClasses}`}
+                className={`tab ${isActive ? 'tab-active' : ''} ${tab.pinned ? 'tab-pinned' : ''}${(tab.taskSpaceId || tab.kind === 'task') ? ' tab-agent' : ''}${groupClasses}`}
                 key={tab.id}
                 role="tab"
                 aria-label={tab.pinned ? `${tab.title || 'Untitled'}, pinned` : group ? `${tab.title || 'Untitled'}, ${group.name} group` : undefined}
                 aria-selected={isActive}
                 tabIndex={isActive ? 0 : -1}
                 title={tab.title || 'Untitled'}
-                draggable={!tab.taskSpaceId}
-                onDragStart={(event) => { if (!tab.taskSpaceId) event.dataTransfer.setData('application/x-poppin-tab', tab.id); }}
+                draggable={!tab.taskSpaceId && tab.kind !== 'task'}
+                onDragStart={(event) => { if (!tab.taskSpaceId && tab.kind !== 'task') event.dataTransfer.setData('application/x-poppin-tab', tab.id); }}
                 onDragOver={(event) => event.preventDefault()}
                 onDrop={(event) => dropTab(event, tab.id, onReorder)}
                 onClick={() => onActivate(tab.id)}
@@ -152,7 +173,7 @@ export function TabStrip({
                 </span>
                 {tab.pinned ? null : <span className="tab-title">{tab.title || 'Untitled'}</span>}
                 {tab.isLoading ? <span className="tab-loading" aria-label="Loading" /> : null}
-                {tab.pinned || tab.taskSpaceId ? null : (
+                {tab.kind !== 'task' && (tab.pinned || tab.taskSpaceId) ? null : (
                   <button
                     className="tab-close"
                     type="button"
@@ -249,6 +270,7 @@ function TabFavicon({ tab }: { tab: TabStripTabSnapshot }) {
 
   if (tab.kind === 'page') return <FileText size={15} />;
   if (tab.kind === 'database') return <Database size={15} />;
+  if (tab.kind === 'task') return tab.taskKind === 'code' ? <FileDiff size={15} /> : <MessageSquareText size={15} />;
   if (tab.failure) return <TriangleAlert size={15} className="tab-failure-icon" />;
   const source = tab.faviconUrls?.[candidateIndex];
   if (!source) return <Globe2 size={15} />;

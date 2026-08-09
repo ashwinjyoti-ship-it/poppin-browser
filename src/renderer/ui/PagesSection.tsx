@@ -2,9 +2,11 @@ import { Brain, ChevronDown, ChevronRight, Database, FilePlus2, FileText, Plus }
 import { type ReactNode, useMemo, useState } from 'react';
 
 import type { PageKind, PageSnapshot, PagesCommand, PagesSnapshot } from '../../shared/pages';
+import type { PageContextSnapshot } from '../../shared/workspace';
 
-export function PagesSection({ snapshot, onCommand }: {
+export function PagesSection({ snapshot, pageContexts, onCommand }: {
   snapshot: PagesSnapshot;
+  pageContexts: PageContextSnapshot[];
   onCommand: (command: PagesCommand) => Promise<string | null>;
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
@@ -27,6 +29,7 @@ export function PagesSection({ snapshot, onCommand }: {
     const descendants = children.get(page.id) ?? [];
     const isExpanded = expanded.has(page.id);
     const selected = snapshot.selectedPageIds.includes(page.id);
+    const context = pageContexts.find((candidate) => candidate.pageId === page.id);
     return (
       <div key={page.id} className="page-tree-node">
         <div className="page-tree-row" style={{ paddingLeft: `${depth * 14}px` }}>
@@ -41,7 +44,7 @@ export function PagesSection({ snapshot, onCommand }: {
               return next;
             })}
           >{descendants.length ? (isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />) : <span />}</button>
-          <label className="page-context-check" title="Include in Codex context">
+          <label className="page-context-check" title="Include in agent context">
             <input type="checkbox" checked={selected} onChange={(event) => { void onCommand({ type: 'setPageSelected', pageId: page.id, selected: event.target.checked }); }} />
           </label>
           <button type="button" className="page-tree-open" onClick={() => { void onCommand({ type: 'openPage', pageId: page.id }); }}>
@@ -50,6 +53,12 @@ export function PagesSection({ snapshot, onCommand }: {
           </button>
           <button type="button" className="page-tree-add-child" aria-label={`Add child to ${page.title}`} onClick={() => { void create('page', page.id); }}><Plus size={12} /></button>
         </div>
+        {selected && context ? (
+          <div className="context-preview" style={{ marginLeft: `${depth * 14 + 26}px` }}>
+            <pre>{context.content || '(Empty page)'}</pre>
+            {context.truncated ? <span className="context-note">Captured at the 60,000-character limit.</span> : null}
+          </div>
+        ) : null}
         {isExpanded ? descendants.map((child) => renderNode(child, depth + 1)) : null}
       </div>
     );

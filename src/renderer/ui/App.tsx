@@ -11,7 +11,8 @@ import { Brand } from './Brand';
 import { BrowserToolbar } from './BrowserToolbar';
 import { TabStrip } from './TabStrip';
 import { WorkspacePane } from './WorkspacePane';
-import { ContextPane, type PaneSection } from './ContextPane';
+import { TaskTabView } from './TaskTabView';
+import { AgentDock } from './AgentDock';
 import { CommandBar } from './CommandBar';
 import { PaneResizer } from './PaneResizer';
 import { NativePageView } from './NativePageView';
@@ -20,12 +21,11 @@ import { getChromeLayout, getTitlebarLeftInset } from './chrome-layout';
 import { issueForCommand, visibleAddressIssue, type AddressIssue } from './address-issue';
 import { browserApprovalAttentionKey, taskAttentionKey } from './task-attention';
 import {
-  clampResizedPaneWidth,
-  getPaneWidthRange,
-  loadPaneWidths,
-  normalizePaneWidths,
-  savePaneWidths,
-  type PaneSide,
+  clampResizedLeftPaneWidth,
+  getLeftPaneWidthRange,
+  loadLeftPaneWidth,
+  normalizeLeftPaneWidth,
+  saveLeftPaneWidth,
 } from './pane-layout';
 
 const EMPTY_SNAPSHOT: BrowserSnapshot = {
@@ -38,6 +38,9 @@ const EMPTY_WORKSPACE: WorkspaceSnapshot = { workspace: null, documents: [], tab
 const EMPTY_TASK: TaskSnapshot = { connection: { state: 'checking', message: 'Connecting to Codex…', accountLabel: null, models: [] }, task: null };
 const EMPTY_BROWSER_AGENT: BrowserAgentSnapshot = { state: 'idle', taskId: null, taskSpace: null, watching: false, allowedTabIds: [], activeTabId: null, currentAction: null, pendingApproval: null, log: [] };
 const EMPTY_PAGES: PagesSnapshot = { pages: [], tabs: [], activeTabId: null, selectedPageIds: [] };
+const TASK_TAB_ID = 'task-reply';
+/** Fixed reserved height for the dock's chrome strip, above the command bar. Not measured — its content is small and bounded. */
+const AGENT_DOCK_RESERVED_HEIGHT = 84;
 
 export function App() {
   const [snapshot, setSnapshot] = useState<BrowserSnapshot>(EMPTY_SNAPSHOT);
@@ -45,11 +48,9 @@ export function App() {
   const [addressIssue, setAddressIssue] = useState<AddressIssue | null>(null);
   const [isEditingAddress, setIsEditingAddress] = useState(false);
   const [workspaceSnapshot, setWorkspaceSnapshot] = useState<WorkspaceSnapshot>(EMPTY_WORKSPACE);
-  // A fresh browser opens for browsing first. Work panes expand on demand or
-  // whenever an agent needs attention.
+  // A fresh browser opens for browsing first. The workspace pane expands on demand.
   const [workspaceCollapsed, setWorkspaceCollapsed] = useState(true);
-  const [contextCollapsed, setContextCollapsed] = useState(true);
-  const [contextSection, setContextSection] = useState<PaneSection>('context');
+  const [taskTabActive, setTaskTabActive] = useState(false);
   const [taskSnapshot, setTaskSnapshot] = useState<TaskSnapshot>(EMPTY_TASK);
   const [browserAgentSnapshot, setBrowserAgentSnapshot] = useState<BrowserAgentSnapshot>(EMPTY_BROWSER_AGENT);
   const [pagesSnapshot, setPagesSnapshot] = useState<PagesSnapshot>(EMPTY_PAGES);
@@ -58,36 +59,53 @@ export function App() {
   const [commandCollapsed, setCommandCollapsed] = useState(false);
   const [commandOverlayHeight, setCommandOverlayHeight] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [preferredPaneWidths, setPreferredPaneWidths] = useState(() => loadPaneWidths(window.localStorage));
+  const [preferredLeftPaneWidth, setPreferredLeftPaneWidth] = useState(() => loadLeftPaneWidth(window.localStorage));
   const [viewport, setViewport] = useState(() => ({ width: window.innerWidth, height: window.innerHeight }));
   const addressInputRef = useRef<HTMLInputElement>(null);
 
   const activeNativeTab = pagesSnapshot.tabs.find((tab) => tab.id === pagesSnapshot.activeTabId) ?? null;
   const activeNativeTabId = activeNativeTab?.id ?? null;
   const browserActiveTab = snapshot.tabs.find((tab) => tab.id === snapshot.activeTabId) ?? null;
-  const activeTab = activeNativeTab ? null : browserActiveTab;
+  const activeTab = activeNativeTab || taskTabActive ? null : browserActiveTab;
   const browserTabs = snapshot.tabs.filter((tab) => !tab.taskSpaceId || (browserAgentSnapshot.watching && tab.taskSpaceId === browserAgentSnapshot.taskSpace?.id));
+  const hasBrowserTaskSpace = Boolean(browserAgentSnapshot.taskSpace);
+  // Code tasks (and Work tasks that never used browsing) have no "watch" toggle
+  // to gate on, so their tab is simply always there.
+  const showTaskTab = Boolean(taskSnapshot.task) && (!hasBrowserTaskSpace || browserAgentSnapshot.watching || taskTabActive);
   const visibleTabs = [
     ...browserTabs.map((tab) => ({ ...tab, kind: 'browser' as const })),
+    ...(showTaskTab && taskSnapshot.task ? [{
+      id: TASK_TAB_ID,
+      title: taskSnapshot.task.kind === 'code' ? 'Review' : 'Reply',
+      kind: 'task' as const,
+      taskKind: taskSnapshot.task.kind,
+      taskSpaceId: browserAgentSnapshot.taskSpace?.id ?? 'task-only',
+    }] : []),
     ...pagesSnapshot.tabs.map((tab) => ({ id: tab.id, title: tab.title, kind: tab.kind })),
   ];
-  const activeTabId = activeNativeTab?.id ?? snapshot.activeTabId;
+  const activeTabId = taskTabActive ? TASK_TAB_ID : (activeNativeTab?.id ?? snapshot.activeTabId);
   const address = isEditingAddress ? addressDraft : activeTab?.url ?? (activeNativeTab ? `${activeNativeTab.kind}://${activeNativeTab.pageId}` : '');
   const addressError = visibleAddressIssue(addressIssue, activeTab);
   const chromeLayout = getChromeLayout(viewport.width, viewport.height);
-  const paneWidths = normalizePaneWidths(preferredPaneWidths, viewport.width);
+  const leftPaneWidth = normalizeLeftPaneWidth(preferredLeftPaneWidth, viewport.width);
+  const showAgentDock = !commandCollapsed && Boolean(taskSnapshot.task);
   const paneStyle = {
     '--chrome-height': `${chromeLayout.height}px`,
     '--titlebar-left-inset': `${getTitlebarLeftInset(chromeLayout.density, snapshot.isFullScreen)}px`,
-    '--workspace-pane-width': `${paneWidths.left}px`,
-    '--context-pane-width': `${paneWidths.right}px`,
+    '--workspace-pane-width': `${leftPaneWidth}px`,
     '--command-overlay-height': `${commandOverlayHeight}px`,
+    '--agent-dock-height': `${showAgentDock ? AGENT_DOCK_RESERVED_HEIGHT : 0}px`,
   } as CSSProperties;
-  const taskAttention = taskAttentionKey(taskSnapshot);
-  const browserApprovalAttention = browserApprovalAttentionKey(browserAgentSnapshot);
-  const attentionRequired = Boolean(taskAttention || browserApprovalAttention);
-  const visibleContextCollapsed = attentionRequired ? false : contextCollapsed;
-  const visibleContextSection: PaneSection = attentionRequired ? 'task' : contextSection;
+  const attentionKey = taskAttentionKey(taskSnapshot) || browserApprovalAttentionKey(browserAgentSnapshot) || null;
+  const [seenAttentionKey, setSeenAttentionKey] = useState<string | null>(null);
+  // Jump to the task tab the moment something new needs the user, without
+  // forcing them to stay there — the dock keeps working from any other tab.
+  // Adjusting state during render (React's documented pattern for "reset/react
+  // to a changed value") rather than in an effect avoids an extra render pass.
+  if (attentionKey !== seenAttentionKey) {
+    setSeenAttentionKey(attentionKey);
+    if (attentionKey) setTaskTabActive(true);
+  }
 
   useEffect(() => {
     let mounted = true;
@@ -144,8 +162,8 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    void window.poppinBrowser.command({ type: 'setContentVisible', visible: activeNativeTabId === null });
-  }, [activeNativeTabId]);
+    void window.poppinBrowser.command({ type: 'setContentVisible', visible: activeNativeTabId === null && !taskTabActive });
+  }, [activeNativeTabId, taskTabActive]);
 
   useEffect(() => {
     if (browserAgentSnapshot.watching && pagesSnapshot.activeTabId) void window.poppinPages.command({ type: 'deactivateTabs' });
@@ -161,24 +179,21 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    savePaneWidths(window.localStorage, preferredPaneWidths);
-  }, [preferredPaneWidths]);
+    saveLeftPaneWidth(window.localStorage, preferredLeftPaneWidth);
+  }, [preferredLeftPaneWidth]);
 
   useEffect(() => {
     void window.poppinBrowser.command({
       type: 'setLayout',
       topInset: chromeLayout.height,
-      leftInset: workspaceCollapsed ? 46 : paneWidths.left + 14,
-      rightInset: visibleContextCollapsed ? 46 : paneWidths.right + 14,
-      ...(settingsOpen ? { rightInset: Math.max(visibleContextCollapsed ? 46 : paneWidths.right + 14, 350) } : {}),
-      bottomInset: commandCollapsed ? 0 : 94 + commandOverlayHeight,
+      leftInset: workspaceCollapsed ? 46 : leftPaneWidth + 14,
+      rightInset: settingsOpen ? 350 : 24,
+      bottomInset: commandCollapsed ? 0 : 94 + commandOverlayHeight + (showAgentDock ? AGENT_DOCK_RESERVED_HEIGHT : 0),
     });
-  }, [chromeLayout.height, commandCollapsed, commandOverlayHeight, paneWidths.left, paneWidths.right, settingsOpen, visibleContextCollapsed, workspaceCollapsed]);
+  }, [chromeLayout.height, commandCollapsed, commandOverlayHeight, leftPaneWidth, settingsOpen, showAgentDock, workspaceCollapsed]);
 
-  const resizePane = (side: PaneSide, requestedWidth: number) => {
-    const otherSide = side === 'left' ? 'right' : 'left';
-    const width = clampResizedPaneWidth(side, requestedWidth, viewport.width, paneWidths[otherSide]);
-    setPreferredPaneWidths((current) => ({ ...current, [side]: width }));
+  const resizeLeftPane = (requestedWidth: number) => {
+    setPreferredLeftPaneWidth(clampResizedLeftPaneWidth(requestedWidth, viewport.width));
   };
 
   const sendCommand = async (command: BrowserCommand) => {
@@ -300,6 +315,11 @@ export function App() {
           groups={snapshot.groups}
           activeTabId={activeTabId}
           onActivate={(tabId) => {
+            if (tabId === TASK_TAB_ID) {
+              setTaskTabActive(true);
+              return;
+            }
+            setTaskTabActive(false);
             const nativeTab = pagesSnapshot.tabs.find((candidate) => candidate.id === tabId);
             if (nativeTab) {
               if (browserAgentSnapshot.watching) void sendBrowserAgentCommand({ type: 'leaveWatch' });
@@ -311,7 +331,11 @@ export function App() {
             void sendPagesCommand({ type: 'deactivateTabs' });
             void sendCommand({ type: 'activate', tabId });
           }}
-          onClose={(tabId) => { if (pagesSnapshot.tabs.some((tab) => tab.id === tabId)) void sendPagesCommand({ type: 'closeTab', tabId }); else void sendCommand({ type: 'close', tabId }); }}
+          onClose={(tabId) => {
+            if (tabId === TASK_TAB_ID) { setTaskTabActive(false); return; }
+            if (pagesSnapshot.tabs.some((tab) => tab.id === tabId)) void sendPagesCommand({ type: 'closeTab', tabId });
+            else void sendCommand({ type: 'close', tabId });
+          }}
           onCreate={() => { void sendPagesCommand({ type: 'deactivateTabs' }); void sendCommand({ type: 'create' }); }}
           onReorder={(tabId, beforeTabId) => { if (pagesSnapshot.tabs.some((tab) => tab.id === tabId)) void sendPagesCommand({ type: 'reorderTab', tabId, beforeTabId: pagesSnapshot.tabs.some((tab) => tab.id === beforeTabId) ? beforeTabId : null }); else void sendCommand({ type: 'reorder', tabId, beforeTabId: snapshot.tabs.some((tab) => tab.id === beforeTabId) ? beforeTabId : null }); }}
           onShowTabMenu={(tabId) => void sendCommand({ type: 'showTabMenu', tabId })}
@@ -321,6 +345,13 @@ export function App() {
           agentTaskSpace={browserAgentSnapshot.taskSpace}
           watchingAgentTabs={browserAgentSnapshot.watching}
           onWatchAgentTabs={() => { void sendBrowserAgentCommand({ type: 'watch' }); }}
+          tandemReady={tandemSnapshot.connection.state === 'ready'}
+          tandemMessage={tandemSnapshot.connection.message}
+          onOpenTandemWorld={() => {
+            setTaskTabActive(false);
+            void sendPagesCommand({ type: 'deactivateTabs' });
+            void sendTandemCommand({ type: 'openWorld' });
+          }}
         />
       </header>
       <WorkspacePane
@@ -328,60 +359,54 @@ export function App() {
         snapshot={workspaceSnapshot}
         tabs={snapshot.tabs.filter((tab) => !tab.taskSpaceId)}
         pages={pagesSnapshot}
+        activeTab={activeTab}
         onCollapseChange={setWorkspaceCollapsed}
         onCreate={(name) => sendWorkspaceCommand({ type: 'createWorkspace', name })}
         onCommand={sendWorkspaceCommand}
         onPagesCommand={sendPagesCommand}
-        tandem={tandemSnapshot}
-        onTandemCommand={sendTandemCommand}
-      />
-      <ContextPane
-        collapsed={visibleContextCollapsed}
-        snapshot={workspaceSnapshot}
-        taskSnapshot={taskSnapshot}
-        onCollapseChange={setContextCollapsed}
         onRefreshTab={(tabId) => { void sendWorkspaceCommand({ type: 'refreshTabContext', tabId }); }}
-        activeTab={activeTab}
         onCaptureVisualSelection={async (tabId) => {
           const message = await sendWorkspaceCommand({ type: 'captureVisualSelection', tabId });
           return { ok: message === null, ...(message ? { message } : {}) };
         }}
         onClearVisualSelection={() => { void sendWorkspaceCommand({ type: 'clearVisualSelection' }); }}
-        onTaskCommand={sendTaskCommand}
-        onOpenResult={() => { if (taskSnapshot.task) void sendPagesCommand({ type: 'openTaskDocument', threadId: taskSnapshot.task.documentId }); }}
-        browserAgentSnapshot={browserAgentSnapshot}
-        onBrowserAgentCommand={sendBrowserAgentCommand}
-        section={visibleContextSection}
-        onSectionChange={setContextSection}
         tandem={tandemSnapshot}
-        onOpenTandemWorld={() => {
-          void sendPagesCommand({ type: 'deactivateTabs' });
-          void sendTandemCommand({ type: 'openWorld' });
-        }}
+        onTandemCommand={sendTandemCommand}
       />
       {!workspaceCollapsed ? (
         <PaneResizer
           side="left"
-          width={paneWidths.left}
-          {...getPaneWidthRange('left', viewport.width, paneWidths.right)}
-          onResize={(width) => resizePane('left', width)}
+          width={leftPaneWidth}
+          {...getLeftPaneWidthRange(viewport.width)}
+          onResize={resizeLeftPane}
         />
       ) : null}
-      {!visibleContextCollapsed ? (
-        <PaneResizer
-          side="right"
-          width={paneWidths.right}
-          {...getPaneWidthRange('right', viewport.width, paneWidths.left)}
-          onResize={(width) => resizePane('right', width)}
-        />
-      ) : null}
-      {activeNativeTab ? (
-        <div className={`native-stage ${workspaceCollapsed ? 'workspace-collapsed' : ''} ${visibleContextCollapsed ? 'context-collapsed' : ''}`}>
+      {taskTabActive ? (
+        <div className={`task-stage ${workspaceCollapsed ? 'workspace-collapsed' : ''}`}>
+          <TaskTabView
+            taskSnapshot={taskSnapshot}
+            workspace={workspaceSnapshot}
+            browserAgentSnapshot={browserAgentSnapshot}
+            onTaskCommand={sendTaskCommand}
+            onBrowserAgentCommand={sendBrowserAgentCommand}
+          />
+        </div>
+      ) : activeNativeTab ? (
+        <div className={`native-stage ${workspaceCollapsed ? 'workspace-collapsed' : ''}`}>
           {activeNativeTab.kind === 'database'
             ? <NativeDatabaseView pageId={activeNativeTab.pageId} revision={pagesRevision} onCommand={sendPagesCommand} />
-            : <NativePageView pageId={activeNativeTab.pageId} revision={pagesRevision} onCommand={sendPagesCommand} taskSnapshot={taskSnapshot} onTaskCommand={sendTaskCommand} onTaskStarted={() => { setContextCollapsed(false); setContextSection('task'); }} />}
+            : <NativePageView pageId={activeNativeTab.pageId} revision={pagesRevision} onCommand={sendPagesCommand} taskSnapshot={taskSnapshot} onTaskCommand={sendTaskCommand} onTaskStarted={() => setTaskTabActive(true)} />}
         </div>
-      ) : <div className={`browser-stage ${workspaceCollapsed ? 'workspace-collapsed' : ''} ${visibleContextCollapsed ? 'context-collapsed' : ''}`} aria-hidden="true" />}
+      ) : <div className={`browser-stage ${workspaceCollapsed ? 'workspace-collapsed' : ''}`} aria-hidden="true" />}
+      {showAgentDock ? (
+        <AgentDock
+          taskSnapshot={taskSnapshot}
+          browserAgentSnapshot={browserAgentSnapshot}
+          onTaskCommand={sendTaskCommand}
+          onBrowserAgentCommand={sendBrowserAgentCommand}
+          onOpenTaskTab={() => setTaskTabActive(true)}
+        />
+      ) : null}
       <CommandBar snapshot={taskSnapshot} workspace={workspaceSnapshot} collapsed={commandCollapsed} onCollapseChange={setCommandCollapsed} onCommand={sendTaskCommand} onOverlayHeightChange={setCommandOverlayHeight} />
     </main>
   );
