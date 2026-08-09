@@ -37,7 +37,7 @@ describe('native Pages UI', () => {
     render(<PagesSection snapshot={{
       pages: [{ id: 'page-1', title: 'Plan', kind: 'page', parentId: null, createdAt: '', updatedAt: '' }],
       tabs: [], activeTabId: null, selectedPageIds: [],
-    }} onCommand={command} />);
+    }} pageContexts={[]} onCommand={command} />);
     await user.click(screen.getByRole('button', { name: 'Plan' }));
     await user.click(screen.getByRole('checkbox'));
     await user.click(screen.getByRole('button', { name: /^Page$/ }));

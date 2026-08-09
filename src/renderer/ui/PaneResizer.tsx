@@ -1,6 +1,6 @@
 import { type KeyboardEvent, type PointerEvent, useEffect, useRef, useState } from 'react';
 
-import { DEFAULT_PANE_WIDTHS, type PaneSide } from './pane-layout';
+import { DEFAULT_LEFT_PANE_WIDTH, type PaneSide } from './pane-layout';
 
 interface PaneResizerProps {
   side: PaneSide;
@@ -55,7 +55,7 @@ export function PaneResizer({ side, width, minimum, maximum, onResize }: PaneRes
       aria-valuemax={maximum}
       aria-valuenow={width}
       title={`${label}. Drag, use arrow keys, or double-click to reset.`}
-      onDoubleClick={() => onResize(DEFAULT_PANE_WIDTHS[side])}
+      onDoubleClick={() => onResize(DEFAULT_LEFT_PANE_WIDTH)}
       onKeyDown={handleKeyDown}
       onPointerDown={(event) => {
         if (event.button !== 0) return;

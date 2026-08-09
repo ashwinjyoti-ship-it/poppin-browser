@@ -1,9 +1,4 @@
-export type PaneSide = 'left' | 'right';
-
-export interface PaneWidths {
-  left: number;
-  right: number;
-}
+export type PaneSide = 'left';
 
 interface StorageReader {
   getItem: (key: string) => string | null;
@@ -13,76 +8,47 @@ interface StorageWriter {
   setItem: (key: string, value: string) => void;
 }
 
-export const DEFAULT_PANE_WIDTHS: PaneWidths = { left: 286, right: 316 };
-export const MIN_PANE_WIDTHS: PaneWidths = { left: 240, right: 260 };
-export const MAX_PANE_WIDTHS: PaneWidths = { left: 480, right: 520 };
+export const DEFAULT_LEFT_PANE_WIDTH = 286;
+export const MIN_LEFT_PANE_WIDTH = 240;
+export const MAX_LEFT_PANE_WIDTH = 480;
 
 const MIN_BROWSER_WIDTH = 320;
 const FIXED_HORIZONTAL_SPACE = 52;
-const PANE_WIDTHS_STORAGE_KEY = 'poppin:pane-widths:v1';
+const PANE_WIDTH_STORAGE_KEY = 'poppin:pane-width:v2';
 
-export function normalizePaneWidths(widths: PaneWidths, viewportWidth: number): PaneWidths {
-  let left = clamp(widths.left, MIN_PANE_WIDTHS.left, MAX_PANE_WIDTHS.left);
-  let right = clamp(widths.right, MIN_PANE_WIDTHS.right, MAX_PANE_WIDTHS.right);
-  const availableForPanes = Math.max(
-    MIN_PANE_WIDTHS.left + MIN_PANE_WIDTHS.right,
-    Math.round(viewportWidth) - FIXED_HORIZONTAL_SPACE - MIN_BROWSER_WIDTH,
-  );
-  const overflow = left + right - availableForPanes;
-
-  if (overflow > 0) {
-    const leftCapacity = left - MIN_PANE_WIDTHS.left;
-    const rightCapacity = right - MIN_PANE_WIDTHS.right;
-    const capacity = leftCapacity + rightCapacity;
-    const leftReduction = capacity > 0
-      ? Math.min(leftCapacity, Math.round(overflow * (leftCapacity / capacity)))
-      : 0;
-    left -= leftReduction;
-    right -= Math.min(rightCapacity, overflow - leftReduction);
-  }
-
-  return { left, right };
+export function normalizeLeftPaneWidth(width: number, viewportWidth: number): number {
+  const { minimum, maximum } = getLeftPaneWidthRange(viewportWidth);
+  return clamp(width, minimum, maximum);
 }
 
-export function getPaneWidthRange(side: PaneSide, viewportWidth: number, otherPaneWidth: number) {
-  const minimum = MIN_PANE_WIDTHS[side];
-  const available = Math.round(viewportWidth) - FIXED_HORIZONTAL_SPACE - MIN_BROWSER_WIDTH - otherPaneWidth;
+export function getLeftPaneWidthRange(viewportWidth: number): { minimum: number; maximum: number } {
+  const available = Math.round(viewportWidth) - FIXED_HORIZONTAL_SPACE - MIN_BROWSER_WIDTH;
   return {
-    minimum,
-    maximum: Math.max(minimum, Math.min(MAX_PANE_WIDTHS[side], available)),
+    minimum: MIN_LEFT_PANE_WIDTH,
+    maximum: Math.max(MIN_LEFT_PANE_WIDTH, Math.min(MAX_LEFT_PANE_WIDTH, available)),
   };
 }
 
-export function clampResizedPaneWidth(
-  side: PaneSide,
-  requestedWidth: number,
-  viewportWidth: number,
-  otherPaneWidth: number,
-): number {
-  const { minimum, maximum } = getPaneWidthRange(side, viewportWidth, otherPaneWidth);
+export function clampResizedLeftPaneWidth(requestedWidth: number, viewportWidth: number): number {
+  const { minimum, maximum } = getLeftPaneWidthRange(viewportWidth);
   return clamp(requestedWidth, minimum, maximum);
 }
 
-export function loadPaneWidths(storage: StorageReader): PaneWidths {
+export function loadLeftPaneWidth(storage: StorageReader): number {
   try {
-    const stored = storage.getItem(PANE_WIDTHS_STORAGE_KEY);
-    if (!stored) return { ...DEFAULT_PANE_WIDTHS };
-    const candidate = JSON.parse(stored) as Partial<PaneWidths>;
-    if (!Number.isFinite(candidate.left) || !Number.isFinite(candidate.right)) {
-      return { ...DEFAULT_PANE_WIDTHS };
-    }
-    return {
-      left: clamp(candidate.left!, MIN_PANE_WIDTHS.left, MAX_PANE_WIDTHS.left),
-      right: clamp(candidate.right!, MIN_PANE_WIDTHS.right, MAX_PANE_WIDTHS.right),
-    };
+    const stored = storage.getItem(PANE_WIDTH_STORAGE_KEY);
+    if (!stored) return DEFAULT_LEFT_PANE_WIDTH;
+    const candidate = JSON.parse(stored) as unknown;
+    if (typeof candidate !== 'number' || !Number.isFinite(candidate)) return DEFAULT_LEFT_PANE_WIDTH;
+    return clamp(candidate, MIN_LEFT_PANE_WIDTH, MAX_LEFT_PANE_WIDTH);
   } catch {
-    return { ...DEFAULT_PANE_WIDTHS };
+    return DEFAULT_LEFT_PANE_WIDTH;
   }
 }
 
-export function savePaneWidths(storage: StorageWriter, widths: PaneWidths): void {
+export function saveLeftPaneWidth(storage: StorageWriter, width: number): void {
   try {
-    storage.setItem(PANE_WIDTHS_STORAGE_KEY, JSON.stringify(widths));
+    storage.setItem(PANE_WIDTH_STORAGE_KEY, JSON.stringify(width));
   } catch {
     // Layout persistence is a convenience. Resizing must still work if storage is unavailable.
   }
