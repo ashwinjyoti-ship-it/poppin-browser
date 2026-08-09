@@ -709,17 +709,17 @@ export class BrowserEngine {
     const contents = tab.view.webContents;
     contents.setWindowOpenHandler(({ url }) => {
       const authentication = !tab.snapshot.taskSpaceId && isAuthenticationPopup(url, contents.getURL());
-      const preview = !tab.snapshot.taskSpaceId && this.settings.linkOpening === 'follow-site'
-        && isExternalLinkPreview(url, contents.getURL());
-      if (authentication || preview) {
+      // Native frameless preview windows proved capable of trapping the parent
+      // window on macOS. Until a renderer-owned overlay host replaces them,
+      // ordinary links always use a normal Poppin tab.
+      if (authentication) {
         return {
           action: 'allow',
           overrideBrowserWindowOptions: {
-            parent: this.window,
-            frame: false,
-            show: false,
+            frame: true,
+            show: true,
             backgroundColor: '#fbf8f2',
-            autoHideMenuBar: true,
+            autoHideMenuBar: false,
             webPreferences: {
               session: this.browserSession,
               nodeIntegration: false,
@@ -740,9 +740,7 @@ export class BrowserEngine {
       return { action: 'deny' };
     });
     contents.on('did-create-window', (popup, details) => {
-      const kind = isAuthenticationPopup(details.url, contents.getURL())
-        ? 'authentication'
-        : this.settings.linkOpening === 'follow-site' && isExternalLinkPreview(details.url, contents.getURL()) ? 'preview' : null;
+      const kind = isAuthenticationPopup(details.url, contents.getURL()) ? 'authentication' : null;
       if (!kind) {
         popup.close();
         return;

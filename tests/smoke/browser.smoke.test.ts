@@ -128,6 +128,9 @@ describe('packaged browser workflow', () => {
     await expect.poll(() => newTabPage!.getByRole('heading', { name: /where would you like to go/i }).isVisible()).toBe(true);
 
     const address = shell.getByLabel('Address and search');
+    await expect.poll(() => shell.getByRole('button', { name: 'Open workspace' }).isVisible()).toBe(true);
+    await expect.poll(() => shell.getByRole('button', { name: 'Open context and task pane' }).isVisible()).toBe(true);
+    await shell.getByRole('button', { name: 'Open workspace' }).click();
     const workspaceDivider = shell.getByRole('separator', { name: 'Resize workspace pane' });
     const initialWorkspaceWidth = Number(await workspaceDivider.getAttribute('aria-valuenow'));
     const chromeHeight = await shell.locator('.app-shell').evaluate((element) => Number.parseInt(getComputedStyle(element).getPropertyValue('--chrome-height'), 10));
@@ -178,6 +181,7 @@ describe('packaged browser workflow', () => {
     await address.press('Enter');
     await expect.poll(() => pageInfo(application!, origin)).toMatchObject({ title: 'Local fixture' });
 
+    await shell.getByRole('button', { name: 'Open context and task pane' }).click();
     await shell.getByRole('button', { name: 'Collapse right pane' }).click();
     const collapsedRightPane = shell.getByLabel('Right pane collapsed');
     await expect.poll(() => collapsedRightPane.isVisible()).toBe(true);
@@ -211,19 +215,8 @@ describe('packaged browser workflow', () => {
       const contents = webContents.getAllWebContents().find((candidate) => candidate.getURL() === targetUrl);
       await contents?.executeJavaScript("document.querySelector('#external').click()");
     }, `${origin}/`);
-    await expect.poll(() => shell.getByRole('region', { name: 'Link preview overlay' }).isVisible()).toBe(true);
-    expect(await shell.getByRole('tab').count()).toBe(1);
-    await shell.getByRole('region', { name: 'Link preview overlay' }).getByRole('button', { name: 'Close' }).click();
-    await expect.poll(() => shell.getByRole('region', { name: 'Link preview overlay' }).count()).toBe(0);
-
-    await application.evaluate(async ({ webContents }, targetUrl) => {
-      const contents = webContents.getAllWebContents().find((candidate) => candidate.getURL() === targetUrl);
-      await contents?.executeJavaScript("document.querySelector('#external').click()");
-    }, `${origin}/`);
-    await expect.poll(() => shell.getByRole('region', { name: 'Link preview overlay' }).isVisible()).toBe(true);
-    await shell.getByRole('region', { name: 'Link preview overlay' }).getByRole('button', { name: 'Open in tab' }).click();
     await expect.poll(() => shell.getByRole('tab').count()).toBe(2);
-    await expect.poll(() => shell.getByRole('region', { name: 'Link preview overlay' }).count()).toBe(0);
+    await expect.poll(() => shell.evaluate(async () => (await window.poppinBrowser.getSnapshot()).linkPreview)).toBeNull();
     await shell.evaluate(async () => {
       const snapshot = await window.poppinBrowser.getSnapshot();
       await window.poppinBrowser.command({ type: 'close', tabId: snapshot.activeTabId });
@@ -404,6 +397,7 @@ describe('packaged browser workflow', () => {
 
     ({ app: application, shell } = await launch(userDataPath));
     await expect.poll(() => shell.getByRole('tab').count()).toBe(2);
+    await shell.getByRole('button', { name: 'Open workspace' }).click();
     await expect.poll(() => shell.getByRole('separator', { name: 'Resize workspace pane' }).getAttribute('aria-valuenow')).toBe(String(resizedWorkspaceWidth));
     await expect.poll(() => shell.getByLabel('Workspace').getByRole('heading', { name: 'Launch workspace' }).isVisible()).toBe(true);
     const cookies = await application.evaluate(async ({ session }, fixtureOrigin) => {
