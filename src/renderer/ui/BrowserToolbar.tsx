@@ -121,7 +121,7 @@ function BrowserSettingsPanel({ settings, canReopenClosedTab, onClose, onReopenC
       <label>
         Links open in
         <select value={settings.linkOpening} onChange={(event) => onUpdate({ linkOpening: event.target.value as BrowserSettings['linkOpening'] })}>
-          <option value="follow-site">Follow website; preview other sites</option>
+          <option value="follow-site">Follow website; open other sites in a tab</option>
           <option value="new-tab">Always a new tab</option>
           <option value="same-tab">Always the current tab</option>
         </select>

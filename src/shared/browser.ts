@@ -49,7 +49,7 @@ export interface BrowserSettings {
 }
 
 export const DEFAULT_BROWSER_SETTINGS: BrowserSettings = {
-  linkOpening: 'follow-site',
+  linkOpening: 'new-tab',
   focusNewTabs: true,
   startup: 'restore',
   newTabPosition: 'next-to-active',
