@@ -4,8 +4,10 @@ import { type FormEvent, useState } from 'react';
 import type { WorkspaceSnapshot } from '../../shared/workspace';
 import type { BrowserTabSnapshot } from '../../shared/browser';
 import type { PagesCommand, PagesSnapshot } from '../../shared/pages';
+import type { TandemCommand, TandemSnapshot } from '../../shared/tandem';
 import { ProjectSection } from './ProjectSection';
 import { PagesSection } from './PagesSection';
+import { TandemSection } from './TandemSection';
 
 interface WorkspacePaneProps {
   collapsed: boolean;
@@ -16,9 +18,11 @@ interface WorkspacePaneProps {
   onCreate: (name: string) => Promise<string | null>;
   onCommand: (command: import('../../shared/workspace').WorkspaceCommand) => Promise<string | null>;
   onPagesCommand: (command: PagesCommand) => Promise<string | null>;
+  tandem: TandemSnapshot;
+  onTandemCommand: (command: TandemCommand) => Promise<string | null>;
 }
 
-export function WorkspacePane({ collapsed, snapshot, tabs, pages, onCollapseChange, onCreate, onCommand, onPagesCommand }: WorkspacePaneProps) {
+export function WorkspacePane({ collapsed, snapshot, tabs, pages, onCollapseChange, onCreate, onCommand, onPagesCommand, tandem, onTandemCommand }: WorkspacePaneProps) {
   const [name, setName] = useState('My Workspace');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -56,6 +60,7 @@ export function WorkspacePane({ collapsed, snapshot, tabs, pages, onCollapseChan
       {snapshot.workspace ? (
         <div className="workspace-content">
           <PagesSection snapshot={pages} onCommand={onPagesCommand} />
+          <TandemSection snapshot={tandem} onCommand={onTandemCommand} />
           <section className="workspace-section">
             <div className="section-heading"><span>Tabs</span><span>{tabs.length}</span></div>
             <div className="selection-list">

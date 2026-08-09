@@ -30,6 +30,10 @@ import { PagesStore } from './pages/pages-store';
 import { PagesEngine } from './pages/pages-engine';
 import { PAGES_CHANNELS, type PagesCommand } from '../shared/pages';
 import { querySelectedDatabase, selectedPageContexts } from './pages/page-context';
+import { EMPTY_TANDEM_SNAPSHOT, TANDEM_CHANNELS, type TandemCommand } from '../shared/tandem';
+import { TandemEngine } from './tandem/tandem-engine';
+import { TandemCredentialStore } from './tandem/tandem-credentials';
+import { executeTandemCapability } from './tandem/tandem-capability';
 
 registerInternalScheme();
 
@@ -43,6 +47,8 @@ let pagesStore: PagesStore | null = null;
 let pagesEngine: PagesEngine | null = null;
 let browserAgentEngine: BrowserAgentEngine | null = null;
 let previewEngine: PreviewEngine | null = null;
+let tandemEngine: TandemEngine | null = null;
+let tandemCredentials: TandemCredentialStore | null = null;
 const pendingExternalUrls: string[] = [];
 
 function openExternalUrl(url: string): void {
@@ -94,7 +100,17 @@ async function createWindow(): Promise<void> {
   if (!workspaceStore) throw new Error('Workspace storage is not ready.');
   const git = new GitEngine();
   previewEngine = new PreviewEngine();
-  workspaceEngine = new WorkspaceEngine(mainWindow, workspaceStore, browserEngine, git, pagesStore ?? undefined, () => pagesEngine?.refresh());
+  if (!tandemCredentials) throw new Error('Tandem credential storage is not ready.');
+  tandemEngine = new TandemEngine(mainWindow, tandemCredentials, {
+    openWorld: (url) => browserEngine?.openTandemWorld(url),
+    closeWorld: () => browserEngine?.closeTandemWorld(),
+    onContextChanged: () => workspaceEngine?.refreshTandemContexts(),
+  });
+  workspaceEngine = new WorkspaceEngine(
+    mainWindow, workspaceStore, browserEngine, git, pagesStore ?? undefined,
+    () => pagesEngine?.refresh(),
+    () => tandemEngine?.getSelectedContext() ?? [],
+  );
   if (!pagesStore) throw new Error('Pages storage is not ready.');
   pagesEngine = new PagesEngine(mainWindow, pagesStore, () => workspaceEngine?.refreshPageContexts());
   browserAgentEngine = new BrowserAgentEngine(mainWindow, browserEngine, (tabId, content) => {
@@ -148,6 +164,15 @@ async function createWindow(): Promise<void> {
       ok: false, message: 'Controlled browser use is not ready.',
     },
     getPageContexts: () => pagesStore ? selectedPageContexts(pagesStore) : [],
+    getTandemContexts: () => tandemEngine?.getSelectedContext() ?? [],
+    getTandemAvailability: () => tandemEngine?.getAvailability() ?? { available: false, writable: false },
+    // Agents reach Tandem through its REST API, never by automating Tandem World.
+    executeTandemCapability: async (args) => executeTandemCapability({
+      client: () => tandemEngine?.getClient() ?? null,
+      workspaceId: () => tandemEngine?.getActiveWorkspaceId() ?? null,
+      writable: () => tandemEngine?.getAvailability().writable ?? false,
+      openInWorld: (pageId) => tandemEngine?.openWorldForPage(pageId),
+    }, args),
     // The page the user is looking at. Lets the capability router tell
     // "act on this open page" apart from "go and research something".
     getActiveBrowsableTabId: () => {
@@ -183,6 +208,7 @@ async function createWindow(): Promise<void> {
     pagesEngine.refresh();
   }
   browserEngine.restore(persisted);
+  void tandemEngine.initialize();
   await browserAgentEngine.restore();
   for (const url of pendingExternalUrls.splice(0)) openExternalUrl(url);
 
@@ -208,6 +234,7 @@ async function createWindow(): Promise<void> {
     browserAgentEngine = null;
     void previewEngine?.stop();
     previewEngine = null;
+    tandemEngine = null;
     void closingTaskEngine?.close();
   });
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
@@ -242,6 +269,11 @@ app.whenReady().then(async () => {
   ]));
   workspaceStore = new WorkspaceStore(path.join(app.getPath('userData'), 'poppin.sqlite'));
   taskStore = new TaskStore(path.join(app.getPath('userData'), 'poppin.sqlite'));
+  tandemCredentials = new TandemCredentialStore(path.join(app.getPath('userData'), 'poppin.sqlite'), {
+    available: () => safeStorage.isEncryptionAvailable(),
+    encrypt: (text) => safeStorage.encryptString(text),
+    decrypt: (value) => safeStorage.decryptString(value),
+  });
   pagesStore = new PagesStore(path.join(app.getPath('userData'), 'poppin.sqlite'), {
     available: () => safeStorage.isEncryptionAvailable(),
     encrypt: (text) => safeStorage.encryptString(text),
@@ -278,6 +310,14 @@ app.whenReady().then(async () => {
   ipcMain.handle(PAGES_CHANNELS.command, (event, command: PagesCommand) => {
     if (!isTrustedShellSender(event.sender)) throw new Error('Untrusted Pages command.');
     return pagesEngine?.execute(command) ?? { ok: false, message: 'Pages are not ready.' };
+  });
+  ipcMain.handle(TANDEM_CHANNELS.getSnapshot, (event) => {
+    if (!isTrustedShellSender(event.sender)) throw new Error('Untrusted Tandem snapshot request.');
+    return tandemEngine?.getSnapshot() ?? EMPTY_TANDEM_SNAPSHOT;
+  });
+  ipcMain.handle(TANDEM_CHANNELS.command, (event, command: TandemCommand) => {
+    if (!isTrustedShellSender(event.sender)) throw new Error('Untrusted Tandem command.');
+    return tandemEngine?.execute(command) ?? { ok: false, message: 'Tandem is not ready.' };
   });
   ipcMain.handle(TASK_CHANNELS.getSnapshot, (event) => {
     if (!isTrustedShellSender(event.sender)) throw new Error('Untrusted task snapshot request.');
@@ -341,6 +381,8 @@ app.on('quit', () => {
   taskStore = null;
   pagesStore?.close();
   pagesStore = null;
+  tandemCredentials?.close();
+  tandemCredentials = null;
 });
 
 app.on('window-all-closed', () => {

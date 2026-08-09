@@ -16,6 +16,8 @@ import {
 } from '../../shared/task';
 import type { PageContextSnapshot, WorkspaceSnapshot } from '../../shared/workspace';
 import type { AgentHarnessId } from '../../shared/agent';
+import type { TandemContextSnapshot } from '../../shared/tandem';
+import { TANDEM_CAPABILITY_TOOL, TANDEM_TOOL_NAME } from '../tandem/tandem-capability';
 import type { BrowserAgentAction, BrowserAgentCommand, BrowserAgentCommandResult, BrowserAgentSnapshot, BrowserBatchStep } from '../../shared/browser-agent';
 
 import { routeCapabilities } from '../../shared/capability-router';
@@ -77,6 +79,10 @@ interface TaskEngineOptions {
   getActiveBrowsableTabId?: () => string | null;
   /** Whether the Tandem capability is connected, and whether it may write. */
   getTandemAvailability?: () => { available: boolean; writable: boolean };
+  /** Frozen Tandem pages checked into explicit context. */
+  getTandemContexts?: () => TandemContextSnapshot[];
+  /** Executes one Tandem capability action on behalf of the agent. */
+  executeTandemCapability?: (args: unknown) => Promise<{ ok: boolean; text: string }>;
   querySelectedDatabase?: (databaseId: string, limit: number) => string;
   applyPageComment?: (commentId: string, replacement: string) => string;
 }
@@ -408,6 +414,7 @@ export class TaskEngine {
           ...(workspace.tabContexts.length ? ['browser-tab'] : []),
           ...(workspace.documents.some((item) => item.selected) ? ['document'] : []),
           ...(workspace.pageContexts?.length ? ['native-page'] : []),
+          ...(workspace.tandemContexts?.length ? ['tandem-page'] : []),
           ...(workspace.visualSelection ? ['localhost-visual-selection'] : []),
         ],
       },
@@ -431,7 +438,7 @@ export class TaskEngine {
     const model = this.connection.models.find((candidate) => candidate.id === task.model);
     if (!model) return { ok: false, message: 'The original model is no longer available for the selected agent.' };
     const adapter = this.requireAdapter();
-    const workspace = workspaceSnapshot(this.workspaceStore, this.options.getPageContexts);
+    const workspace = workspaceSnapshot(this.workspaceStore, this.options.getPageContexts, this.options.getTandemContexts);
     const priorBrowserSession = this.options.getBrowserAgentSnapshot?.();
     const priorTaskSpace = priorBrowserSession?.taskSpace;
     const continuesBrowserWork = isImplicitBrowserContinuation(prompt);
@@ -689,7 +696,7 @@ export class TaskEngine {
   } {
     if (this.connection.state !== 'ready') throw new Error(this.connection.message);
     if (this.task && ['Running', 'Needs Approval'].includes(this.task.state)) throw new Error('Finish or cancel the current task first.');
-    const workspace = workspaceSnapshot(this.workspaceStore, this.options.getPageContexts);
+    const workspace = workspaceSnapshot(this.workspaceStore, this.options.getPageContexts, this.options.getTandemContexts);
     if (!workspace.workspace) throw new Error('Create the workspace first.');
     if (kind === 'code' && !workspace.project) throw new Error('Connect a local Git project for this Code task, or run it as Work.');
     const model = this.connection.models.find((candidate) => candidate.id === modelId);
@@ -783,6 +790,23 @@ export class TaskEngine {
       } catch (error) {
         this.respondToBrowserTool(request.requestId, { ok: false, message: error instanceof Error ? error.message : 'Page instruction could not be applied.' });
       }
+      return;
+    }
+    if (tool === TANDEM_TOOL_NAME) {
+      if (!this.options.executeTandemCapability) {
+        this.respondToBrowserTool(request.requestId, { ok: false, message: 'Tandem is not connected in Poppin.' });
+        return;
+      }
+      const result = await this.options.executeTandemCapability(request.arguments);
+      this.adapter?.respondTool(request.requestId, result);
+      this.upsertProgress({
+        id: `tandem-${String(request.requestId)}`,
+        kind: 'status',
+        title: result.ok ? 'Tandem updated' : 'Tandem action failed',
+        detail: result.text.slice(0, 2_000),
+        status: result.ok ? 'completed' : 'failed',
+      });
+      this.touchAndSchedule();
       return;
     }
     if (tool !== BROWSER_TOOL_NAME && tool !== BROWSER_BATCH_TOOL_NAME) {
@@ -956,7 +980,7 @@ export class TaskEngine {
     try {
       const turn = await adapter.prompt({
         sessionId: task.threadId,
-        prompt: buildTaskPrompt(browserRetryPrompt(task.prompt), workspaceSnapshot(this.workspaceStore, this.options.getPageContexts), browserSnapshot, this.environmentState(workspaceSnapshot(this.workspaceStore, this.options.getPageContexts), browserSnapshot, 'exploration')),
+        prompt: buildTaskPrompt(browserRetryPrompt(task.prompt), workspaceSnapshot(this.workspaceStore, this.options.getPageContexts, this.options.getTandemContexts), browserSnapshot, this.environmentState(workspaceSnapshot(this.workspaceStore, this.options.getPageContexts, this.options.getTandemContexts), browserSnapshot, 'exploration')),
         cwd: this.workDirectory(),
         model: task.model,
         reasoningEffort: task.reasoningEffort,
@@ -1077,6 +1101,7 @@ Do not browse, click, navigate, or type unless the Poppin browser action tool is
 The Poppin browser action tool is restricted to the task-owned Agent Tabs supplied in TASK-OWNED AGENT TABS. Context tabs are URL-seeded clones of selected source tabs; exploration tabs are fresh and may navigate according to the user request. Prefer exploration tabs for new research so context clones remain useful references. Always pass the exact taskSpaceId and Agent Tab tabId supplied there. Read returns a semantic snapshot; act only with a ref and snapshotId from that latest read. Re-read after navigation or page-changing actions. Ordinary navigation, clicking, typing, and saving a reversible draft are already allowed; the tool itself pauses before a critical action such as sending, submitting, deleting, purchasing, publishing, uploading/downloading, or crossing an authentication boundary.
 Do not claim that a browser action succeeded unless the tool output confirms it. For a requested draft, perform the browser actions, verify that the page reports the draft as saved, and leave it unsent.
 Use the bounded batch tool to reduce round trips when several refs from one snapshot can be acted on safely. End every batch with read or assert, and treat any pause, takeover, stale ref, skipped step, or failed assertion as a stop rather than retrying.
+When the Tandem capability tool is supplied, use it for every Tandem read and write. It speaks the Tandem REST API: search or list to resolve a page, read_page before editing, and prefer append or edit_section so existing content survives. Never navigate to Tandem in a browser tab or automate its interface to do something the tool can do, and never ask the user for a Tandem API key.
 Your final agent message becomes Poppin's trusted Result page for contextual, browser-only, and mixed tasks. Return the complete polished outcome rather than a browser activity summary. Include source URLs and the time-sensitive date or timestamp when research, prices, availability, or other changing facts are involved. Create a new output artifact rather than overwriting an input.`;
 
 function buildTaskPrompt(
@@ -1095,6 +1120,11 @@ function buildTaskPrompt(
     ...(workspace.pageContexts ?? []).map((item) => ({
       type: `native-${item.kind}`, pageId: item.pageId, title: item.title, content: item.content,
       truncated: item.truncated, rowCount: item.rowCount,
+    })),
+    ...(workspace.tandemContexts ?? []).map((item) => ({
+      type: item.sourceType, workspaceId: item.workspaceId, pageId: item.pageId, title: item.title,
+      updatedAt: item.updatedAt, content: item.capturedMarkdown, truncated: item.truncated,
+      capturedAt: item.capturedAt, stale: item.stale,
     })),
     ...(workspace.visualSelection ? [{
       type: 'localhost-visual-selection', source: workspace.visualSelection.url,
@@ -1195,6 +1225,7 @@ function workCapabilityTools(options: TaskEngineOptions): AgentToolSpec[] {
     ...(options.executeBrowserAgentCommand ? BROWSER_CAPABILITY_TOOLS : []),
     ...(options.querySelectedDatabase ? [DATABASE_CAPABILITY_TOOL] : []),
     ...(options.applyPageComment ? [PAGE_COMMENT_CAPABILITY_TOOL] : []),
+    ...(options.executeTandemCapability ? [TANDEM_CAPABILITY_TOOL] : []),
   ];
 }
 
@@ -1426,6 +1457,7 @@ function selectedContextCount(workspace: WorkspaceSnapshot): number {
   return workspace.tabContexts.length
     + workspace.documents.filter((item) => item.selected).length
     + (workspace.pageContexts?.length ?? 0)
+    + (workspace.tandemContexts?.length ?? 0)
     + (workspace.visualSelection ? 1 : 0);
 }
 
@@ -1447,6 +1479,7 @@ function hasSelectedContext(workspace: WorkspaceSnapshot): boolean {
   return workspace.tabContexts.length > 0
     || workspace.documents.some((item) => item.selected)
     || Boolean(workspace.pageContexts?.length)
+    || Boolean(workspace.tandemContexts?.length)
     || workspace.visualSelection !== null;
 }
 
@@ -1461,7 +1494,11 @@ function githubCompareUrl(remote: string | null, base: string, head: string): st
   return `https://github.com/${encodeURIComponent(match[1]!)}/${encodeURIComponent(match[2]!)}/compare/${encodeURIComponent(base)}...${encodeURIComponent(head)}?expand=1`;
 }
 
-function workspaceSnapshot(store: WorkspaceStore, getPageContexts?: () => PageContextSnapshot[]): WorkspaceSnapshot {
+function workspaceSnapshot(
+  store: WorkspaceStore,
+  getPageContexts?: () => PageContextSnapshot[],
+  getTandemContexts?: () => TandemContextSnapshot[],
+): WorkspaceSnapshot {
   return {
     workspace: store.getWorkspace(),
     documents: store.listDocuments(),
@@ -1469,6 +1506,7 @@ function workspaceSnapshot(store: WorkspaceStore, getPageContexts?: () => PageCo
     project: store.getProject(),
     visualSelection: store.getVisualSelection(),
     pageContexts: getPageContexts?.() ?? [],
+    tandemContexts: getTandemContexts?.() ?? [],
   };
 }
 

@@ -22,6 +22,8 @@ const TEXT_DOCUMENT_EXTENSIONS = new Set([
   '.css', '.csv', '.html', '.htm', '.js', '.json', '.jsx', '.md', '.mjs', '.scss', '.text', '.ts', '.tsx', '.txt', '.xml', '.yaml', '.yml',
 ]);
 const EXCEL_DOCUMENT_EXTENSIONS = new Set(['.xlsx']);
+import type { TandemContextSnapshot } from '../../shared/tandem';
+
 const MAX_WORKBOOK_BYTES = 20 * 1024 * 1024;
 const MAX_DATABASE_IMPORT_ROWS = 5_000;
 const MAX_DATABASE_IMPORT_COLUMNS = 100;
@@ -34,6 +36,8 @@ export class WorkspaceEngine {
     private readonly git: GitEngine,
     private readonly pagesStore?: PagesStore,
     private readonly onPagesChanged?: () => void,
+    /** Frozen Tandem pages the user checked into explicit context. */
+    private readonly getTandemContexts?: () => TandemContextSnapshot[],
   ) {}
 
   getSnapshot(): WorkspaceSnapshot {
@@ -44,6 +48,7 @@ export class WorkspaceEngine {
       project: this.store.getProject(),
       visualSelection: this.store.getVisualSelection(),
       pageContexts: this.pagesStore ? selectedPageContexts(this.pagesStore) : [],
+      tandemContexts: this.getTandemContexts?.() ?? [],
     };
   }
 
@@ -263,6 +268,11 @@ export class WorkspaceEngine {
   }
 
   refreshPageContexts(): void {
+    this.emitSnapshot();
+  }
+
+  /** Called when Tandem context selection or freshness changes. */
+  refreshTandemContexts(): void {
     this.emitSnapshot();
   }
 }

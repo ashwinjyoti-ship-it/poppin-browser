@@ -82,6 +82,8 @@ export class BrowserEngine {
   private authenticationWindow: BrowserWindow | null = null;
   private overlayKind: 'authentication' | 'preview' | null = null;
   private contentVisible = true;
+  /** The single reusable Tandem World surface, if it is open. */
+  private tandemWorldTabId: string | null = null;
 
   constructor(
     private readonly window: BrowserWindow,
@@ -171,6 +173,42 @@ export class BrowserEngine {
     const normalized = normalizeAddressInput(url);
     if (normalized.kind !== 'url') return;
     this.createTab(normalized.url, randomUUID(), false, undefined, true, 'end');
+  }
+
+  /**
+   * Tandem World: one dedicated, reusable surface in Poppin's centre area that
+   * hosts the real Tandem application. It uses the same WebContentsView runtime
+   * as browsing (no iframe, no DOM copy, so Tandem keeps its own CSP, auth,
+   * routing and state), but it is pinned and reused rather than accumulating
+   * tabs.
+   */
+  openTandemWorld(url: string): void {
+    const normalized = normalizeAddressInput(url);
+    if (normalized.kind !== 'url') return;
+    const existing = this.tandemWorldTabId ? this.tabs.get(this.tandemWorldTabId) : undefined;
+    if (existing && !existing.view.webContents.isDestroyed()) {
+      void existing.view.webContents.loadURL(normalized.url).catch(() => undefined);
+      this.activateTab(existing.snapshot.id);
+      return;
+    }
+    const id = randomUUID();
+    this.tandemWorldTabId = id;
+    this.createTab(normalized.url, id, false, { id, url: normalized.url, pinned: true, groupId: null }, true, 'end');
+    const created = this.tabs.get(id);
+    if (created) {
+      created.snapshot.title = 'Tandem World';
+      this.emitSnapshot();
+    }
+  }
+
+  closeTandemWorld(): void {
+    const tabId = this.tandemWorldTabId;
+    this.tandemWorldTabId = null;
+    if (tabId && this.tabs.has(tabId)) this.closeTab(tabId, false);
+  }
+
+  isTandemWorldTab(tabId: string): boolean {
+    return this.tandemWorldTabId === tabId;
   }
 
   hasTab(tabId: string): boolean {
@@ -929,6 +967,7 @@ export class BrowserEngine {
       });
       if (this.closedTabs.length > CLOSED_TAB_LIMIT) this.closedTabs.shift();
     }
+    if (this.tandemWorldTabId === tabId) this.tandemWorldTabId = null;
     this.window.contentView.removeChildView(tab.view);
     this.tabs.delete(tabId);
     this.tabOrder = this.tabOrder.filter((id) => id !== tabId);

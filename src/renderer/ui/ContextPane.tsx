@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
-import { Check, ChevronLeft, ChevronRight, Copy, Database, ExternalLink, FileText, Globe2, RefreshCw, RotateCcw, X } from 'lucide-react';
+import { BookOpenText, Check, ChevronLeft, ChevronRight, Copy, Database, ExternalLink, FileText, Globe2, RefreshCw, RotateCcw, X } from 'lucide-react';
 
 import type { TaskCommand, TaskCommandResult, TaskSnapshot } from '../../shared/task';
 import type { WorkspaceSnapshot } from '../../shared/workspace';
 import type { BrowserAgentCommand, BrowserAgentCommandResult, BrowserAgentSnapshot } from '../../shared/browser-agent';
 import type { BrowserTabSnapshot } from '../../shared/browser';
 import type { WorkspaceCommandResult } from '../../shared/workspace';
+import type { TandemSnapshot } from '../../shared/tandem';
 
 interface ContextPaneProps {
   collapsed: boolean;
@@ -22,15 +23,18 @@ interface ContextPaneProps {
   activeTab?: BrowserTabSnapshot | null;
   onCaptureVisualSelection?: (tabId: string) => Promise<WorkspaceCommandResult>;
   onClearVisualSelection?: () => void;
+  tandem?: TandemSnapshot;
+  /** Opens the real Tandem application in Poppin's centre viewing area. */
+  onOpenTandemWorld?: () => void;
 }
 
 export type PaneSection = 'context' | 'task' | 'result';
 
-export function ContextPane({ collapsed, snapshot, taskSnapshot, onCollapseChange, onRefreshTab, onTaskCommand, onOpenResult, section, onSectionChange, browserAgentSnapshot, onBrowserAgentCommand, activeTab, onCaptureVisualSelection, onClearVisualSelection }: ContextPaneProps) {
+export function ContextPane({ collapsed, snapshot, taskSnapshot, onCollapseChange, onRefreshTab, onTaskCommand, onOpenResult, section, onSectionChange, browserAgentSnapshot, onBrowserAgentCommand, activeTab, onCaptureVisualSelection, onClearVisualSelection, tandem, onOpenTandemWorld }: ContextPaneProps) {
   const [internalSection, setInternalSection] = useState<PaneSection>('context');
   const activeSection = section ?? internalSection;
   const selectedDocuments = snapshot.documents.filter((document) => document.selected);
-  const itemCount = snapshot.tabContexts.length + selectedDocuments.length + (snapshot.pageContexts?.length ?? 0) + (snapshot.visualSelection ? 1 : 0);
+  const itemCount = snapshot.tabContexts.length + selectedDocuments.length + (snapshot.pageContexts?.length ?? 0) + (snapshot.tandemContexts?.length ?? 0) + (snapshot.visualSelection ? 1 : 0);
 
   if (collapsed) {
     return (
@@ -59,6 +63,17 @@ export function ContextPane({ collapsed, snapshot, taskSnapshot, onCollapseChang
       {activeSection === 'context' ? <ContextView snapshot={snapshot} activeTab={activeTab} onRefreshTab={onRefreshTab} onCaptureVisualSelection={onCaptureVisualSelection} onClearVisualSelection={onClearVisualSelection} /> : null}
       {activeSection === 'task' ? <TaskView snapshot={taskSnapshot} browserAgent={browserAgentSnapshot} onCommand={onTaskCommand} onBrowserAgentCommand={onBrowserAgentCommand} /> : null}
       {activeSection === 'result' ? <ResultView snapshot={taskSnapshot} workspace={snapshot} onCommand={onTaskCommand} onOpenResult={onOpenResult} /> : null}
+      {onOpenTandemWorld ? (
+        <button
+          type="button"
+          className="tandem-world-button"
+          onClick={onOpenTandemWorld}
+          disabled={tandem?.connection.state !== 'ready'}
+          title={tandem?.connection.state === 'ready' ? 'Open Tandem in the centre view' : tandem?.connection.message}
+        >
+          <BookOpenText size={15} /> Tandem World
+        </button>
+      ) : null}
     </aside>
   );
 }
@@ -69,11 +84,14 @@ function ContextView({ snapshot, activeTab, onRefreshTab, onCaptureVisualSelecti
   onRefreshTab: (tabId: string) => void;
   onCaptureVisualSelection?: (tabId: string) => Promise<WorkspaceCommandResult>;
   onClearVisualSelection?: () => void;
+  tandem?: TandemSnapshot;
+  /** Opens the real Tandem application in Poppin's centre viewing area. */
+  onOpenTandemWorld?: () => void;
 }) {
   const [selectionMessage, setSelectionMessage] = useState('');
   const [selecting, setSelecting] = useState(false);
   const documents = snapshot.documents.filter((document) => document.selected);
-  const itemCount = snapshot.tabContexts.length + documents.length + (snapshot.pageContexts?.length ?? 0) + (snapshot.visualSelection ? 1 : 0);
+  const itemCount = snapshot.tabContexts.length + documents.length + (snapshot.pageContexts?.length ?? 0) + (snapshot.tandemContexts?.length ?? 0) + (snapshot.visualSelection ? 1 : 0);
   const activeIsLocalhost = Boolean(activeTab && /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?(?:\/|$)/i.test(activeTab.url));
   const capture = async () => {
     if (!activeTab || !onCaptureVisualSelection) return;
@@ -112,6 +130,17 @@ function ContextView({ snapshot, activeTab, onRefreshTab, onCaptureVisualSelecti
             <span className="context-source">Native {page.kind}{page.rowCount === null ? '' : ` · ${page.rowCount} rows`}</span>
             <pre>{page.content || '(Empty page)'}</pre>
             {page.truncated ? <span className="context-note">Captured at the 60,000-character limit.</span> : null}
+          </article>
+        ))}
+        {(snapshot.tandemContexts ?? []).map((page) => (
+          <article className="context-card" key={`tandem-${page.pageId}`}>
+            <div className="context-card-heading"><BookOpenText size={14} /><strong>{page.title}</strong></div>
+            <span className="context-source">Tandem page{page.updatedAt ? ` · updated ${page.updatedAt}` : ''}</span>
+            <pre>{page.capturedMarkdown || '(Empty Tandem page)'}</pre>
+            <span className="context-note">
+              Frozen {new Date(page.capturedAt).toLocaleString()}.{page.stale ? ' This snapshot could not be refreshed.' : ''}
+              {page.truncated ? ' Captured at the 60,000-character limit.' : ''}
+            </span>
           </article>
         ))}
         {snapshot.visualSelection ? (

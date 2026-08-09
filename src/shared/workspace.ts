@@ -10,6 +10,8 @@ export interface WorkspaceRecordSnapshot {
   createdAt: string;
 }
 
+import type { TandemContextSnapshot } from './tandem';
+
 export interface WorkspaceSnapshot {
   workspace: WorkspaceRecordSnapshot | null;
   documents: WorkspaceDocumentSnapshot[];
@@ -17,6 +19,8 @@ export interface WorkspaceSnapshot {
   project: WorkspaceProjectSnapshot | null;
   visualSelection: VisualSelectionSnapshot | null;
   pageContexts?: PageContextSnapshot[];
+  /** Frozen Tandem pages the user explicitly checked into context. */
+  tandemContexts?: TandemContextSnapshot[];
 }
 
 export interface PageContextSnapshot {
