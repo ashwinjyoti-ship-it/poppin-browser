@@ -57,7 +57,7 @@ installs it.
 | Browser Use | `src/main/browser/browser-agent-engine.ts`, `src/shared/browser-agent.ts` | Good. Task spaces, semantic snapshots, approvals, takeover already transport-independent. | Untouched; only its *exposure* changes. |
 | Capability inference | `src/shared/task-requirements.ts` | Keyword-only regex; browser-use inferred per prompt. | To evolve into the Capability Router (Phase 2/3). |
 | Product task | `src/main/task/task-store.ts`, `src/shared/task.ts` | Sound. Holds context snapshot, browser run, delivery, history. | Kept. A Poppin Task ≠ an agent session. |
-| Native pages | `src/main/pages/*` | A Poppin-native re-implementation of Tandem concepts. | Kept working; Tandem World + Tandem capability land beside it, cleanup only after (Part V). |
+| Native pages | `src/main/pages/*` | Internal encrypted Memory storage and legacy native document/database support. | The visible Page/Database UI is removed now that Tandem is the source of truth; the engine remains for Memory and compatibility. |
 | Tandem API | `unified-doc-management/worker/src/routes/*`, `docs/AGENT_API.md` | Complete REST surface incl. `GET /api/agent/catalog`, markdown read/write, `edit-section`, agent comments. | Used directly. No endpoint mirroring. |
 
 ### Migration risks
@@ -160,8 +160,9 @@ Switching harness switches the session, not the task.
   frame hierarchy) beyond URL reconstruction is not implemented.
 - **ACP `elicitation/create`** is not advertised, so blocking questions from an
   ACP agent are refused rather than surfaced.
-- **Tandem cleanup (Part V)** has not started: the native Pages implementation
-  still works and is still used. Removing it before Tandem World and the Tandem
+- **Tandem cleanup (Part V)** has started at the UI boundary: native Page and
+  Database creation are hidden while the engine remains for encrypted Memory.
+  Removing the engine before Tandem World and the Tandem
   capability have been exercised in daily use would break working behaviour.
 
 Poppin stays runnable at every phase, and the working Codex path is never

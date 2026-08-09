@@ -6,10 +6,12 @@ import { BrowserToolbar } from '../src/renderer/ui/BrowserToolbar';
 import { TabStrip } from '../src/renderer/ui/TabStrip';
 import { CommandBar } from '../src/renderer/ui/CommandBar';
 import { TaskTabView } from '../src/renderer/ui/TaskTabView';
+import { TandemSection } from '../src/renderer/ui/TandemSection';
 import { PaneResizer } from '../src/renderer/ui/PaneResizer';
 import { DEFAULT_BROWSER_SETTINGS, type BrowserTabSnapshot } from '../src/shared/browser';
 import type { TaskSnapshot } from '../src/shared/task';
 import type { WorkspaceSnapshot } from '../src/shared/workspace';
+import { EMPTY_TANDEM_SNAPSHOT } from '../src/shared/tandem';
 
 const TAB: BrowserTabSnapshot = {
   id: 'tab-one',
@@ -231,8 +233,23 @@ describe('browser chrome', () => {
         onOpenTandemWorld={onOpenTandemWorld}
       />,
     );
+    expect(screen.getByText('Tandem')).toBeVisible();
     await user.click(screen.getByRole('button', { name: /open tandem world/i }));
     expect(onOpenTandemWorld).toHaveBeenCalledOnce();
+  });
+
+  it('offers an explicit Tandem World action in the connected workspace section', async () => {
+    const user = userEvent.setup();
+    const onCommand = vi.fn().mockResolvedValue(null);
+    render(<TandemSection snapshot={{
+      ...EMPTY_TANDEM_SNAPSHOT,
+      connection: { ...EMPTY_TANDEM_SNAPSHOT.connection, state: 'ready', message: 'Connected', baseUrl: 'https://tandem.example.com', hasCredential: true, writable: true },
+      workspaces: [{ id: 'workspace-1', name: 'Personal' }],
+      activeWorkspaceId: 'workspace-1',
+    }} onCommand={onCommand} />);
+
+    await user.click(screen.getByRole('button', { name: 'Open Tandem World' }));
+    expect(onCommand).toHaveBeenCalledWith({ type: 'openWorld' });
   });
 
   it('reflects navigation availability and submits the address form', async () => {

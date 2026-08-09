@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { NativeDatabaseView } from '../src/renderer/ui/NativeDatabaseView';
 import { NativePageView } from '../src/renderer/ui/NativePageView';
-import { PagesSection } from '../src/renderer/ui/PagesSection';
+import { MemorySection } from '../src/renderer/ui/MemorySection';
 import type { PageDocumentSnapshot, PoppinPagesApi } from '../src/shared/pages';
 import type { TaskSnapshot } from '../src/shared/task';
 
@@ -31,21 +31,14 @@ describe('native Pages UI', () => {
     });
   });
 
-  it('creates, context-selects, and opens items from the Pages tree', async () => {
+  it('keeps encrypted Memory available without native Page or Database creation controls', async () => {
     const user = userEvent.setup();
     const command = vi.fn().mockResolvedValue(null);
-    render(<PagesSection snapshot={{
-      pages: [{ id: 'page-1', title: 'Plan', kind: 'page', parentId: null, createdAt: '', updatedAt: '' }],
-      tabs: [], activeTabId: null, selectedPageIds: [],
-    }} pageContexts={[]} onCommand={command} />);
-    await user.click(screen.getByRole('button', { name: 'Plan' }));
-    await user.click(screen.getByRole('checkbox'));
-    await user.click(screen.getByRole('button', { name: /^Page$/ }));
-    await user.click(screen.getByRole('button', { name: /^Database$/ }));
-    expect(command).toHaveBeenCalledWith({ type: 'openPage', pageId: 'page-1' });
-    expect(command).toHaveBeenCalledWith({ type: 'setPageSelected', pageId: 'page-1', selected: true });
-    expect(command).toHaveBeenCalledWith(expect.objectContaining({ type: 'createPage', kind: 'page' }));
-    expect(command).toHaveBeenCalledWith(expect.objectContaining({ type: 'createPage', kind: 'database' }));
+    render(<MemorySection onCommand={command} />);
+    await user.click(screen.getByRole('button', { name: /Open Memory/i }));
+    expect(command).toHaveBeenCalledWith({ type: 'openMemory' });
+    expect(screen.queryByRole('button', { name: /^Page$/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Database$/ })).not.toBeInTheDocument();
   });
 
   it('edits stable blocks, anchors a selection instruction, and can send it through Task', async () => {

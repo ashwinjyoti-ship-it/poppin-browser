@@ -3,18 +3,17 @@ import { type FormEvent, useState } from 'react';
 
 import type { WorkspaceSnapshot } from '../../shared/workspace';
 import type { BrowserTabSnapshot } from '../../shared/browser';
-import type { PagesCommand, PagesSnapshot } from '../../shared/pages';
+import type { PagesCommand } from '../../shared/pages';
 import type { TandemCommand, TandemSnapshot } from '../../shared/tandem';
 import type { WorkspaceCommandResult } from '../../shared/workspace';
 import { ProjectSection } from './ProjectSection';
-import { PagesSection } from './PagesSection';
+import { MemorySection } from './MemorySection';
 import { TandemSection } from './TandemSection';
 
 interface WorkspacePaneProps {
   collapsed: boolean;
   snapshot: WorkspaceSnapshot;
   tabs: BrowserTabSnapshot[];
-  pages: PagesSnapshot;
   activeTab?: BrowserTabSnapshot | null;
   onCollapseChange: (collapsed: boolean) => void;
   onCreate: (name: string) => Promise<string | null>;
@@ -33,7 +32,7 @@ interface WorkspacePaneProps {
  * checked items are ever sent to the agent.
  */
 export function WorkspacePane({
-  collapsed, snapshot, tabs, pages, activeTab, onCollapseChange, onCreate, onCommand, onPagesCommand,
+  collapsed, snapshot, tabs, activeTab, onCollapseChange, onCreate, onCommand, onPagesCommand,
   onRefreshTab, onCaptureVisualSelection, onClearVisualSelection, tandem, onTandemCommand,
 }: WorkspacePaneProps) {
   const [name, setName] = useState('My Workspace');
@@ -84,8 +83,8 @@ export function WorkspacePane({
       </div>
       {snapshot.workspace ? (
         <div className="workspace-content">
-          <PagesSection snapshot={pages} pageContexts={snapshot.pageContexts ?? []} onCommand={onPagesCommand} />
           <TandemSection snapshot={tandem} onCommand={onTandemCommand} />
+          <MemorySection onCommand={onPagesCommand} />
           <section className="workspace-section">
             <div className="section-heading"><span>Tabs</span><span>{tabs.length}</span></div>
             <div className="selection-list">
@@ -138,7 +137,7 @@ export function WorkspacePane({
                       <FileText size={14} />
                       <span>{document.name}</span>
                     </label>
-                    {/\.xlsx$/i.test(document.name) ? <button type="button" className="document-open-database" onClick={() => { void onCommand({ type: 'openDocumentAsDatabase', documentId: document.id }); }} aria-label={`Open ${document.name} as Database`}>DB</button> : <span />}
+                    <span />
                     <button type="button" onClick={() => { void onCommand({ type: 'removeDocument', documentId: document.id }); }} aria-label={`Remove ${document.name}`}><X size={13} /></button>
                   </div>
                   {document.selected ? (

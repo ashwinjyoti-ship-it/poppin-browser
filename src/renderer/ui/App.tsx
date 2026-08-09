@@ -358,7 +358,6 @@ export function App() {
         collapsed={workspaceCollapsed}
         snapshot={workspaceSnapshot}
         tabs={snapshot.tabs.filter((tab) => !tab.taskSpaceId)}
-        pages={pagesSnapshot}
         activeTab={activeTab}
         onCollapseChange={setWorkspaceCollapsed}
         onCreate={(name) => sendWorkspaceCommand({ type: 'createWorkspace', name })}

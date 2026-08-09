@@ -236,6 +236,7 @@ Initial candidates are an unsent Gmail draft, a timestamped YouTube transcript s
 
 ## Decision Log
 
+- **2026-08-09:** Tandem is the document and database source of truth. The visible native Pages tree and its Page/Database creation and spreadsheet-import controls are removed; encrypted local Memory remains as a dedicated workspace action. Tandem World gains labeled entry points in both the tab strip and Tandem workspace section, each opening or focusing the centre Tandem surface.
 - **2026-08-06:** Phase 1 begins from the supplied v0.1 brief and design assets.
 - **2026-08-06:** Later phases are explicitly provisional pending daily Phase 1 use.
 - **2026-08-06:** Phase 1 uses DuckDuckGo for address-bar searches and restores cookies, tabs, active tab, and window state.
