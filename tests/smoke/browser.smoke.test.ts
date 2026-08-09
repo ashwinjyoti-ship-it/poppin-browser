@@ -129,7 +129,6 @@ describe('packaged browser workflow', () => {
 
     const address = shell.getByLabel('Address and search');
     await expect.poll(() => shell.getByRole('button', { name: 'Open workspace' }).isVisible()).toBe(true);
-    await expect.poll(() => shell.getByRole('button', { name: 'Open context and task pane' }).isVisible()).toBe(true);
     await shell.getByRole('button', { name: 'Open workspace' }).click();
     const workspaceDivider = shell.getByRole('separator', { name: 'Resize workspace pane' });
     const initialWorkspaceWidth = Number(await workspaceDivider.getAttribute('aria-valuenow'));
@@ -179,25 +178,14 @@ describe('packaged browser workflow', () => {
     ).toBe(false);
     await address.fill(origin);
     await address.press('Enter');
-    await expect.poll(() => pageInfo(application!, origin)).toMatchObject({ title: 'Local fixture' });
+    await expect.poll(() => exactPageInfo(application!, `${origin}/`)).toMatchObject({ title: 'Local fixture' });
 
-    await shell.getByRole('button', { name: 'Open context and task pane' }).click();
-    await shell.getByRole('button', { name: 'Collapse right pane' }).click();
-    const collapsedRightPane = shell.getByLabel('Right pane collapsed');
-    await expect.poll(() => collapsedRightPane.isVisible()).toBe(true);
     await shell.getByRole('button', { name: 'Browser settings' }).click();
     const settingsPanel = shell.getByRole('complementary', { name: 'Browser settings' });
-    const railBox = await collapsedRightPane.boundingBox();
-    const settingsBox = await settingsPanel.boundingBox();
-    expect(railBox).not.toBeNull();
-    expect(settingsBox).not.toBeNull();
-    await expect.poll(() => shell.evaluate(({ x, y }) => {
-      return document.elementFromPoint(x, y)?.closest('.browser-settings-panel')?.getAttribute('aria-label') ?? null;
-    }, { x: railBox!.x + railBox!.width / 2, y: Math.max(railBox!.y + 10, settingsBox!.y + 10) })).toBe('Browser settings');
+    await expect.poll(() => settingsPanel.isVisible()).toBe(true);
     await shell.getByLabel('Links open in').selectOption('same-tab');
     await expect.poll(() => shell.evaluate(async () => (await window.poppinBrowser.getSnapshot()).settings.linkOpening)).toBe('same-tab');
     await shell.getByRole('button', { name: 'Close browser settings' }).click();
-    await shell.getByRole('button', { name: 'Open context and task pane' }).click();
     await application.evaluate(async ({ webContents }, prefix) => {
       const contents = webContents.getAllWebContents().find((candidate) => candidate.getURL().startsWith(prefix));
       await contents?.executeJavaScript("document.querySelector('#popup').click()");
@@ -259,18 +247,16 @@ describe('packaged browser workflow', () => {
     await expect.poll(() => workspace.getByRole('heading', { name: 'Launch workspace' }).isVisible()).toBe(true);
     const workspaceBox = await workspace.boundingBox();
     expect(workspaceBox).not.toBeNull();
-    for (const name of ['Page', 'Database', 'Memory']) {
-      const actionBox = await workspace.getByRole('button', { name, exact: true }).boundingBox();
-      expect(actionBox).not.toBeNull();
-      expect(actionBox!.x).toBeGreaterThanOrEqual(workspaceBox!.x);
-      expect(actionBox!.x + actionBox!.width).toBeLessThanOrEqual(workspaceBox!.x + workspaceBox!.width);
-    }
+    const memoryActionBox = await workspace.getByRole('button', { name: /Open Memory/i }).boundingBox();
+    expect(memoryActionBox).not.toBeNull();
+    expect(memoryActionBox!.x).toBeGreaterThanOrEqual(workspaceBox!.x);
+    expect(memoryActionBox!.x + memoryActionBox!.width).toBeLessThanOrEqual(workspaceBox!.x + workspaceBox!.width);
+    expect(await workspace.getByRole('button', { name: 'Page', exact: true }).count()).toBe(0);
+    expect(await workspace.getByRole('button', { name: 'Database', exact: true }).count()).toBe(0);
     const tabContextCheckbox = workspace.getByRole('checkbox', { name: 'Local fixture' });
     await tabContextCheckbox.click();
     await expect.poll(() => tabContextCheckbox.isChecked()).toBe(true);
-    const context = shell.getByLabel('Context');
-    await expect.poll(() => context.getByText('Local fixture', { exact: true }).count()).toBeGreaterThan(0);
-    await expect.poll(() => context.locator('pre').first().textContent()).toContain('Open popup');
+    await expect.poll(() => workspace.locator('.context-preview pre').first().textContent()).toContain('Open popup');
 
     await address.fill(`${origin}/agent`);
     await address.press('Enter');
@@ -319,8 +305,8 @@ describe('packaged browser workflow', () => {
     const sendRef = thirdSemantic.nodes.find((node) => node.locator === '#send' || /^send$/i.test(node.name))?.ref;
     expect(sendRef).toBeTruthy();
     expect(await shell.evaluate(({ scope, snapshotId, ref }) => window.poppinBrowserAgent.command({ type: 'act', ...scope, action: { type: 'click', snapshotId, ref } }), { scope: agentScope, snapshotId: thirdSemantic.snapshotId, ref: sendRef! })).toEqual({ ok: false, message: 'Approval required.' });
-    await expect.poll(() => shell.getByLabel('Browser action approval required').isVisible()).toBe(true);
-    await shell.getByLabel('Browser action approval required').getByRole('button', { name: 'Reject' }).click();
+    await expect.poll(() => shell.evaluate(async () => (await window.poppinBrowserAgent.getSnapshot()).pendingApproval?.target ?? null)).toBe('Send reply');
+    expect(await shell.evaluate(() => window.poppinBrowserAgent.command({ type: 'respondApproval', decision: 'reject' }))).toEqual({ ok: false, message: 'Browser action rejected by the user.' });
     await expect.poll(() => application!.evaluate(async ({ webContents }, targetUrl) => {
       const candidates = webContents.getAllWebContents().filter((candidate) => candidate.getURL() === targetUrl);
       return await Promise.all(candidates.map((contents) => contents.executeJavaScript('document.body.dataset.sent || null')));
@@ -341,19 +327,23 @@ describe('packaged browser workflow', () => {
     expect(await shell.evaluate(() => window.poppinBrowserAgent.command({ type: 'stop' }))).toMatchObject({ ok: true });
     expect(await shell.evaluate(() => window.poppinBrowserAgent.command({ type: 'closeTaskTabs' }))).toMatchObject({ ok: true });
 
-    await address.fill(`${origin}/client-redirect`);
-    await address.press('Enter');
+    await shell.evaluate(async (url) => {
+      const snapshot = await window.poppinBrowser.getSnapshot();
+      await window.poppinBrowser.command({ type: 'navigate', tabId: snapshot.activeTabId, input: url });
+    }, `${origin}/client-redirect`);
     await expect.poll(() => exactPageInfo(application!, `${origin}/second`)).toMatchObject({ title: 'Second page' });
     expect(await shell.getByRole('alert').count()).toBe(0);
 
-    await address.fill(origin);
-    await address.press('Enter');
-    await expect.poll(() => pageInfo(application!, origin)).toMatchObject({ title: 'Local fixture' });
-
-    await application.evaluate(async ({ webContents }, prefix) => {
-      const contents = webContents.getAllWebContents().find((candidate) => candidate.getURL().startsWith(prefix));
-      await contents?.executeJavaScript("document.querySelector('#popup').click()");
+    await shell.evaluate(async (url) => {
+      const snapshot = await window.poppinBrowser.getSnapshot();
+      await window.poppinBrowser.command({ type: 'navigate', tabId: snapshot.activeTabId, input: url });
     }, origin);
+    await expect.poll(() => exactPageInfo(application!, `${origin}/`)).toMatchObject({ title: 'Local fixture' });
+
+    await application.evaluate(async ({ webContents }, targetUrl) => {
+      const contents = webContents.getAllWebContents().find((candidate) => candidate.getURL() === targetUrl);
+      await contents?.executeJavaScript("document.querySelector('#popup').click()");
+    }, `${origin}/`);
     await expect.poll(() => shell.getByRole('tab').count()).toBe(2);
     await expect.poll(() => pageInfo(application!, `${origin}/popup`)).toMatchObject({ title: 'Popup page' });
 

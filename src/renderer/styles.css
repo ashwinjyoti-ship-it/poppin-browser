@@ -553,13 +553,12 @@ body.pane-is-resizing * { cursor: col-resize !important; user-select: none !impo
 .document-row > .document-open-database:hover { color: #8b581f; background: #ffe7c4; }
 .section-empty { padding: 8px 6px; color: #a0978d; font-size: 11px; }
 
-.pages-section { container-type: inline-size; }
-.pages-actions { display: flex; min-width: 0; flex-wrap: wrap; justify-content: flex-end; gap: 4px; }
-.pages-actions button { flex: 0 0 auto; }
-@container (max-width: 260px) {
-  .pages-section .section-heading { display: grid; grid-template-columns: minmax(0, 1fr); align-items: start; gap: 8px; }
-  .pages-actions { justify-content: flex-start; }
-}
+.memory-open-button, .tandem-world-button { display: flex; width: 100%; align-items: center; gap: 9px; padding: 9px 10px; border: 1px solid var(--border); border-radius: 10px; color: #6e4b24; background: var(--surface); text-align: left; }
+.memory-open-button:hover, .tandem-world-button:hover { border-color: #dc9a4f; background: #fff8ed; }
+.memory-open-button > span { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
+.memory-open-button strong { font-size: 11px; }
+.memory-open-button small { color: var(--text-muted); font-size: 9px; }
+.tandem-world-button { justify-content: center; margin-bottom: 9px; color: #8b581f; font-size: 11px; font-weight: 700; }
 .page-tree { display: flex; flex-direction: column; gap: 2px; }
 .page-tree-row { display: grid; grid-template-columns: 18px 18px minmax(0, 1fr) 24px; align-items: center; min-height: 32px; border-radius: 8px; }
 .page-tree-row:hover { background: var(--surface-muted); }
@@ -911,7 +910,7 @@ body.pane-is-resizing * { cursor: col-resize !important; user-select: none !impo
 .tandem-actions { display: flex; gap: 8px; margin-top: 8px; }
 .tandem-search { display: grid; grid-template-columns: 16px minmax(0, 1fr); align-items: center; gap: 7px; height: 30px; margin-bottom: 8px; padding: 0 9px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: #988f86; }
 .tandem-search input { min-width: 0; border: 0; outline: 0; background: transparent; color: #34302b; font: inherit; font-size: 12px; }
-.tab-tandem-world { border: 0; cursor: pointer; }
+.tab-tandem-world { display: inline-flex; flex: 0 0 auto; min-width: 88px; max-width: 108px; align-items: center; justify-content: center; gap: 6px; padding: 0 10px; border: 0; cursor: pointer; }
 .tab-tandem-world:disabled { opacity: .4; cursor: default; }
 
 .section-subheading { display: block; margin: 10px 0 4px; color: #a69a8d; font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }

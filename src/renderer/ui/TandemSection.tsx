@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Database, FileText, Folder, RefreshCw, Search, Shapes } from 'lucide-react';
+import { BookOpenText, Database, FileText, Folder, RefreshCw, Search, Shapes } from 'lucide-react';
 
 import type { TandemCommand, TandemContextSnapshot, TandemPageSnapshot, TandemSnapshot } from '../../shared/tandem';
 
@@ -72,6 +72,9 @@ export function TandemSection({ snapshot, onCommand }: TandemSectionProps) {
           <RefreshCw size={13} /> Refresh Context
         </button>
       </div>
+      <button type="button" className="tandem-world-button" disabled={busy} onClick={() => { void run({ type: 'openWorld' }); }}>
+        <BookOpenText size={15} /> Open Tandem World
+      </button>
       {snapshot.workspaces.length > 1 ? (
         <label className="tandem-field">
           <span className="sr-only">Tandem workspace</span>

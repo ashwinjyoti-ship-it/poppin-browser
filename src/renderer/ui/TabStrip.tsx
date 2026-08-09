@@ -100,13 +100,14 @@ export function TabStrip({
         {onOpenTandemWorld ? (
           <button
             type="button"
-            className="tab tab-pinned tab-tandem-world"
+            className="tab tab-tandem-world"
             aria-label="Open Tandem World"
             title={tandemReady ? 'Tandem World' : tandemMessage ?? 'Connect Tandem to use Tandem World'}
             disabled={!tandemReady}
             onClick={onOpenTandemWorld}
           >
             <span className="tab-icon" aria-hidden="true"><BookOpenText size={15} /></span>
+            <span className="tab-title">Tandem</span>
           </button>
         ) : null}
         {agentTaskSpace ? (

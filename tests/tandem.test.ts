@@ -85,6 +85,19 @@ describe('TandemCredentialStore', () => {
 });
 
 describe('TandemClient', () => {
+  it('keeps a valid API-key connection when the optional browser account endpoint returns 401', async () => {
+    const api = new TandemClient(BASE, 'udm_secret', async (input) => {
+      const pathname = new URL(String(input)).pathname;
+      if (pathname === '/api/auth/me') {
+        return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 });
+      }
+      return new Response(JSON.stringify({ endpoints: [] }), { status: 200 });
+    });
+
+    await expect(api.catalog()).resolves.toEqual({ endpoints: [] });
+    await expect(api.me()).resolves.toEqual({ label: null, writable: true });
+  });
+
   it('sends the API key as a header and reads Markdown for a page', async () => {
     const calls: Call[] = [];
     const api = client({

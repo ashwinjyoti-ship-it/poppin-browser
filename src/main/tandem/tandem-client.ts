@@ -46,9 +46,10 @@ export class TandemClient {
     try {
       const user = await this.request<{ email?: string; name?: string }>('GET', '/api/auth/me');
       return { label: user.name || user.email || null, writable: true };
-    } catch (error) {
-      if (error instanceof TandemApiError && error.status === 401) throw error;
-      // A catalog-only key still permits the documented write endpoints.
+    } catch {
+      // `/api/auth/me` is a browser-session endpoint in Tandem and can reject
+      // an otherwise valid X-API-Key. It is used only for an optional label;
+      // catalog and workspace requests validate the integration itself.
       return { label: null, writable: true };
     }
   }
