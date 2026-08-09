@@ -744,6 +744,10 @@ export class BrowserEngine {
       this.authenticationWindow = popup;
       this.overlayKind = kind;
       popup.setTitle(kind === 'authentication' ? 'Secure sign-in' : 'Link preview');
+      // Publish the recovery controls before the child has painted. Some external
+      // sites delay their first paint or title update; waiting for either left a
+      // frameless preview above the app with no reachable Close/Open-in-tab UI.
+      this.emitSnapshot();
       popup.webContents.on('will-navigate', (event, url) => {
         const protocol = safeProtocol(url);
         if (protocol !== 'http:' && protocol !== 'https:' && protocol !== 'about:') event.preventDefault();
@@ -768,7 +772,8 @@ export class BrowserEngine {
         this.emitSnapshot();
       });
       popup.webContents.on('before-input-event', (_event, input) => {
-        if (input.type === 'keyDown' && input.key === 'Escape') popup.close();
+        if (input.type !== 'keyDown') return;
+        if (input.key === 'Escape' || (input.meta && input.key.toLowerCase() === 'w')) popup.close();
       });
     });
     contents.on('context-menu', (_event, params) => {
@@ -1272,11 +1277,14 @@ export class BrowserEngine {
     const popup = this.authenticationWindow;
     if (!popup || popup.isDestroyed() || this.window.isDestroyed()) return;
     const parent = this.window.getContentBounds();
-    const width = Math.min(720, Math.max(420, parent.width - 96));
-    const height = Math.min(760, Math.max(420, parent.height - 170));
+    // Preview windows are deliberately large enough to feel like an in-app
+    // Arc-style surface, while leaving a clear, persistent control rail in
+    // the parent window for Close and Open in tab.
+    const width = Math.min(1_280, Math.max(420, parent.width - 160));
+    const height = Math.min(920, Math.max(420, parent.height - 132));
     popup.setBounds({
       x: parent.x + Math.round((parent.width - width) / 2),
-      y: parent.y + Math.min(112, Math.max(72, Math.round(parent.height * 0.12))),
+      y: parent.y + Math.max(58, Math.round((parent.height - height) / 2)),
       width,
       height,
     });

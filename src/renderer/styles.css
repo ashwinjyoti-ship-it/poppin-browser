@@ -79,9 +79,36 @@ button { color: inherit; }
 .authentication-overlay-status strong { overflow: hidden; color: #584126; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .authentication-overlay-status span { color: #826e57; font-size: 9px; }
 .authentication-overlay-status button { padding: 7px 11px; border: 1px solid #d9b98f; border-radius: 9px; color: #72491f; background: white; font-size: 10px; font-weight: 650; }
-.link-preview-status { width: min(680px, calc(100% - 180px)); }
-.link-preview-status div { flex: 1; }
-.link-preview-status span { overflow: hidden; max-width: 460px; text-overflow: ellipsis; white-space: nowrap; }
+.link-preview-status {
+  top: clamp(74px, 11vh, 116px);
+  right: 22px;
+  left: auto;
+  flex-direction: column;
+  justify-content: flex-start;
+  width: 46px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  box-shadow: none;
+  transform: none;
+}
+.link-preview-description { position: absolute; overflow: hidden; width: 1px; height: 1px; clip: rect(0, 0, 0, 0); white-space: nowrap; }
+.link-preview-status button {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid rgba(214, 203, 189, .95);
+  border-radius: 999px;
+  color: #5c4b3a;
+  background: rgba(255, 253, 249, .98);
+  box-shadow: 0 6px 18px rgba(72, 44, 16, .16);
+}
+.link-preview-status button:hover { color: #7b4b16; border-color: rgba(206, 122, 26, .55); background: #fff5e8; }
+.link-preview-status button:focus-visible { outline: 3px solid rgba(232, 130, 11, .42); outline-offset: 3px; }
 
 .top-row {
   display: grid;
@@ -797,6 +824,11 @@ body.pane-is-resizing * { cursor: col-resize !important; user-select: none !impo
   .tab-row { margin-left: 16px; }
   .tab { min-width: 158px; }
   .command-bar { grid-template-columns: 38px 80px 140px 98px minmax(180px, 1fr) 42px 25px; gap: 7px; }
+}
+
+@media (max-width: 720px) {
+  .link-preview-status { top: 66px; right: 12px; }
+  .link-preview-status button { width: 38px; height: 38px; }
 }
 
 .chrome-compact .browser-chrome { padding: 7px 20px 0 var(--titlebar-left-inset, 80px); }

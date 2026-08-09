@@ -1,3 +1,4 @@
+import { ExternalLink, X } from 'lucide-react';
 import { type CSSProperties, type FormEvent, useEffect, useRef, useState } from 'react';
 
 import { DEFAULT_BROWSER_SETTINGS, type BrowserCommand, type BrowserSnapshot } from '../../shared/browser';
@@ -238,9 +239,9 @@ export function App() {
       ) : null}
       {snapshot.linkPreview ? (
         <section className="authentication-overlay-status link-preview-status" aria-label="Link preview overlay">
-          <div><strong>{snapshot.linkPreview.title}</strong><span>{snapshot.linkPreview.url}</span></div>
-          <button type="button" onClick={() => { void sendCommand({ type: 'openLinkPreviewInTab' }); }}>Open in tab</button>
-          <button type="button" onClick={() => { void sendCommand({ type: 'closeLinkPreview' }); }}>Close</button>
+          <div className="link-preview-description"><strong>{snapshot.linkPreview.title}</strong><span>{snapshot.linkPreview.url}</span></div>
+          <button type="button" aria-label="Close" title="Close preview (Esc)" onClick={() => { void sendCommand({ type: 'closeLinkPreview' }); }}><X size={17} /></button>
+          <button type="button" aria-label="Open in tab" title="Open preview in a tab" onClick={() => { void sendCommand({ type: 'openLinkPreviewInTab' }); }}><ExternalLink size={16} /></button>
         </section>
       ) : null}
       <header className="browser-chrome">
