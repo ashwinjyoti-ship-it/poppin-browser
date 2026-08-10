@@ -90,6 +90,7 @@ async function setup({ withProject = true, withBrowserAgent = false, withTabCont
   const onTaskEnded = vi.fn();
   const github = new FakeGitHub();
   const onOpenExternal = vi.fn();
+  const onProjectUpdated = vi.fn();
   const querySelectedDatabase = vi.fn(() => 'Name\nGuitar');
   const applyPageComment = vi.fn(() => 'Applied comment');
   const browserSnapshot: BrowserAgentSnapshot = {
@@ -126,6 +127,7 @@ async function setup({ withProject = true, withBrowserAgent = false, withTabCont
       onTaskEnded,
       github: github as unknown as GitHubEngine,
       onOpenExternal,
+      onProjectUpdated,
       querySelectedDatabase,
       applyPageComment,
       ...(withBrowserAgent ? {
@@ -135,7 +137,7 @@ async function setup({ withProject = true, withBrowserAgent = false, withTabCont
     },
   );
   await engine.initialize();
-  return { engine, fake, repositoryPath, taskStore, workspaceStore, onResultReady, onTaskEnded, directory, github, onOpenExternal, browserSnapshot, browserCommand, querySelectedDatabase, applyPageComment };
+  return { engine, fake, repositoryPath, taskStore, workspaceStore, onResultReady, onTaskEnded, directory, github, onOpenExternal, onProjectUpdated, browserSnapshot, browserCommand, querySelectedDatabase, applyPageComment };
 }
 
 describe('task engine', () => {
@@ -634,8 +636,8 @@ describe('task engine', () => {
     workspaceStore.close();
   });
 
-  it('keeps commit, push, PR creation, and merge as separately reviewed delivery steps', async () => {
-    const { engine, fake, repositoryPath, taskStore, workspaceStore, github, onOpenExternal } = await setup();
+  it('keeps commit, push, PR creation, merge, and local update as separately reviewed delivery steps', async () => {
+    const { engine, fake, repositoryPath, directory, taskStore, workspaceStore, github, onOpenExternal, onProjectUpdated } = await setup();
     await engine.execute({ type: 'startTask', prompt: 'Update the fixture', model: 'gpt-test', reasoningEffort: 'high', kind: 'code' });
     await writeFile(path.join(repositoryPath, 'README.md'), '# Ready to deliver\n');
     fake.emit('notification', { method: 'turn/completed', params: { threadId: 'thread-1', turn: { id: 'turn-1', status: 'completed', error: null } } });
@@ -643,7 +645,7 @@ describe('task engine', () => {
     await engine.execute({ type: 'approveResult' });
 
     expect(await engine.execute({ type: 'prepareCommit', branch: 'codex/delivery', message: 'feat: deliver fixture' })).toMatchObject({ ok: true, message: expect.stringMatching(/Prepared/) });
-    expect(engine.getSnapshot().task?.delivery).toMatchObject({ branch: 'codex/delivery', pushed: false });
+    expect(engine.getSnapshot().task?.delivery).toMatchObject({ branch: 'codex/delivery', pushed: false, localUpdated: false });
 
     expect(await engine.execute({ type: 'requestPush' })).toEqual({ ok: true, message: 'Approval required.' });
     expect(engine.getSnapshot().task?.pendingApproval).toMatchObject({ kind: 'git', title: 'Push branch to GitHub', detail: expect.stringContaining('codex/delivery') });
@@ -660,6 +662,22 @@ describe('task engine', () => {
     await engine.execute({ type: 'respondApproval', decision: 'accept' });
     expect(github.mergePullRequest).toHaveBeenCalledWith(repositoryPath, 12, 'squash');
     expect(engine.getSnapshot().task?.delivery?.pullRequest?.state).toBe('MERGED');
+    expect(engine.getSnapshot().task?.delivery?.localUpdated).toBe(false);
+
+    // Simulate a remote main tip that includes the delivery commit while local main stays behind.
+    const bare = path.join(directory, 'origin.git');
+    await execFileAsync('git', ['clone', '--bare', repositoryPath, bare]);
+    await execFileAsync('git', ['-C', bare, 'branch', '-f', 'main', 'codex/delivery']);
+    await execFileAsync('git', ['-C', repositoryPath, 'remote', 'add', 'origin', bare]);
+
+    expect(await engine.execute({ type: 'requestUpdateLocal' })).toEqual({ ok: true, message: 'Approval required.' });
+    expect(engine.getSnapshot().task?.pendingApproval).toMatchObject({ kind: 'git', title: 'Update local main', detail: expect.stringContaining('fast-forward') });
+    await engine.execute({ type: 'respondApproval', decision: 'accept' });
+    expect(engine.getSnapshot().task?.delivery).toMatchObject({ localUpdated: true, message: expect.stringMatching(/Updated local main/) });
+    expect(onProjectUpdated).toHaveBeenCalled();
+    expect(workspaceStore.getProject()?.branch).toBe('main');
+    expect((await execFileAsync('git', ['-C', repositoryPath, 'branch', '--show-current'])).stdout.trim()).toBe('main');
+
     await engine.close();
     taskStore.close();
     workspaceStore.close();

@@ -37,6 +37,8 @@ export interface TaskDeliverySnapshot {
   remote: string | null;
   pushed: boolean;
   pullRequest: { number: number; url: string; base: string; head: string; state: string; checks: string; review: string } | null;
+  /** True after the user separately approved checking out and fast-forwarding the PR base branch locally. */
+  localUpdated?: boolean;
   message: string;
 }
 
@@ -134,6 +136,7 @@ export type TaskCommand =
   | { type: 'requestPullRequest'; base: string; title: string; body: string }
   | { type: 'refreshPullRequest' }
   | { type: 'requestMerge'; strategy: 'merge' | 'squash' | 'rebase' }
+  | { type: 'requestUpdateLocal' }
   | { type: 'exportResult'; format: 'markdown' | 'text' };
 
 export interface TaskCommandResult {

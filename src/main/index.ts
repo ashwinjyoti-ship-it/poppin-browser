@@ -169,6 +169,9 @@ async function createWindow(): Promise<void> {
       pagesEngine?.refresh();
       browserEngine?.openExternalUrl(url);
     },
+    onProjectUpdated: () => {
+      workspaceEngine?.refreshProject();
+    },
     onExportResult: async (task, format) => {
       if (!mainWindow) return null;
       const extension = format === 'markdown' ? 'md' : 'txt';

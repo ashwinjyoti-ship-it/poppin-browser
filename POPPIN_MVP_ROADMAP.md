@@ -163,7 +163,7 @@ This applies to critical browser actions, filesystem/network permission, artifac
 
 ### Separately approved merge
 
-Merge is never implied by code approval or PR creation. A separate Merge action displays repository, PR number, base branch, checks, review status, and allowed merge strategy. Poppin supports merge, squash, or rebase only when repository policy permits, respects protection and required checks/reviews, and requires final confirmation immediately before merging. If merge is unavailable, open the PR for manual completion. Any later local-branch update that may be destructive requires separate explicit approval.
+Merge is never implied by code approval or PR creation. A separate Merge action displays repository, PR number, base branch, checks, review status, and allowed merge strategy. Poppin supports merge, squash, or rebase only when repository policy permits, respects protection and required checks/reviews, and requires final confirmation immediately before merging. If merge is unavailable, open the PR for manual completion. After a successful merge, a separate Update local folder action checks out the PR base branch and fast-forwards it from the remote; that local update also requires its own explicit approval and refuses a dirty working tree.
 
 ### Surface responsibilities
 

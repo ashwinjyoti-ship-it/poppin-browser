@@ -139,6 +139,30 @@ export class GitEngine {
     return output ? output.split('\n').filter(Boolean) : [];
   }
 
+  /**
+   * After a remote merge, check out the base branch and fast-forward it from the remote.
+   * Refuses a dirty working tree so the update cannot discard local edits.
+   */
+  async updateLocalBase(repositoryPath: string, baseBranch: string, remote = 'origin'): Promise<WorkspaceProjectSnapshot> {
+    const branch = validateBranch(baseBranch);
+    const remoteName = validateRemoteName(remote);
+    const changes = await this.getWorkingTreeChanges(repositoryPath);
+    if (changes.length > 0) {
+      throw new Error('Commit or stash local changes before updating the base branch.');
+    }
+    await this.run(['-C', repositoryPath, 'fetch', '--', remoteName, branch]);
+    const current = await this.run(['-C', repositoryPath, 'branch', '--show-current']);
+    if (current !== branch) {
+      try {
+        await this.run(['-C', repositoryPath, 'switch', '--', branch]);
+      } catch {
+        await this.run(['-C', repositoryPath, 'switch', '-c', branch, '--track', `${remoteName}/${branch}`]);
+      }
+    }
+    await this.run(['-C', repositoryPath, 'pull', '--ff-only', '--', remoteName, branch]);
+    return this.inspect(repositoryPath);
+  }
+
   suggestedCloneDestination(parentDirectory: string, remote: string): string {
     return path.join(parentDirectory, repositoryFolderName(remote));
   }
@@ -201,6 +225,11 @@ function validateBranch(value: string): string {
     throw new Error('Use a valid Git branch name.');
   }
   return branch;
+}
+
+function validateRemoteName(value: string): string {
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,80}$/.test(value)) throw new Error('Use a valid Git remote name.');
+  return value;
 }
 
 async function exists(filePath: string): Promise<boolean> {

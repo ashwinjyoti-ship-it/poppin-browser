@@ -206,6 +206,8 @@ function CodeReview({ task, workspace, onCommand }: { task: NonNullable<TaskSnap
   const [prBody, setPrBody] = useState('Completed and verified with Poppin Browser.');
   const [mergeStrategy, setMergeStrategy] = useState<'merge' | 'squash' | 'rebase'>('squash');
   const canReview = task.state === 'Needs Approval' && !task.pendingApproval;
+  const pullRequest = task.delivery?.pullRequest ?? null;
+  const pullRequestMerged = Boolean(pullRequest && /^merged$/i.test(pullRequest.state));
   return (
     <div className="review-view">
       <button type="button" className="secondary-button preview-button" onClick={() => { void onCommand({ type: 'openPreview' }).then((result) => setMessage(result.message ?? 'Preview opened in the centre browser.')); }}>Open localhost preview</button>
@@ -222,10 +224,52 @@ function CodeReview({ task, workspace, onCommand }: { task: NonNullable<TaskSnap
       {task.state === 'Completed' ? (
         <section className="delivery-card">
           <h3>GitHub delivery</h3>
-          {!task.delivery?.commit ? <div className="delivery-form"><label>Branch<input value={branch} onChange={(event) => setBranch(event.target.value)} /></label><label>Commit message<input value={commitMessage} onChange={(event) => setCommitMessage(event.target.value)} /></label><button type="button" className="secondary-button" onClick={() => { void onCommand({ type: 'prepareCommit', branch, message: commitMessage }).then((result) => setMessage(result.message ?? 'Commit prepared.')); }}>Prepare commit</button></div> : null}
-          {task.delivery?.commit ? <div className="delivery-status"><p><strong>{task.delivery.branch}</strong> · {task.delivery.commit.slice(0, 7)}</p><p>{task.delivery.message}</p>{!task.delivery.pushed ? <button type="button" className="primary-button" onClick={() => { void onCommand({ type: 'requestPush' }).then((result) => setMessage(result.message ?? 'Review the push approval.')); }}>Review push</button> : null}</div> : null}
-          {task.delivery?.pushed && !task.delivery.pullRequest ? <div className="delivery-form"><label>Base branch<input value={base} onChange={(event) => setBase(event.target.value)} /></label><label>PR title<input value={prTitle} onChange={(event) => setPrTitle(event.target.value)} /></label><label>PR summary<textarea value={prBody} onChange={(event) => setPrBody(event.target.value)} /></label><button type="button" className="primary-button" onClick={() => { void onCommand({ type: 'requestPullRequest', base, title: prTitle, body: prBody }).then((result) => setMessage(result.message ?? 'Review the pull-request approval.')); }}>Create Pull Request</button></div> : null}
-          {task.delivery?.pullRequest ? <div className="delivery-status"><p><strong>PR #{task.delivery.pullRequest.number}</strong> · {task.delivery.pullRequest.state}</p><p>{task.delivery.pullRequest.base} ← {task.delivery.pullRequest.head}</p><p>{task.delivery.pullRequest.checks} · {task.delivery.pullRequest.review}</p><div className="delivery-actions"><button type="button" className="secondary-button" onClick={() => { void onCommand({ type: 'refreshPullRequest' }).then((result) => setMessage(result.message ?? 'Pull request updated.')); }}>Refresh status</button><select aria-label="Merge strategy" value={mergeStrategy} onChange={(event) => setMergeStrategy(event.target.value as typeof mergeStrategy)}><option value="merge">Merge</option><option value="squash">Squash</option><option value="rebase">Rebase</option></select><button type="button" className="primary-button" onClick={() => { void onCommand({ type: 'requestMerge', strategy: mergeStrategy }).then((result) => setMessage(result.message ?? 'Review the separate merge approval.')); }}>Review Merge</button></div></div> : null}
+          {!task.delivery?.commit ? (
+            <div className="delivery-form">
+              <label>Branch<input value={branch} onChange={(event) => setBranch(event.target.value)} /></label>
+              <label>Commit message<input value={commitMessage} onChange={(event) => setCommitMessage(event.target.value)} /></label>
+              <button type="button" className="secondary-button" onClick={() => { void onCommand({ type: 'prepareCommit', branch, message: commitMessage }).then((result) => setMessage(result.message ?? 'Commit prepared.')); }}>Prepare commit</button>
+            </div>
+          ) : null}
+          {task.delivery?.commit ? (
+            <div className="delivery-status">
+              <p><strong>{task.delivery.branch}</strong> · {task.delivery.commit.slice(0, 7)}</p>
+              <p>{task.delivery.message}</p>
+              {!task.delivery.pushed ? <button type="button" className="primary-button" onClick={() => { void onCommand({ type: 'requestPush' }).then((result) => setMessage(result.message ?? 'Review the push approval.')); }}>Review push</button> : null}
+            </div>
+          ) : null}
+          {task.delivery?.pushed && !pullRequest ? (
+            <div className="delivery-form">
+              <label>Base branch<input value={base} onChange={(event) => setBase(event.target.value)} /></label>
+              <label>PR title<input value={prTitle} onChange={(event) => setPrTitle(event.target.value)} /></label>
+              <label>PR summary<textarea value={prBody} onChange={(event) => setPrBody(event.target.value)} /></label>
+              <button type="button" className="primary-button" onClick={() => { void onCommand({ type: 'requestPullRequest', base, title: prTitle, body: prBody }).then((result) => setMessage(result.message ?? 'Review the pull-request approval.')); }}>Create Pull Request</button>
+            </div>
+          ) : null}
+          {pullRequest ? (
+            <div className="delivery-status">
+              <p><strong>PR #{pullRequest.number}</strong> · {pullRequest.state}</p>
+              <p>{pullRequest.base} ← {pullRequest.head}</p>
+              <p>{pullRequest.checks} · {pullRequest.review}</p>
+              <div className="delivery-actions">
+                <button type="button" className="secondary-button" onClick={() => { void onCommand({ type: 'refreshPullRequest' }).then((result) => setMessage(result.message ?? 'Pull request updated.')); }}>Refresh status</button>
+                {!pullRequestMerged ? (
+                  <>
+                    <select aria-label="Merge strategy" value={mergeStrategy} onChange={(event) => setMergeStrategy(event.target.value as typeof mergeStrategy)}>
+                      <option value="merge">Merge</option>
+                      <option value="squash">Squash</option>
+                      <option value="rebase">Rebase</option>
+                    </select>
+                    <button type="button" className="primary-button" onClick={() => { void onCommand({ type: 'requestMerge', strategy: mergeStrategy }).then((result) => setMessage(result.message ?? 'Review the separate merge approval.')); }}>Review Merge</button>
+                  </>
+                ) : null}
+                {pullRequestMerged && !task.delivery?.localUpdated ? (
+                  <button type="button" className="primary-button" onClick={() => { void onCommand({ type: 'requestUpdateLocal' }).then((result) => setMessage(result.message ?? 'Review the local update approval.')); }}>Update local folder</button>
+                ) : null}
+                {task.delivery?.localUpdated ? <p>Local {pullRequest.base} is up to date.</p> : null}
+              </div>
+            </div>
+          ) : null}
         </section>
       ) : null}
     </div>
