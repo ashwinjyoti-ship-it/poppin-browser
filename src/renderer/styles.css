@@ -352,7 +352,9 @@ textarea:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
   gap: 7px;
   -webkit-app-region: no-drag;
 }
-.tab-strip { display: flex; flex: 1 1 auto; align-items: end; min-width: 0; gap: 6px; overflow-x: auto; padding: 5px 2px 0; scrollbar-width: none; }
+/* Grow so the agent cluster can still dock right, but keep content (tabs + +)
+   left-packed so the new-tab control sits beside the last tab. */
+.tab-strip { display: flex; flex: 1 1 auto; align-items: end; justify-content: flex-start; min-width: 0; gap: 6px; overflow-x: auto; padding: 5px 2px 0; scrollbar-width: none; }
 .tab-strip::-webkit-scrollbar { display: none; }
 /* The agent-owned zone (Agent Tabs entry + the task's reply/review tab) docks
    to the right of ordinary tabs instead of interleaving with them, so it

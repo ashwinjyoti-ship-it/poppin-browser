@@ -202,6 +202,10 @@ export function TabStrip({
             renderTab(tab, group),
           ];
         })}
+        {/* Keep + beside the last ordinary tab; do not dock it at the viewport edge. */}
+        <button className="new-tab-button" type="button" aria-label="New tab" onClick={onCreate}>
+          <Plus size={18} />
+        </button>
       </div>
       {showAgentCluster ? (
         <div className="tab-strip-agent" role="tablist" aria-label="Agent Tabs and reply">
@@ -220,9 +224,6 @@ export function TabStrip({
           {agentOwnedTabs.map((tab) => renderTab(tab))}
         </div>
       ) : null}
-      <button className="new-tab-button" type="button" aria-label="New tab" onClick={onCreate}>
-        <Plus size={18} />
-      </button>
     </div>
   );
 }
