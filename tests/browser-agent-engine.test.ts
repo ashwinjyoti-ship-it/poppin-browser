@@ -13,16 +13,20 @@ class FakePages implements BrowserAgentPageController {
   tabs = new Set(['approved', 'other']);
   activated: string[] = [];
   performed: Array<{ tabId: string; action: BrowserAgentAction }> = [];
-  inspection = { credential: false, consequential: null as string | null, target: 'visible target' };
+  mediaPolicies: Array<{ taskSpaceId: string; blocked: boolean }> = [];
+  explorationCount = 0;
+  inspection: { credential: boolean; consequential: string | null; takeover?: string | null; target: string } = { credential: false, consequential: null, target: 'visible target' };
 
   hasTab(tabId: string) { return this.tabs.has(tabId); }
   createTaskSpaceTabs(taskSpaceId: string, sourceTabIds: string[]) {
     return sourceTabIds.map((tabId) => { const id = `agent-${tabId}`; this.tabs.add(id); return id; });
   }
-  createTaskSpaceExplorationTab() { const id = 'agent-exploration'; this.tabs.add(id); return id; }
+  createTaskSpaceExplorationTab() { this.explorationCount += 1; const id = this.explorationCount === 1 ? 'agent-exploration' : `agent-exploration-${this.explorationCount}`; this.tabs.add(id); return id; }
   prepareTabForAgent(tabId: string) { return this.tabs.has(tabId) && tabId.startsWith('agent-'); }
   watchTaskSpace(_taskSpaceId: string, tabId: string | null) { if (tabId) this.activated.push(tabId); return Boolean(tabId && this.tabs.has(tabId)); }
+  closeTaskSpaceTab(_taskSpaceId: string, tabId: string) { return this.tabs.delete(tabId); }
   closeTaskSpaceTabs() { for (const id of [...this.tabs]) if (id.startsWith('agent-')) this.tabs.delete(id); }
+  setTaskSpaceMediaBlocked(taskSpaceId: string, blocked: boolean) { this.mediaPolicies.push({ taskSpaceId, blocked }); }
   async createSemanticSnapshot(tabId: string, snapshotId: string, taskSpaceId: string) {
     return { snapshotId, taskSpaceId, tabId, documentId: `${tabId}:1`, url: 'https://example.com', title: 'Fixture', createdAt: new Date().toISOString(), nodes: [] };
   }
@@ -86,26 +90,60 @@ describe('BrowserAgentEngine', () => {
     expect(pages.activated).toEqual(['agent-exploration', 'agent-approved', 'agent-exploration']);
   });
 
-  it('leaves the live browser view when completed so the Tandem result can become active', async () => {
-    const { engine } = setup();
+  it('closes task-owned tabs automatically after successful completion', async () => {
+    const { engine, pages } = setup();
     await engine.execute({ type: 'start', taskId: 'task-1', mode: 'browser-only', tabIds: [] });
     expect(engine.getSnapshot().watching).toBe(true);
     engine.complete();
+    expect(engine.getSnapshot()).toMatchObject({ state: 'idle', watching: false, taskSpace: null });
+    expect(pages.tabs.has('agent-exploration')).toBe(false);
+  });
+
+  it('preserves tabs only when the user opts in before completion', async () => {
+    const { engine, pages } = setup();
+    await engine.execute({ type: 'start', taskId: 'task-1', mode: 'browser-only', tabIds: [] });
+    expect(await engine.execute({ type: 'setKeepTabs', keep: true })).toEqual({ ok: true });
+    engine.complete();
     expect(engine.getSnapshot()).toMatchObject({
-      state: 'completed',
-      watching: false,
-      taskSpace: { owner: 'user', status: 'completed' },
+      state: 'completed', watching: false,
+      taskSpace: { owner: 'user', status: 'completed', kept: true },
     });
+    expect(pages.tabs.has('agent-exploration')).toBe(true);
+    expect(pages.mediaPolicies.at(-1)).toMatchObject({ blocked: false });
   });
 
   it('supports pause, explicit resume, and immediate user takeover', async () => {
-    const { engine } = setup();
+    const { engine, pages } = setup();
     await engine.execute({ type: 'start', taskId: 'task-1', mode: 'mixed', tabIds: ['approved'] });
     expect(await engine.execute({ type: 'takeOver' })).toEqual({ ok: true });
     expect(engine.getSnapshot().state).toBe('paused');
     expect((await agentAct(engine, { type: 'scroll', deltaY: 500 })).ok).toBe(false);
     expect(await engine.execute({ type: 'resume' })).toEqual({ ok: true });
     expect((await agentAct(engine, { type: 'scroll', deltaY: 500 })).ok).toBe(true);
+    expect(pages.mediaPolicies.slice(-2)).toEqual([
+      expect.objectContaining({ blocked: false }),
+      expect.objectContaining({ blocked: true }),
+    ]);
+  });
+
+  it('opens and closes bounded dynamic exploration tabs inside the active task space', async () => {
+    const { engine, pages } = setup();
+    await engine.execute({ type: 'start', taskId: 'task-1', mode: 'browser-only', tabIds: [] });
+    for (let index = 0; index < 5; index += 1) {
+      expect((await agentAct(engine, { type: 'openTab', url: `https://example.com/${index}` }, 'agent-exploration')).ok).toBe(true);
+    }
+    expect(engine.getSnapshot().taskSpace?.explorationTabIds).toHaveLength(6);
+    expect((await agentAct(engine, { type: 'openTab' }, 'agent-exploration')).message).toMatch(/maximum of 6/i);
+    expect((await agentAct(engine, { type: 'closeTab' }, 'agent-exploration-2')).ok).toBe(true);
+    expect(engine.getSnapshot().allowedTabIds).not.toContain('agent-exploration-2');
+    expect(pages.tabs.has('agent-exploration-2')).toBe(false);
+  });
+
+  it('reads sanitized structured metadata without navigating a candidate', async () => {
+    const { engine, pages } = setup();
+    await engine.execute({ type: 'start', taskId: 'task-1', mode: 'browser-only', tabIds: [] });
+    expect((await agentAct(engine, { type: 'readMetadata' }, 'agent-exploration')).ok).toBe(true);
+    expect(pages.performed).toContainEqual({ tabId: 'agent-exploration', action: { type: 'readMetadata' } });
   });
 
   it('never operates credential fields or accepts credential-like typing', async () => {
@@ -116,6 +154,16 @@ describe('BrowserAgentEngine', () => {
     expect((await agentAct(engine, { type: 'click', selector: '#password' })).message).toMatch(/takeover required/i);
     expect(engine.getSnapshot()).toMatchObject({ state: 'paused', taskSpace: { owner: 'user', status: 'user-controlling' } });
     expect(pages.performed).toHaveLength(0);
+  });
+
+  it('hands playback controls to the user instead of operating them', async () => {
+    const { engine, pages } = setup();
+    await engine.execute({ type: 'start', taskId: 'task-1', mode: 'browser-only', tabIds: [] });
+    pages.inspection = { credential: false, consequential: null, takeover: 'Media playback remains under user control.', target: 'Play' };
+    expect((await agentAct(engine, { type: 'click', selector: '#play' }, 'agent-exploration')).message).toBe('User takeover required.');
+    expect(engine.getSnapshot()).toMatchObject({ state: 'paused', taskSpace: { owner: 'user', status: 'user-controlling' } });
+    expect(pages.performed).toHaveLength(0);
+    expect(pages.mediaPolicies.at(-1)).toMatchObject({ blocked: false });
   });
 
   it('binds semantic references to only the latest read snapshot', async () => {
