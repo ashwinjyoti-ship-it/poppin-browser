@@ -90,9 +90,10 @@ export type WorkspaceCommand =
   | { type: 'refreshTabContext'; tabId: string }
   | { type: 'captureVisualSelection'; tabId: string }
   | { type: 'clearVisualSelection' }
-  | { type: 'connectExistingProject' }
-  | { type: 'cloneRepository'; remote: string }
-  | { type: 'createNewProject' }
+  /** Free-form local path or Git URL; main detects which and completes the flow. */
+  | { type: 'addProject'; source: string }
+  /** Opens a folder picker, then connects or initializes that folder. */
+  | { type: 'chooseProjectFolder' }
   | {
       type: 'updateProjectSettings';
       installCommand: string;

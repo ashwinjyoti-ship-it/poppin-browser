@@ -483,6 +483,24 @@ describe('browser chrome', () => {
     await user.click(screen.getByText('Project settings'));
     expect(screen.getByLabelText('Install command')).toBeVisible();
   });
+
+  it('adds a project from one field that accepts a folder or Git URL', async () => {
+    const user = userEvent.setup();
+    const onCommand = vi.fn().mockResolvedValue(null);
+    render(<ProjectSection project={null} onCommand={onCommand} />);
+
+    expect(screen.queryByRole('button', { name: /connect existing/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /clone repository/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /create new project/i })).toBeNull();
+
+    await user.type(screen.getByLabelText(/project folder or git url/i), 'acme/app');
+    expect(screen.getByRole('button', { name: /clone repository/i })).toBeEnabled();
+    await user.click(screen.getByRole('button', { name: /clone repository/i }));
+    expect(onCommand).toHaveBeenCalledWith({ type: 'addProject', source: 'acme/app' });
+
+    await user.click(screen.getByRole('button', { name: /choose folder/i }));
+    expect(onCommand).toHaveBeenCalledWith({ type: 'chooseProjectFolder' });
+  });
 });
 
 const READY_TASK: TaskSnapshot = {

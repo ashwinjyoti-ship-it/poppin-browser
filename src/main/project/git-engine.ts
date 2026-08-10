@@ -1,12 +1,15 @@
 import { execFile } from 'node:child_process';
-import { access } from 'node:fs/promises';
+import { access, readdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
+import { repositoryFolderName } from '../../shared/project-source';
 import type { WorkspaceProjectSnapshot } from '../../shared/workspace';
 
 const execFileAsync = promisify(execFile);
 const GIT_TIMEOUT_MS = 120_000;
+const BASELINE_NAME = 'Poppin';
+const BASELINE_EMAIL = 'poppin@localhost';
 
 export class GitEngine {
   async inspect(repositoryPath: string): Promise<WorkspaceProjectSnapshot> {
@@ -23,21 +26,68 @@ export class GitEngine {
     };
   }
 
-  async clone(remote: string, parentDirectory: string): Promise<WorkspaceProjectSnapshot> {
+  async clone(remote: string, destination: string): Promise<WorkspaceProjectSnapshot> {
     const normalizedRemote = remote.trim();
     if (!isSupportedRemote(normalizedRemote)) {
       throw new Error('Use an HTTPS, SSH, or GitHub-style Git remote.');
     }
-    const folderName = repositoryName(normalizedRemote);
-    const destination = path.join(parentDirectory, folderName);
-    if (await exists(destination)) throw new Error(`A folder named ${folderName} already exists there.`);
-    await this.run(['clone', '--', normalizedRemote, destination]);
-    return this.inspect(destination);
+    if (await exists(destination)) {
+      throw new Error(`A folder named ${path.basename(destination)} already exists there.`);
+    }
+    try {
+      await this.run(['clone', '--', normalizedRemote, destination]);
+    } catch (error) {
+      throw new Error(describeCloneFailure(error, normalizedRemote));
+    }
+    return this.ensureUsableBaseline(destination);
   }
 
   async create(repositoryPath: string): Promise<WorkspaceProjectSnapshot> {
     await this.run(['-C', repositoryPath, 'init', '-b', 'main']);
+    await this.writeInitialReadme(repositoryPath);
+    await this.createInitialCommit(repositoryPath, 'Initial commit');
     return this.inspect(repositoryPath);
+  }
+
+  /**
+   * Connect a local folder: existing Git repo, empty folder to initialize, or
+   * an empty Git repo that still needs a Code-task baseline commit.
+   */
+  async openLocal(repositoryPath: string): Promise<WorkspaceProjectSnapshot> {
+    if (await this.isGitRepository(repositoryPath)) {
+      return this.ensureUsableBaseline(repositoryPath);
+    }
+    if (!(await isEmptyDirectory(repositoryPath))) {
+      throw new Error('That folder is not a Git repository. Choose a Git checkout, or an empty folder to create a new project.');
+    }
+    return this.create(repositoryPath);
+  }
+
+  /** Ensures HEAD exists so Code tasks can take a trustworthy baseline. */
+  async ensureUsableBaseline(repositoryPath: string): Promise<WorkspaceProjectSnapshot> {
+    const project = await this.inspect(repositoryPath);
+    if (await this.hasHead(repositoryPath)) return project;
+    await this.writeInitialReadme(repositoryPath);
+    await this.createInitialCommit(repositoryPath, 'Initial commit');
+    return this.inspect(repositoryPath);
+  }
+
+  async hasHead(repositoryPath: string): Promise<boolean> {
+    try {
+      await this.getHead(repositoryPath);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async isGitRepository(repositoryPath: string): Promise<boolean> {
+    try {
+      await this.run(['-C', repositoryPath, 'rev-parse', '--is-inside-work-tree']);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   async getHead(repositoryPath: string): Promise<string> {
@@ -89,6 +139,27 @@ export class GitEngine {
     return output ? output.split('\n').filter(Boolean) : [];
   }
 
+  suggestedCloneDestination(parentDirectory: string, remote: string): string {
+    return path.join(parentDirectory, repositoryFolderName(remote));
+  }
+
+  private async createInitialCommit(repositoryPath: string, message: string): Promise<void> {
+    await this.run(['-C', repositoryPath, 'add', '--all', '--']);
+    await this.run([
+      '-C', repositoryPath,
+      '-c', `user.name=${BASELINE_NAME}`,
+      '-c', `user.email=${BASELINE_EMAIL}`,
+      'commit', '--allow-empty', '-m', message,
+    ]);
+  }
+
+  private async writeInitialReadme(repositoryPath: string): Promise<void> {
+    const readme = path.join(repositoryPath, 'README.md');
+    if (await exists(readme)) return;
+    const title = path.basename(repositoryPath) || 'Project';
+    await writeFile(readme, `# ${title}\n\nCreated with Poppin Browser.\n`, 'utf8');
+  }
+
   private async run(args: string[], allowFailure = false, maxBuffer = 2 * 1024 * 1024): Promise<string> {
     try {
       const result = await execFileAsync('git', args, {
@@ -132,14 +203,35 @@ function validateBranch(value: string): string {
   return branch;
 }
 
-function repositoryName(remote: string): string {
-  const name = remote.replace(/[\\/]$/, '').split(/[/:]/).pop()?.replace(/\.git$/i, '') ?? '';
-  if (!/^[a-z0-9._-]+$/i.test(name)) throw new Error('Poppin could not determine the repository folder name.');
-  return name;
-}
-
 async function exists(filePath: string): Promise<boolean> {
   return access(filePath).then(() => true, () => false);
+}
+
+async function isEmptyDirectory(directory: string): Promise<boolean> {
+  try {
+    const entries = await readdir(directory);
+    return entries.length === 0;
+  } catch {
+    return false;
+  }
+}
+
+function describeCloneFailure(error: unknown, remote: string): string {
+  const stderr = (isExecError(error) ? error.stderr : error instanceof Error ? error.message : '').toLowerCase();
+  if (/authentication failed|could not read username|invalid username or password|permission denied \(publickey\)|terminal prompts disabled|error: http.?401|error: http.?403/.test(stderr)) {
+    return `Git could not authenticate to ${remote}. Sign in with the gh CLI or SSH keys, then try again.`;
+  }
+  if (/could not resolve host|nodename nor servname|name or service not known|network is unreachable|timed out|ssl|tls/.test(stderr)) {
+    return `Git could not reach ${remote}. Check the URL and your network connection.`;
+  }
+  if (/repository not found|not found/.test(stderr)) {
+    return `Git could not find ${remote}. Check the URL and that you have access.`;
+  }
+  if (/already exists/.test(stderr)) {
+    return 'That destination folder already exists.';
+  }
+  const detail = isExecError(error) ? error.stderr.trim() : error instanceof Error ? error.message : '';
+  return detail || 'Git could not clone that repository.';
 }
 
 function isExecError(error: unknown): error is { stderr: string } {

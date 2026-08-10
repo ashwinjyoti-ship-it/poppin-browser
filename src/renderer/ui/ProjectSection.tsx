@@ -1,6 +1,7 @@
-import { FolderGit2, GitBranch, GitFork, Plus } from 'lucide-react';
+import { FolderGit2, FolderOpen, GitBranch, Plus } from 'lucide-react';
 import { type FormEvent, useState } from 'react';
 
+import { isGitRemote } from '../../shared/project-source';
 import type { WorkspaceCommand, WorkspaceProjectSnapshot } from '../../shared/workspace';
 
 interface ProjectSectionProps {
@@ -9,8 +10,7 @@ interface ProjectSectionProps {
 }
 
 export function ProjectSection({ project, onCommand }: ProjectSectionProps) {
-  const [remote, setRemote] = useState('');
-  const [showClone, setShowClone] = useState(false);
+  const [source, setSource] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
@@ -20,11 +20,12 @@ export function ProjectSection({ project, onCommand }: ProjectSectionProps) {
     const message = await onCommand(command);
     setError(message ?? '');
     setBusy(false);
+    if (!message && command.type === 'addProject') setSource('');
   };
 
-  const clone = (event: FormEvent) => {
+  const addProject = (event: FormEvent) => {
     event.preventDefault();
-    void run({ type: 'cloneRepository', remote });
+    void run({ type: 'addProject', source });
   };
 
   return (
@@ -33,17 +34,34 @@ export function ProjectSection({ project, onCommand }: ProjectSectionProps) {
       {project ? (
         <ConnectedProject key={project.repositoryPath} project={project} busy={busy} onSave={(command) => { void run(command); }} />
       ) : (
-        <div className="project-actions">
-          <button type="button" onClick={() => void run({ type: 'connectExistingProject' })} disabled={busy}><FolderGit2 size={15} /><span>Connect existing</span></button>
-          <button type="button" onClick={() => setShowClone((value) => !value)} disabled={busy}><GitFork size={15} /><span>Clone repository</span></button>
-          {showClone ? (
-            <form className="clone-form" onSubmit={clone}>
-              <input value={remote} onChange={(event) => setRemote(event.target.value)} placeholder="https://github.com/user/repo.git" aria-label="Repository remote" />
-              <button type="submit" className="secondary-button" disabled={busy || !remote.trim()}>Choose location and clone</button>
-            </form>
-          ) : null}
-          <button type="button" onClick={() => void run({ type: 'createNewProject' })} disabled={busy}><Plus size={15} /><span>Create new project</span></button>
-        </div>
+        <form className="project-add-form" onSubmit={addProject}>
+          <p className="project-add-copy">Add a local folder or paste a Git repository URL.</p>
+          <label className="project-add-field">
+            <span className="sr-only">Project folder or Git URL</span>
+            <input
+              value={source}
+              onChange={(event) => setSource(event.target.value)}
+              placeholder="~/code/app or https://github.com/user/repo.git"
+              aria-label="Project folder or Git URL"
+              disabled={busy}
+            />
+          </label>
+          <div className="project-add-actions">
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={() => void run({ type: 'chooseProjectFolder' })}
+              disabled={busy}
+            >
+              <FolderOpen size={15} />
+              <span>Choose folder</span>
+            </button>
+            <button type="submit" disabled={busy || !source.trim()}>
+              <Plus size={15} />
+              <span>{isGitRemote(source) ? 'Clone repository' : 'Add project'}</span>
+            </button>
+          </div>
+        </form>
       )}
       {busy ? <span className="project-status">Working with Git…</span> : null}
       {error ? <span className="form-error" role="alert">{error}</span> : null}
