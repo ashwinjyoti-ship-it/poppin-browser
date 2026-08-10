@@ -303,8 +303,8 @@ describe('task engine', () => {
     workspaceStore.close();
   });
 
-  it('asks before starting when live web access is genuinely uncertain', async () => {
-    const { engine, browserCommand, taskStore, workspaceStore } = await setup({ withProject: false, withBrowserAgent: true, withTabContext: false });
+  it('asks before starting when live web access is uncertain and context was supplied', async () => {
+    const { engine, browserCommand, taskStore, workspaceStore } = await setup({ withProject: false, withBrowserAgent: true, withTabContext: true });
     const asked = await engine.execute({
       type: 'startTask', prompt: 'Compare the two options and recommend one.', model: 'gpt-test', reasoningEffort: 'high', kind: 'work',
     });
@@ -317,6 +317,19 @@ describe('task engine', () => {
     });
     expect(started).toEqual({ ok: true });
     expect(browserCommand).toHaveBeenCalledWith(expect.objectContaining({ type: 'start' }));
+    await engine.close();
+    taskStore.close();
+    workspaceStore.close();
+  });
+
+  it('starts browsing without asking when the uncertain request has no supplied context', async () => {
+    const { engine, browserCommand, taskStore, workspaceStore } = await setup({ withProject: false, withBrowserAgent: true, withTabContext: false });
+    const started = await engine.execute({
+      type: 'startTask', prompt: 'Compare the two options and recommend one.', model: 'gpt-test', reasoningEffort: 'high', kind: 'work',
+    });
+    expect(started).toEqual({ ok: true });
+    expect(browserCommand).toHaveBeenCalledWith(expect.objectContaining({ type: 'start', mode: 'browser-only' }));
+    expect(engine.getSnapshot().task).toMatchObject({ browserRun: expect.objectContaining({ required: true }) });
     await engine.close();
     taskStore.close();
     workspaceStore.close();

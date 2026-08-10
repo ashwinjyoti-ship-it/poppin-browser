@@ -54,10 +54,60 @@ describe('capability router', () => {
     expect(plan.capabilities).toEqual(['context_read']);
   });
 
-  it('asks before starting when the live-access signal is genuinely weak', () => {
-    const plan = route('Compare the two options and recommend one.');
+  it('asks before starting when the signal is weak and context was supplied', () => {
+    const plan = route('Compare the two options and recommend one.', { selectedContextCount: 1 });
     expect(plan.confirmation).toBe(BROWSER_CONFIRMATION_QUESTION);
     expect(plan.browser).toBe('context-only');
+  });
+
+  it('provisions browsing for a weak-signal request when nothing was supplied', () => {
+    // With no selected context there is nothing else the agent could use, so
+    // Poppin browses instead of asking or silently running context-only.
+    for (const prompt of [
+      'Compare the MacBook Air and the Dell XPS.',
+      'What is the weather in Mumbai?',
+      'Plan a 3 day trip to Jaipur.',
+    ]) {
+      const plan = route(prompt);
+      expect(plan.browser, prompt).toBe('exploration');
+      expect(plan.confirmation, prompt).toBeNull();
+    }
+  });
+
+  it('treats navigation commands and bare website names as browser requests', () => {
+    for (const prompt of [
+      'Go to amazon and find wireless earbuds under 2000.',
+      'Visit nytimes.com.',
+      'Open YouTube and play lo-fi music.',
+      'Order groceries from bigbasket.',
+      'Apply to software engineering jobs on LinkedIn.',
+      'Check whether poppin.dev is up.',
+      'Book a table for two at an Italian restaurant tonight.',
+      'Find flights from Delhi to Goa next weekend.',
+    ]) {
+      const plan = route(prompt);
+      expect(plan.browser, prompt).toBe('exploration');
+      expect(plan.confirmation, prompt).toBeNull();
+    }
+  });
+
+  it('sends page interaction at a named site to a fresh exploration tab when none is open', () => {
+    const plan = route('Fill out the contact form on stripe.com.');
+    expect(plan.browser).toBe('exploration');
+    expect(plan.confirmation).toBeNull();
+  });
+
+  it('keeps purely generative prompts off the browser', () => {
+    for (const prompt of [
+      'Write a haiku about spring.',
+      'Explain how JWT authentication works.',
+      'Rewrite this paragraph to be friendlier.',
+      'Brainstorm five names for a coffee shop.',
+    ]) {
+      const plan = route(prompt);
+      expect(plan.browser, prompt).toBe('none');
+      expect(plan.confirmation, prompt).toBeNull();
+    }
   });
 
   it('routes Tandem reads and writes when Tandem is connected', () => {
