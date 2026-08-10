@@ -15,8 +15,8 @@ interface AgentDockProps {
 /**
  * The one thing that must reach the user regardless of which tab is active.
  * Everything else about a task lives in its tab; the dock only surfaces what
- * cannot wait: approvals, questions, takeover state, and a quiet status pill
- * otherwise. It renders in Poppin's own reserved chrome (not a page overlay) —
+ * cannot wait: approvals and questions on any surface, plus controls/status
+ * while an Agent Tab is active. It renders in Poppin's own reserved chrome —
  * a WebContentsView tab paints above ordinary DOM content, so a floating div
  * would be hidden behind an active browsing tab.
  */
@@ -69,7 +69,7 @@ export function AgentDock({ taskSnapshot, browserAgentSnapshot, onTaskCommand, o
     );
   }
 
-  if (browserAgentSnapshot && ['completed', 'stopped'].includes(browserAgentSnapshot.state) && onBrowserAgentCommand) {
+  if (browserAgentSnapshot?.taskSpace && ['completed', 'stopped'].includes(browserAgentSnapshot.state) && onBrowserAgentCommand) {
     return (
       <div className="agent-dock agent-dock-card" role="status">
         <p>{browserAgentSnapshot.state === 'completed' ? 'Browsing finished.' : 'Browsing stopped.'}</p>
@@ -90,17 +90,5 @@ export function AgentDock({ taskSnapshot, browserAgentSnapshot, onTaskCommand, o
     );
   }
 
-  if (['Completed', 'Failed', 'Cancelled'].includes(task.state)) {
-    return (
-      <button type="button" className={`agent-dock agent-dock-pill agent-dock-${slug(task.state)}`} onClick={onOpenTaskTab}>
-        {task.state === 'Completed' ? '✓ Task complete · View' : task.state === 'Failed' ? '! Task failed · View' : 'Task cancelled · View'}
-      </button>
-    );
-  }
-
   return null;
-}
-
-function slug(value: string): string {
-  return value.toLowerCase().replace(/\s+/g, '-');
 }

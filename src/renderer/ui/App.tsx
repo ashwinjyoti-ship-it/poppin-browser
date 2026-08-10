@@ -20,6 +20,7 @@ import { NativeDatabaseView } from './NativeDatabaseView';
 import { getChromeLayout, getTitlebarLeftInset } from './chrome-layout';
 import { issueForCommand, visibleAddressIssue, type AddressIssue } from './address-issue';
 import { browserApprovalAttentionKey, taskAttentionKey } from './task-attention';
+import { getAgentDockPresentation, getTaskTabStatus } from './task-surface';
 import {
   clampResizedLeftPaneWidth,
   getLeftPaneWidthRange,
@@ -69,17 +70,14 @@ export function App() {
   const browserActiveTab = snapshot.tabs.find((tab) => tab.id === snapshot.activeTabId) ?? null;
   const activeTab = activeNativeTab || taskTabActive ? null : browserActiveTab;
   const browserTabs = snapshot.tabs.filter((tab) => !tab.taskSpaceId || (browserAgentSnapshot.watching && tab.taskSpaceId === browserAgentSnapshot.taskSpace?.id));
-  const hasBrowserTaskSpace = Boolean(browserAgentSnapshot.taskSpace);
-  // Code tasks (and Work tasks that never used browsing) have no "watch" toggle
-  // to gate on, so their tab is simply always there.
-  const showTaskTab = Boolean(taskSnapshot.task) && (!hasBrowserTaskSpace || browserAgentSnapshot.watching || taskTabActive);
   const visibleTabs = [
     ...browserTabs.map((tab) => ({ ...tab, kind: tab.surface === 'tandem-world' ? 'tandem' as const : 'browser' as const })),
-    ...(showTaskTab && taskSnapshot.task ? [{
+    ...(taskSnapshot.task ? [{
       id: TASK_TAB_ID,
       title: taskSnapshot.task.kind === 'code' ? 'Review' : 'Reply',
       kind: 'task' as const,
       taskKind: taskSnapshot.task.kind,
+      taskStatus: getTaskTabStatus(taskSnapshot.task),
       taskSpaceId: browserAgentSnapshot.taskSpace?.id ?? 'task-only',
     }] : []),
     ...pagesSnapshot.tabs.map((tab) => ({ id: tab.id, title: tab.title, kind: tab.kind })),
@@ -89,14 +87,17 @@ export function App() {
   const addressError = visibleAddressIssue(addressIssue, activeTab);
   const chromeLayout = getChromeLayout(viewport.width, viewport.height);
   const leftPaneWidth = normalizeLeftPaneWidth(preferredLeftPaneWidth, viewport.width);
-  const showAgentDock = !commandCollapsed && Boolean(taskSnapshot.task);
-  const agentDockHeight = showAgentDock
-    ? (taskSnapshot.task?.pendingApproval
-      || browserAgentSnapshot.pendingApproval
-      || browserAgentSnapshot.taskSpace?.status === 'user-controlling'
-      || ['completed', 'stopped'].includes(browserAgentSnapshot.state)
-      ? AGENT_DOCK_CARD_HEIGHT : AGENT_DOCK_PILL_HEIGHT)
-    : 0;
+  const dockPresentation = getAgentDockPresentation({
+    taskSnapshot,
+    browserAgentSnapshot,
+    activeBrowserTaskSpaceId: activeNativeTab || taskTabActive ? null : browserActiveTab?.taskSpaceId ?? null,
+    taskTabActive,
+    commandCollapsed,
+  });
+  const showAgentDock = dockPresentation !== 'hidden';
+  const agentDockHeight = dockPresentation === 'card'
+    ? AGENT_DOCK_CARD_HEIGHT
+    : dockPresentation === 'pill' ? AGENT_DOCK_PILL_HEIGHT : 0;
   const paneStyle = {
     '--chrome-height': `${chromeLayout.height}px`,
     '--titlebar-left-inset': `${getTitlebarLeftInset(chromeLayout.density, snapshot.isFullScreen)}px`,

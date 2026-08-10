@@ -214,6 +214,27 @@ describe('browser chrome', () => {
     expect(onClose).toHaveBeenCalledWith('task-reply');
   });
 
+  it('uses the persistent task tab as the accessible completion indicator', () => {
+    const { container } = render(
+      <TabStrip
+        tabs={[{ id: 'task-reply', title: 'Reply', kind: 'task', taskKind: 'work', taskStatus: 'complete', taskSpaceId: 'task-only' }]}
+        groups={[]}
+        activeTabId="another-tab"
+        onActivate={vi.fn()}
+        onClose={vi.fn()}
+        onCreate={vi.fn()}
+        onReorder={vi.fn()}
+        onShowTabMenu={vi.fn()}
+        onToggleGroup={vi.fn()}
+        onRenameGroup={vi.fn()}
+        onShowGroupMenu={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole('tab', { name: 'Reply, task completed' })).toBeVisible();
+    expect(container.querySelector('.tab-task-status-complete')).not.toBeNull();
+    expect(screen.queryByText(/task complete · view/i)).not.toBeInTheDocument();
+  });
+
   it('docks Agent Tabs and the reply tab to the right, separate from ordinary browsing tabs', () => {
     const { container } = render(
       <TabStrip
