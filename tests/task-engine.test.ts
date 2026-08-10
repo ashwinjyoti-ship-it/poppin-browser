@@ -359,9 +359,27 @@ describe('task engine', () => {
     expect(await engine.execute({ type: 'continueTask', prompt: 'Now browse and find an example' })).toEqual({ ok: true });
     expect(fake.resumeCount).toBe(1);
     expect(engine.getSnapshot().task).toMatchObject({ state: 'Running', threadId: 'thread-1', prompt: 'Now browse and find an example' });
+    expect(engine.getSnapshot().task?.turns).toMatchObject([
+      { prompt: 'Explain Poppin briefly', result: 'First answer.', status: 'completed' },
+      { prompt: 'Now browse and find an example', result: '', status: 'running' },
+    ]);
     expect(browserCommand).toHaveBeenCalledWith(expect.objectContaining({ type: 'start', mode: 'browser-only', tabIds: [] }));
     expect(fake.prompt).toContain('Continue the existing conversation and answer this follow-up');
     expect(fake.prompt).toContain('"mode": "browser-only"');
+    fake.emit('request', {
+      id: 24,
+      method: 'item/tool/call',
+      params: { threadId: 'thread-1', turnId: 'turn-2', callId: 'call-read', tool: 'poppin_browser_action', arguments: { taskSpaceId: 'space-1', tabId: 'exploration-tab', action: { type: 'search', text: 'Poppin Browser example' } } },
+    });
+    await vi.waitFor(() => expect(engine.getSnapshot().task?.browserRun.successfulActionCount).toBe(1));
+    fake.emit('notification', { method: 'item/agentMessage/delta', params: { threadId: 'thread-1', turnId: 'turn-2', itemId: 'message-2', delta: 'Second answer.' } });
+    fake.emit('notification', { method: 'turn/completed', params: { threadId: 'thread-1', turn: { id: 'turn-2', status: 'completed', error: null } } });
+    await vi.waitFor(() => expect(engine.getSnapshot().task?.turns).toMatchObject([
+      { prompt: 'Explain Poppin briefly', result: 'First answer.', status: 'completed' },
+      { prompt: 'Now browse and find an example', result: 'Second answer.', status: 'completed' },
+    ]));
+    expect(await engine.execute({ type: 'finishTask' })).toEqual({ ok: true, message: 'Ready for a new task.' });
+    expect(engine.getSnapshot().task).toBeNull();
     await engine.close();
     taskStore.close();
     workspaceStore.close();

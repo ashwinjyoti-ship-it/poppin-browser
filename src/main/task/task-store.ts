@@ -1,6 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 
-import type { TaskApprovalSnapshot, TaskBrowserRunSnapshot, TaskDeliverySnapshot, TaskKind, TaskProgressSnapshot, TaskRecordSnapshot, TaskState } from '../../shared/task';
+import type { TaskApprovalSnapshot, TaskBrowserRunSnapshot, TaskDeliverySnapshot, TaskKind, TaskProgressSnapshot, TaskRecordSnapshot, TaskState, TaskTurnSnapshot } from '../../shared/task';
 
 interface TaskRow {
   kind: TaskKind;
@@ -13,6 +13,7 @@ interface TaskRow {
   turn_id: string;
   baseline_commit: string;
   progress_json: string;
+  turns_json: string | null;
   approval_json: string | null;
   result: string;
   diff: string;
@@ -42,6 +43,7 @@ export class TaskStore {
         turn_id TEXT NOT NULL,
         baseline_commit TEXT NOT NULL,
         progress_json TEXT NOT NULL,
+        turns_json TEXT,
         approval_json TEXT,
         result TEXT NOT NULL,
         diff TEXT NOT NULL,
@@ -64,6 +66,9 @@ export class TaskStore {
     }
     if (!columns.some((column) => column.name === 'document_id')) {
       this.database.exec("ALTER TABLE active_task ADD COLUMN document_id TEXT NOT NULL DEFAULT ''");
+    }
+    if (!columns.some((column) => column.name === 'turns_json')) {
+      this.database.exec('ALTER TABLE active_task ADD COLUMN turns_json TEXT');
     }
     this.database.exec("UPDATE active_task SET document_id = thread_id WHERE document_id = ''");
     this.database.exec(`
@@ -90,12 +95,13 @@ export class TaskStore {
   load(): TaskRecordSnapshot | null {
     const row = this.database.prepare(`
       SELECT state, kind, prompt, model, reasoning_effort, document_id, thread_id, turn_id, baseline_commit,
-        progress_json, approval_json, result, diff, error, browser_run_json, delivery_json, created_at, updated_at
+        progress_json, turns_json, approval_json, result, diff, error, browser_run_json, delivery_json, created_at, updated_at
       FROM active_task WHERE id = 'primary'
     `).get() as unknown as TaskRow | undefined;
     if (!row) return null;
     try {
       const progress = JSON.parse(row.progress_json) as TaskProgressSnapshot[];
+      const persistedTurns = row.turns_json ? JSON.parse(row.turns_json) as TaskTurnSnapshot[] : [];
       const pendingApproval = row.approval_json
         ? JSON.parse(row.approval_json) as TaskApprovalSnapshot
         : null;
@@ -104,6 +110,7 @@ export class TaskStore {
         ? parseBrowserRun(JSON.parse(row.browser_run_json))
         : emptyBrowserRun();
       if (!Array.isArray(progress)) throw new Error('Invalid progress');
+      const turns = parseTurns(persistedTurns, row);
       return {
         state: row.state,
         kind: row.kind === 'work' ? 'work' : 'code',
@@ -115,6 +122,7 @@ export class TaskStore {
         turnId: row.turn_id,
         baselineCommit: row.baseline_commit,
         progress,
+        turns,
         pendingApproval,
         result: row.result,
         diff: row.diff,
@@ -134,8 +142,8 @@ export class TaskStore {
     this.database.prepare(`
       INSERT INTO active_task (
         id, state, kind, prompt, model, reasoning_effort, document_id, thread_id, turn_id, baseline_commit,
-        progress_json, approval_json, result, diff, error, browser_run_json, delivery_json, created_at, updated_at
-      ) VALUES ('primary', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        progress_json, turns_json, approval_json, result, diff, error, browser_run_json, delivery_json, created_at, updated_at
+      ) VALUES ('primary', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         state = excluded.state,
         kind = excluded.kind,
@@ -147,6 +155,7 @@ export class TaskStore {
         turn_id = excluded.turn_id,
         baseline_commit = excluded.baseline_commit,
         progress_json = excluded.progress_json,
+        turns_json = excluded.turns_json,
         approval_json = excluded.approval_json,
         result = excluded.result,
         diff = excluded.diff,
@@ -166,6 +175,7 @@ export class TaskStore {
       task.turnId,
       task.baselineCommit,
       JSON.stringify(task.progress),
+      JSON.stringify(task.turns ?? []),
       task.pendingApproval ? JSON.stringify(task.pendingApproval) : null,
       task.result,
       task.diff,
@@ -184,6 +194,40 @@ export class TaskStore {
   close(): void {
     this.database.close();
   }
+}
+
+function parseTurns(value: unknown, row: TaskRow): TaskTurnSnapshot[] {
+  if (!Array.isArray(value)) throw new Error('Invalid task turns');
+  const valid = value.every((turn) => {
+    if (!turn || typeof turn !== 'object') return false;
+    const candidate = turn as Record<string, unknown>;
+    const sourcesValid = Array.isArray(candidate.sources) && candidate.sources.every((source) => {
+      if (!source || typeof source !== 'object') return false;
+      const candidateSource = source as Record<string, unknown>;
+      return typeof candidateSource.title === 'string' && typeof candidateSource.url === 'string';
+    });
+    return typeof candidate.id === 'string'
+      && typeof candidate.prompt === 'string'
+      && typeof candidate.result === 'string'
+      && typeof candidate.status === 'string'
+      && ['running', 'completed', 'failed', 'cancelled'].includes(candidate.status)
+      && sourcesValid
+      && typeof candidate.createdAt === 'string'
+      && (candidate.completedAt === null || typeof candidate.completedAt === 'string');
+  });
+  if (!valid) throw new Error('Invalid task turns');
+  if (value.length > 0) return value as TaskTurnSnapshot[];
+  return [{
+    id: row.turn_id || 'legacy-turn',
+    prompt: row.prompt,
+    result: row.result,
+    status: row.state === 'Completed' || row.state === 'Needs Approval' ? 'completed'
+      : row.state === 'Cancelled' ? 'cancelled'
+        : row.state === 'Failed' ? 'failed' : 'running',
+    sources: [],
+    createdAt: row.created_at,
+    completedAt: row.state === 'Running' ? null : row.updated_at,
+  }];
 }
 
 function emptyBrowserRun(): TaskBrowserRunSnapshot {

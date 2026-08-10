@@ -69,7 +69,7 @@ xattr -dr com.apple.quarantine "/Applications/Poppin Browser.app"
 |---|---|
 | Codex agent (default) | Codex installed at `/Applications/ChatGPT.app/Contents/Resources/codex`, `/opt/homebrew/bin/codex` or `/usr/local/bin/codex`. Override with `POPPIN_CODEX_PATH`. |
 | Codex over ACP (preview) | `codex-acp` on your PATH (`npm i -g @agentclientprotocol/codex-acp`), or set `POPPIN_ACP_AGENT_COMMAND` (and optionally `POPPIN_ACP_AGENT_ARGS`). |
-| Tandem World and the Tandem capability | Your Tandem address plus an API key from Tandem → Settings → API keys. Paste both into the Tandem section of Poppin's left pane. The key is sealed in the macOS Keychain. |
+| Tandem World and the Tandem capability | Your Tandem address plus an API key from Tandem → Settings → API keys. Paste both into Poppin Settings → Tandem integration. The key is sealed in the macOS Keychain. |
 | GitHub delivery | `gh` CLI, authenticated. |
 
 ## 7. Prompt to hand your local agent
@@ -92,4 +92,4 @@ on a downloaded, ad-hoc-signed build. Use the `xattr` command in step 5.
 Set `POPPIN_CODEX_PATH` to the real binary and use *Reconnect* in the Task pane.
 
 **Blank centre area after opening Tandem World** — Tandem could not be reached.
-Check the address in the left pane; Poppin shows the connection error there.
+Check the address in Poppin Settings → Tandem integration; the workspace pane also shows the connection status.

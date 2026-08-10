@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Check, Copy, RotateCcw, X } from 'lucide-react';
+import { Check, Copy, Plus, RotateCcw, X } from 'lucide-react';
 
 import type { TaskCommand, TaskCommandResult, TaskSnapshot } from '../../shared/task';
 import type { WorkspaceSnapshot } from '../../shared/workspace';
@@ -42,8 +42,13 @@ export function TaskTabView({ taskSnapshot, workspace, browserAgentSnapshot, onT
     <div className="task-tab-content">
       <ApprovalCards approvalRef={approvalRef} task={task} browserAgent={browserAgentSnapshot} onTaskCommand={onTaskCommand} onBrowserAgentCommand={onBrowserAgentCommand} />
       <div className="task-tab-heading">
-        <div><span className="eyebrow">{task.kind === 'code' ? 'Code task' : 'Work task'}</span><h2>{taskHeadline(task.prompt)}</h2></div>
-        <span className={`task-state task-state-${slug(task.state)}`}>{task.state}</span>
+        <div><span className="eyebrow">{task.kind === 'code' ? 'Code task' : 'Work task thread'}</span><h2>{taskHeadline(task.turns?.[0]?.prompt ?? task.prompt)}</h2></div>
+        <div className="task-tab-actions">
+          <span className={`task-state task-state-${slug(task.state)}`}>{task.state}</span>
+          {['Completed', 'Failed', 'Cancelled'].includes(task.state) ? (
+            <button type="button" className="secondary-button task-new-button" onClick={() => { void onTaskCommand({ type: 'finishTask' }); }}><Plus size={13} /> New task</button>
+          ) : null}
+        </div>
       </div>
       {taskSnapshot.connection.state !== 'ready' ? (
         <p className="task-account">
@@ -51,11 +56,12 @@ export function TaskTabView({ taskSnapshot, workspace, browserAgentSnapshot, onT
           <button type="button" className="secondary-button" onClick={() => { void onTaskCommand({ type: 'refreshConnection' }); }}>Reconnect</button>
         </p>
       ) : null}
+      {task.kind === 'work' ? <WorkThread task={task} onCommand={onTaskCommand} /> : null}
       {isLive
         ? <LiveView task={task} browserAgent={browserAgentSnapshot} onBrowserAgentCommand={onBrowserAgentCommand} onTaskCommand={onTaskCommand} />
         : task.kind === 'code'
           ? <CodeReview task={task} workspace={workspace} onCommand={onTaskCommand} />
-          : <WorkReply task={task} onCommand={onTaskCommand} />}
+          : null}
       {task.error ? <p className="task-error">{task.error}</p> : null}
     </div>
   );
@@ -144,26 +150,39 @@ function BrowserUseView({ snapshot, onCommand }: { snapshot?: BrowserAgentSnapsh
   );
 }
 
-function WorkReply({ task, onCommand }: { task: NonNullable<TaskSnapshot['task']>; onCommand: (command: TaskCommand) => Promise<TaskCommandResult> }) {
+function WorkThread({ task, onCommand }: { task: NonNullable<TaskSnapshot['task']>; onCommand: (command: TaskCommand) => Promise<TaskCommandResult> }) {
   const [revision, setRevision] = useState('');
   const [message, setMessage] = useState('');
   const canReview = task.state === 'Needs Approval' && !task.pendingApproval;
+  const turns = task.turns?.length ? task.turns : [{
+    id: task.turnId || 'current-turn', prompt: task.prompt, result: task.result,
+    status: task.state === 'Completed' ? 'completed' as const : task.state === 'Failed' ? 'failed' as const : task.state === 'Cancelled' ? 'cancelled' as const : 'running' as const,
+    sources: task.browserRun.sources, createdAt: task.createdAt, completedAt: task.state === 'Running' ? null : task.updatedAt,
+  }];
+  const hasResult = turns.some((turn) => turn.result.trim());
+  const threadText = turns.map((turn, index) => `Turn ${index + 1}\nYou\n${turn.prompt}\n\nAgent\n${turn.result}`).join('\n\n---\n\n');
   return (
-    <div className="reply-view">
-      {task.result ? (
+    <div className="reply-view task-thread" aria-label="Task conversation">
+      {hasResult ? (
         <div className="reply-toolbar">
-          <button type="button" className="secondary-button" onClick={() => { void navigator.clipboard.writeText(task.result).then(() => setMessage('Copied result.')); }}><Copy size={13} /> Copy</button>
+          <button type="button" className="secondary-button" onClick={() => { void navigator.clipboard.writeText(threadText).then(() => setMessage('Copied thread.')); }}><Copy size={13} /> Copy thread</button>
           <button type="button" className="secondary-button" onClick={() => { void onCommand({ type: 'exportResult', format: 'markdown' }).then((result) => setMessage(result.message ?? 'Saved.')); }}>Save</button>
           <button type="button" className="secondary-button" onClick={() => { void onCommand({ type: 'exportResult', format: 'text' }).then((result) => setMessage(result.message ?? 'Exported.')); }}>Export</button>
         </div>
       ) : null}
-      <TandemMarkdown markdown={task.result} title={taskHeadline(task.prompt)} className="reply-body" />
-      {task.browserRun.sources.length ? (
-        <section className="reply-sources">
-          <h3>Sources</h3>
-          <ul>{task.browserRun.sources.map((source) => <li key={source.url}><a href={source.url} target="_blank" rel="noreferrer">{source.title}</a></li>)}</ul>
-        </section>
-      ) : null}
+      {turns.map((turn, index) => (
+        <article className={`task-turn task-turn-${turn.status}`} key={turn.id}>
+          <header className="task-turn-request"><span>You · Turn {index + 1}</span><p>{turn.prompt}</p></header>
+          {turn.result ? <TandemMarkdown markdown={turn.result} title={taskHeadline(turn.prompt)} className="reply-body task-turn-reply" /> : null}
+          {turn.sources.length ? (
+            <section className="reply-sources">
+              <h3>Sources</h3>
+              <ul>{turn.sources.map((source) => <li key={source.url}><a href={source.url} target="_blank" rel="noreferrer">{source.title}</a></li>)}</ul>
+            </section>
+          ) : null}
+          {turn.status === 'running' ? <div className="task-turn-thinking" role="status"><span className="agent-dock-dot" aria-hidden="true" /> Agent thinking…</div> : null}
+        </article>
+      ))}
       {canReview ? (
         <div className="review-actions">
           <button type="button" className="primary-button" onClick={() => { void onCommand({ type: 'approveResult' }).then((result) => setMessage(result.message ?? 'Approved.')); }}><Check size={14} /> Approve</button>

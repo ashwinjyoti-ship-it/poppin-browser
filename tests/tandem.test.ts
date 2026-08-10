@@ -132,7 +132,7 @@ describe('Tandem capability', () => {
   function capability(routes: Record<string, unknown>, calls: Call[] = [], writable = true) {
     const openInWorld = vi.fn();
     const context = {
-      client: () => client(routes, calls),
+      provider: () => client(routes, calls),
       workspaceId: () => 'workspace-1',
       writable: () => writable,
       openInWorld,
@@ -214,7 +214,7 @@ describe('TandemEngine', () => {
     const engine = new TandemEngine(window as unknown as Electron.BrowserWindow, credentials, {
       openWorld,
       onContextChanged,
-      createClient: (baseUrl, apiKey) => new TandemClient(baseUrl, apiKey, fakeFetch(routes, calls).impl),
+      createProvider: (baseUrl, apiKey) => new TandemClient(baseUrl, apiKey, fakeFetch(routes, calls).impl),
     });
     return { engine, credentials, openWorld, onContextChanged, routes, calls };
   }

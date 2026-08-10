@@ -24,6 +24,7 @@ describe('task store', () => {
       turnId: 'turn-1',
       baselineCommit: 'a'.repeat(40),
       progress: [{ id: 'item-1', kind: 'files', title: 'Edited files', detail: 'src/App.tsx', status: 'completed' }],
+      turns: [{ id: 'turn-1', prompt: 'Change the button', result: 'Implemented the change.', status: 'completed', sources: [], createdAt: '2026-08-07T00:00:00.000Z', completedAt: '2026-08-07T00:01:00.000Z' }],
       pendingApproval: { requestId: 4, kind: 'command', title: 'Run command', detail: 'npm test', reason: 'Verify the change' },
       result: 'Implemented the change.',
       diff: 'diff --git a/src/App.tsx b/src/App.tsx',

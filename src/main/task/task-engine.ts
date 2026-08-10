@@ -13,6 +13,7 @@ import {
   type TaskRecordSnapshot,
   type TaskSnapshot,
   type TaskKind,
+  type TaskTurnSnapshot,
 } from '../../shared/task';
 import type { PageContextSnapshot, WorkspaceSnapshot } from '../../shared/workspace';
 import type { AgentHarnessId } from '../../shared/agent';
@@ -134,6 +135,7 @@ export class TaskEngine {
         error: 'Poppin closed before this Codex task finished. Review the project before starting another task.',
         updatedAt: new Date().toISOString(),
       };
+      completeCurrentTurn(this.task, 'failed');
       this.store.save(this.task);
     }
   }
@@ -179,6 +181,8 @@ export class TaskEngine {
           return await this.startTask(command.prompt, command.model, command.reasoningEffort, command.kind, command.useBrowser);
         case 'continueTask':
           return await this.continueTask(command.prompt, 'follow-up');
+        case 'finishTask':
+          return await this.finishTask();
         case 'respondApproval':
           return await this.respondApproval(command.decision);
         case 'respondQuestion':
@@ -329,6 +333,7 @@ export class TaskEngine {
         id: 'starting', kind: 'status', title: kind === 'code' ? 'Starting Code task' : 'Starting Work task',
         detail: kind === 'code' ? pathTail(cwd) : selectedContextSummary(workspace), status: 'running',
       }],
+      turns: [createTaskTurn(prompt, now)],
       pendingApproval: null, result: '', diff: '', error: null, createdAt: now, updatedAt: now,
       browserRun: createBrowserRun(wantsBrowserUse, browserSnapshot),
     };
@@ -465,6 +470,7 @@ export class TaskEngine {
     task.result = '';
     this.agentMessages.clear();
     task.browserRun = createBrowserRun(wantsBrowserUse, browserSnapshot);
+    task.turns = [...taskTurns(task), createTaskTurn(prompt, new Date().toISOString())];
     task.progress = [{
       id: `continuation-${Date.now()}`, kind: 'status',
       title: intent === 'revision' ? 'Revising with Codex' : 'Continuing the Codex conversation',
@@ -489,6 +495,24 @@ export class TaskEngine {
       this.failTask(error instanceof Error ? error.message : 'Codex could not continue the conversation.');
       throw error;
     }
+  }
+
+  private async finishTask(): Promise<TaskCommandResult> {
+    const task = this.task;
+    if (!task) return { ok: true };
+    if (task.state === 'Running' || task.pendingApproval || task.state === 'Needs Approval') {
+      return { ok: false, message: 'Finish, cancel, or approve the current turn before starting a new task.' };
+    }
+    const browser = this.options.getBrowserAgentSnapshot?.();
+    if (browser?.taskSpace && !browser.taskSpace.kept) {
+      await this.options.executeBrowserAgentCommand?.({ type: 'closeTaskTabs' });
+    }
+    this.task = null;
+    this.store.clear();
+    this.agentMessages.clear();
+    this.browserToolsAvailableInCurrentThread = false;
+    this.emitSnapshot();
+    return { ok: true, message: 'Ready for a new task.' };
   }
 
   private async respondApproval(decision: 'accept' | 'decline' | 'cancel'): Promise<TaskCommandResult> {
@@ -556,6 +580,7 @@ export class TaskEngine {
     task.pendingApproval = null;
     task.error = null;
     if (task.browserRun.required) task.browserRun.state = 'incomplete';
+    completeCurrentTurn(task, 'cancelled');
     await this.captureDiff();
     this.persistAndEmit();
     this.options.onTaskEnded?.('stopped');
@@ -873,6 +898,8 @@ export class TaskEngine {
         const message = `${this.agentMessages.get(event.itemId) ?? ''}${event.delta}`.slice(-MAX_RESULT_LENGTH);
         this.agentMessages.set(event.itemId, message);
         task.result = message;
+        const turn = currentTaskTurn(task);
+        if (turn) turn.result = message;
         break;
       }
       case 'commandOutputDelta': {
@@ -898,15 +925,18 @@ export class TaskEngine {
           task.pendingApproval = null;
           task.error = null;
           if (task.browserRun.required) task.browserRun.state = 'completed';
+          completeCurrentTurn(task, 'completed');
         } else if (status === 'interrupted') {
           task.state = 'Cancelled';
           task.pendingApproval = null;
           if (task.browserRun.required) task.browserRun.state = 'incomplete';
+          completeCurrentTurn(task, 'cancelled');
         } else {
           task.state = 'Failed';
           task.pendingApproval = null;
           if (task.browserRun.required) task.browserRun.state = 'incomplete';
           task.error = event.error ?? `${describeAgent(this.agentId).name} failed to complete the task.`;
+          completeCurrentTurn(task, 'failed');
         }
         await this.captureDiff();
         this.persistAndEmit();
@@ -970,6 +1000,12 @@ export class TaskEngine {
     task.pendingApproval = null;
     task.error = null;
     task.result = '';
+    const turn = currentTaskTurn(task);
+    if (turn) {
+      turn.result = '';
+      turn.status = 'running';
+      turn.completedAt = null;
+    }
     this.agentMessages.clear();
     this.appendProgress({
       id: `browser-retry-${task.browserRun.retryCount}`,
@@ -1004,8 +1040,10 @@ export class TaskEngine {
       instructions: task.kind === 'code' ? CODE_DEVELOPER_INSTRUCTIONS : WORK_DEVELOPER_INSTRUCTIONS,
       tools,
       fallbackHistory: [
-        { role: 'user', text: `USER REQUEST\n${task.prompt}` },
-        ...(task.result.trim() ? [{ role: 'assistant' as const, text: task.result.trim() }] : []),
+        ...taskTurns(task).flatMap((turn) => [
+          { role: 'user' as const, text: `USER REQUEST\n${turn.prompt}` },
+          ...(turn.result.trim() ? [{ role: 'assistant' as const, text: turn.result.trim() }] : []),
+        ]),
       ],
       requiresTools: wantsBrowserUse,
       toolsAlreadyAttached: this.browserToolsAvailableInCurrentThread,
@@ -1018,8 +1056,11 @@ export class TaskEngine {
     task.state = 'Failed';
     task.pendingApproval = null;
     task.result = '';
+    const turn = currentTaskTurn(task);
+    if (turn) turn.result = '';
     task.browserRun.state = 'incomplete';
     task.error = 'Browser research is incomplete: Codex did not execute a browser action after Poppin retried the turn. The task and Agent Tabs were retained so you can retry without losing context.';
+    completeCurrentTurn(task, 'failed');
     this.appendProgress({
       id: `browser-incomplete-${Date.now()}`,
       kind: 'status',
@@ -1046,6 +1087,7 @@ export class TaskEngine {
     this.task.pendingApproval = null;
     this.task.error = message;
     if (this.task.browserRun.required) this.task.browserRun.state = 'incomplete';
+    completeCurrentTurn(this.task, 'failed');
     this.persistAndEmit();
     this.options.onTaskEnded?.('stopped');
   }
@@ -1536,9 +1578,44 @@ function cloneTask(task: TaskRecordSnapshot): TaskRecordSnapshot {
   return {
     ...task,
     progress: task.progress.map((item) => ({ ...item })),
+    turns: task.turns?.map((turn) => ({ ...turn, sources: turn.sources.map((source) => ({ ...source })) })),
     pendingApproval: task.pendingApproval ? { ...task.pendingApproval } : null,
     browserRun: { ...task.browserRun, sources: task.browserRun.sources.map((source) => ({ ...source })) },
     ...(task.delivery ? { delivery: { ...task.delivery, pullRequest: task.delivery.pullRequest ? { ...task.delivery.pullRequest } : null } } : {}),
   };
 }
 
+function createTaskTurn(prompt: string, createdAt: string): TaskTurnSnapshot {
+  return { id: randomUUID(), prompt, result: '', status: 'running', sources: [], createdAt, completedAt: null };
+}
+
+function taskTurns(task: TaskRecordSnapshot): TaskTurnSnapshot[] {
+  if (task.turns?.length) return task.turns;
+  const fallback: TaskTurnSnapshot = {
+    id: task.turnId || 'legacy-turn',
+    prompt: task.prompt,
+    result: task.result,
+    status: task.state === 'Completed' || task.state === 'Needs Approval' ? 'completed'
+      : task.state === 'Cancelled' ? 'cancelled'
+        : task.state === 'Failed' ? 'failed' : 'running',
+    sources: task.browserRun.sources.map((source) => ({ ...source })),
+    createdAt: task.createdAt,
+    completedAt: task.state === 'Running' ? null : task.updatedAt,
+  };
+  task.turns = [fallback];
+  return task.turns;
+}
+
+function currentTaskTurn(task: TaskRecordSnapshot): TaskTurnSnapshot | null {
+  const turns = taskTurns(task);
+  return turns[turns.length - 1] ?? null;
+}
+
+function completeCurrentTurn(task: TaskRecordSnapshot, status: TaskTurnSnapshot['status']): void {
+  const turn = currentTaskTurn(task);
+  if (!turn) return;
+  turn.result = task.result;
+  turn.status = status;
+  turn.sources = task.browserRun.sources.map((source) => ({ ...source }));
+  turn.completedAt = new Date().toISOString();
+}

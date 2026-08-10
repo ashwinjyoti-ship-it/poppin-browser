@@ -139,7 +139,10 @@ export class BrowserEngine {
     const tabs: PersistedTabState[] = shouldRestore && state?.tabs.length
       ? state.tabs
       : [{ id: randomUUID(), url: NEW_TAB_URL, pinned: false, groupId: null }];
-    for (const tab of tabs) this.createTab(tab.url, tab.id, false, tab, false, 'end');
+    for (const tab of tabs) {
+      this.createTab(tab.url, tab.id, false, tab, false, 'end');
+      if (tab.surface === 'tandem-world') this.tandemWorldTabId = tab.id;
+    }
     const requestedActive = shouldRestore && state?.activeTabId ? this.tabs.get(state.activeTabId) : null;
     const safeActiveId = requestedActive && !requestedActive.snapshot.taskSpaceId
       ? requestedActive.snapshot.id
@@ -193,7 +196,7 @@ export class BrowserEngine {
     }
     const id = randomUUID();
     this.tandemWorldTabId = id;
-    this.createTab(normalized.url, id, false, { id, url: normalized.url, pinned: true, groupId: null }, true, 'end');
+    this.createTab(normalized.url, id, false, { id, url: normalized.url, pinned: false, groupId: null, surface: 'tandem-world' }, true, 'end');
     const created = this.tabs.get(id);
     if (created) {
       created.snapshot.title = 'Tandem World';
@@ -649,6 +652,7 @@ export class BrowserEngine {
           pinned: tab.snapshot.pinned,
           groupId: tab.snapshot.groupId,
           taskSpaceId: tab.snapshot.taskSpaceId,
+          surface: tab.snapshot.surface,
         }] : [];
       }),
       groups: Array.from(this.groups.values(), (group) => ({ ...group })),
@@ -716,6 +720,7 @@ export class BrowserEngine {
       pinned: persisted?.pinned === true,
       groupId: persisted?.groupId ?? null,
       taskSpaceId: persisted?.taskSpaceId ?? null,
+      surface: persisted?.surface,
       isLoading: false,
       canGoBack: false,
       canGoForward: false,
@@ -956,7 +961,7 @@ export class BrowserEngine {
     if (!tab) return { ok: false, message: 'That tab is already closed.' };
     const orderedIds = [...this.tabOrder];
     const closingIndex = orderedIds.indexOf(tabId);
-    if (remember && !tab.snapshot.taskSpaceId && tab.lastExternalUrl) {
+    if (remember && !tab.snapshot.taskSpaceId && !tab.snapshot.surface && tab.lastExternalUrl) {
       this.closedTabs.push({
         id: randomUUID(),
         url: tab.lastExternalUrl,

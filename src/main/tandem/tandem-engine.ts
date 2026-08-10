@@ -3,7 +3,6 @@ import type { BrowserWindow } from 'electron';
 import {
   EMPTY_TANDEM_SNAPSHOT,
   TANDEM_CHANNELS,
-  tandemWorldUrl,
   type TandemCommand,
   type TandemCommandResult,
   type TandemContextSnapshot,
@@ -11,6 +10,7 @@ import {
 } from '../../shared/tandem';
 import { TandemClient } from './tandem-client';
 import { normalizeTandemBaseUrl, type TandemCredentialStore } from './tandem-credentials';
+import type { CreateTandemProvider, TandemProvider } from './tandem-provider';
 
 const MAX_SELECTED_PAGES = 12;
 
@@ -20,7 +20,7 @@ export interface TandemEngineOptions {
   closeWorld?: () => void;
   /** Notifies the workspace that explicit context changed. */
   onContextChanged?: () => void;
-  createClient?: (baseUrl: string, apiKey: string) => TandemClient;
+  createProvider?: CreateTandemProvider;
 }
 
 /**
@@ -31,7 +31,7 @@ export interface TandemEngineOptions {
  */
 export class TandemEngine {
   private snapshot: TandemSnapshot = { ...EMPTY_TANDEM_SNAPSHOT };
-  private client: TandemClient | null = null;
+  private provider: TandemProvider | null = null;
 
   constructor(
     private readonly window: BrowserWindow,
@@ -60,8 +60,8 @@ export class TandemEngine {
     };
   }
 
-  getClient(): TandemClient | null {
-    return this.client;
+  getProvider(): TandemProvider | null {
+    return this.provider;
   }
 
   getActiveWorkspaceId(): string | null {
@@ -74,9 +74,8 @@ export class TandemEngine {
   }
 
   openWorldForPage(pageId: string): void {
-    const baseUrl = this.snapshot.connection.baseUrl;
-    if (!baseUrl) return;
-    this.options.openWorld?.(tandemWorldUrl(baseUrl, pageId));
+    if (!this.provider) return;
+    this.options.openWorld?.(this.provider.worldUrl(pageId));
     this.snapshot.worldOpen = true;
     this.emit();
   }
@@ -129,7 +128,7 @@ export class TandemEngine {
 
   private disconnect(): TandemCommandResult {
     this.credentials.clear();
-    this.client = null;
+    this.provider = null;
     this.snapshot = { ...EMPTY_TANDEM_SNAPSHOT };
     this.emit();
     this.options.onContextChanged?.();
@@ -144,13 +143,13 @@ export class TandemEngine {
       return { ok: false, message: 'Connect Tandem first.' };
     }
     this.setConnection('connecting', 'Connecting to Tandem…', credential.baseUrl);
-    const client = this.options.createClient?.(credential.baseUrl, credential.apiKey)
+    const provider = this.options.createProvider?.(credential.baseUrl, credential.apiKey)
       ?? new TandemClient(credential.baseUrl, credential.apiKey);
     try {
-      await client.catalog();
-      const account = await client.me();
-      const workspaces = await client.listWorkspaces();
-      this.client = client;
+      await provider.catalog();
+      const account = await provider.me();
+      const workspaces = await provider.listWorkspaces();
+      this.provider = provider;
       this.snapshot.connection = {
         state: 'ready',
         message: 'Tandem is connected.',
@@ -168,7 +167,7 @@ export class TandemEngine {
       this.emit();
       return { ok: true };
     } catch (error) {
-      this.client = null;
+      this.provider = null;
       const message = error instanceof Error ? error.message : 'Poppin could not reach Tandem.';
       this.setConnection('error', message, credential.baseUrl);
       return { ok: false, message };
@@ -187,14 +186,14 @@ export class TandemEngine {
 
   private async loadWorkspace(): Promise<void> {
     const workspaceId = this.snapshot.activeWorkspaceId;
-    if (!this.client || !workspaceId) {
+    if (!this.provider || !workspaceId) {
       this.snapshot.pages = [];
       this.snapshot.recent = [];
       return;
     }
     const [pages, recent] = await Promise.all([
-      this.client.listPages(workspaceId),
-      this.client.recentPages(),
+      this.provider.listPages(workspaceId),
+      this.provider.recentPages(),
     ]);
     this.snapshot.pages = pages;
     this.snapshot.recent = recent;
@@ -202,12 +201,12 @@ export class TandemEngine {
 
   private async search(query: string): Promise<TandemCommandResult> {
     this.snapshot.searchQuery = query;
-    if (!this.client || !query.trim()) {
+    if (!this.provider || !query.trim()) {
       this.snapshot.searchResults = [];
       this.emit();
       return { ok: true };
     }
-    this.snapshot.searchResults = await this.client.search(query.trim());
+    this.snapshot.searchResults = await this.provider.search(query.trim());
     this.emit();
     return { ok: true };
   }
@@ -223,12 +222,12 @@ export class TandemEngine {
       this.options.onContextChanged?.();
       return { ok: true };
     }
-    if (!this.client || !this.snapshot.activeWorkspaceId) return { ok: false, message: 'Connect Tandem first.' };
+    if (!this.provider || !this.snapshot.activeWorkspaceId) return { ok: false, message: 'Connect Tandem first.' };
     if (this.snapshot.selected.length >= MAX_SELECTED_PAGES) {
       return { ok: false, message: `Poppin keeps at most ${MAX_SELECTED_PAGES} Tandem pages in explicit context.` };
     }
     if (this.snapshot.selected.some((item) => item.pageId === pageId)) return { ok: true };
-    const content = await this.client.readMarkdown(pageId);
+    const content = await this.provider.readMarkdown(pageId);
     this.snapshot.selected = [...this.snapshot.selected, {
       sourceType: 'tandem-page',
       workspaceId: this.snapshot.activeWorkspaceId,
@@ -250,12 +249,12 @@ export class TandemEngine {
    * active task when a Tandem page changes remotely.
    */
   private async refreshContext(): Promise<TandemCommandResult> {
-    if (!this.client) return { ok: false, message: 'Connect Tandem first.' };
+    if (!this.provider) return { ok: false, message: 'Connect Tandem first.' };
     const refreshed: TandemContextSnapshot[] = [];
     const failures: string[] = [];
     for (const item of this.snapshot.selected) {
       try {
-        const content = await this.client.readMarkdown(item.pageId);
+        const content = await this.provider.readMarkdown(item.pageId);
         refreshed.push({
           ...item,
           title: content.title,
@@ -277,10 +276,9 @@ export class TandemEngine {
   }
 
   private openWorld(pageId?: string): TandemCommandResult {
-    const baseUrl = this.snapshot.connection.baseUrl;
-    if (!baseUrl) return { ok: false, message: 'Connect Tandem before opening Tandem World.' };
+    if (!this.provider) return { ok: false, message: 'Connect Tandem before opening Tandem World.' };
     if (!this.options.openWorld) return { ok: false, message: 'Tandem World is not available.' };
-    this.options.openWorld(tandemWorldUrl(baseUrl, pageId));
+    this.options.openWorld(this.provider.worldUrl(pageId));
     this.snapshot.worldOpen = true;
     this.emit();
     return { ok: true };

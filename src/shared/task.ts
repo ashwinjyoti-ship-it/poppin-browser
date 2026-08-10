@@ -55,6 +55,16 @@ export interface TaskBrowserSourceSnapshot {
   url: string;
 }
 
+export interface TaskTurnSnapshot {
+  id: string;
+  prompt: string;
+  result: string;
+  status: 'running' | 'completed' | 'failed' | 'cancelled';
+  sources: TaskBrowserSourceSnapshot[];
+  createdAt: string;
+  completedAt: string | null;
+}
+
 export interface TaskRecordSnapshot {
   kind: TaskKind;
   state: TaskState;
@@ -66,6 +76,8 @@ export interface TaskRecordSnapshot {
   turnId: string;
   baselineCommit: string;
   progress: TaskProgressSnapshot[];
+  /** Persisted turns in this one task conversation. Current thinking is not retained here. */
+  turns?: TaskTurnSnapshot[];
   pendingApproval: TaskApprovalSnapshot | null;
   result: string;
   diff: string;
@@ -110,6 +122,7 @@ export type TaskCommand =
       useBrowser?: boolean;
     }
   | { type: 'continueTask'; prompt: string }
+  | { type: 'finishTask' }
   | { type: 'respondApproval'; decision: 'accept' | 'decline' | 'cancel' }
   | { type: 'respondQuestion'; answer: string }
   | { type: 'cancelTask' }

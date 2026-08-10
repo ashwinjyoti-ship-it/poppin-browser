@@ -24,6 +24,7 @@ interface WorkspacePaneProps {
   onClearVisualSelection?: () => void;
   tandem: TandemSnapshot;
   onTandemCommand: (command: TandemCommand) => Promise<string | null>;
+  onOpenSettings?: () => void;
 }
 
 /**
@@ -34,6 +35,7 @@ interface WorkspacePaneProps {
 export function WorkspacePane({
   collapsed, snapshot, tabs, activeTab, onCollapseChange, onCreate, onCommand, onPagesCommand,
   onRefreshTab, onCaptureVisualSelection, onClearVisualSelection, tandem, onTandemCommand,
+  onOpenSettings,
 }: WorkspacePaneProps) {
   const [name, setName] = useState('My Workspace');
   const [error, setError] = useState('');
@@ -83,7 +85,7 @@ export function WorkspacePane({
       </div>
       {snapshot.workspace ? (
         <div className="workspace-content">
-          <TandemSection snapshot={tandem} onCommand={onTandemCommand} />
+          <TandemSection snapshot={tandem} onCommand={onTandemCommand} onOpenSettings={onOpenSettings} />
           <MemorySection onCommand={onPagesCommand} />
           <section className="workspace-section">
             <div className="section-heading"><span>Tabs</span><span>{tabs.length}</span></div>

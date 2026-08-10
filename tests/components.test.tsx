@@ -7,6 +7,7 @@ import { TabStrip } from '../src/renderer/ui/TabStrip';
 import { CommandBar } from '../src/renderer/ui/CommandBar';
 import { TaskTabView } from '../src/renderer/ui/TaskTabView';
 import { TandemSection } from '../src/renderer/ui/TandemSection';
+import { ProjectSection } from '../src/renderer/ui/ProjectSection';
 import { PaneResizer } from '../src/renderer/ui/PaneResizer';
 import { DEFAULT_BROWSER_SETTINGS, type BrowserTabSnapshot } from '../src/shared/browser';
 import type { TaskSnapshot } from '../src/shared/task';
@@ -278,6 +279,31 @@ describe('browser chrome', () => {
     expect(onOpenTandemWorld).toHaveBeenCalledOnce();
   });
 
+  it('replaces the Tandem launcher with one closable Tandem World tab while open', async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    render(
+      <TabStrip
+        tabs={[{ ...TAB, id: 'tandem-world', title: 'Tandem World', kind: 'tandem' }]}
+        groups={[]}
+        activeTabId="tandem-world"
+        onActivate={vi.fn()}
+        onClose={onClose}
+        onCreate={vi.fn()}
+        onReorder={vi.fn()}
+        onShowTabMenu={vi.fn()}
+        onToggleGroup={vi.fn()}
+        onRenameGroup={vi.fn()}
+        onShowGroupMenu={vi.fn()}
+        tandemReady
+        onOpenTandemWorld={vi.fn()}
+      />,
+    );
+    expect(screen.queryByRole('button', { name: /open tandem world/i })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /close tandem world/i }));
+    expect(onClose).toHaveBeenCalledWith('tandem-world');
+  });
+
   it('offers an explicit Tandem World action in the connected workspace section', async () => {
     const user = userEvent.setup();
     const onCommand = vi.fn().mockResolvedValue(null);
@@ -290,6 +316,23 @@ describe('browser chrome', () => {
 
     await user.click(screen.getByRole('button', { name: 'Open Tandem World' }));
     expect(onCommand).toHaveBeenCalledWith({ type: 'openWorld' });
+  });
+
+  it('keeps Tandem projects collapsed until requested and keeps checked context inspectable', async () => {
+    const user = userEvent.setup();
+    render(<TandemSection snapshot={{
+      ...EMPTY_TANDEM_SNAPSHOT,
+      connection: { ...EMPTY_TANDEM_SNAPSHOT.connection, state: 'ready', message: 'Connected', baseUrl: 'https://tandem.example.com', hasCredential: true, writable: true },
+      workspaces: [{ id: 'workspace-1', name: 'Personal' }], activeWorkspaceId: 'workspace-1',
+      pages: [{ id: 'page-1', title: 'Project notes', kind: 'page', parentId: null, icon: null, updatedAt: null }],
+      selected: [{ sourceType: 'tandem-page', workspaceId: 'workspace-1', pageId: 'page-1', title: 'Project notes', updatedAt: null, capturedMarkdown: '# Notes', capturedAt: '2026-08-10T00:00:00Z', truncated: false, stale: false }],
+    }} onCommand={vi.fn().mockResolvedValue(null)} />);
+    const projects = screen.getByRole('button', { name: /projects & pages/i });
+    expect(projects).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByText('Project notes')).not.toBeInTheDocument();
+    await user.click(projects);
+    expect(screen.getByText('Project notes')).toBeVisible();
+    expect(screen.getByText('Selected context snapshot')).toBeVisible();
   });
 
   it('reflects navigation availability and submits the address form', async () => {
@@ -349,9 +392,34 @@ describe('browser chrome', () => {
       />,
     );
 
-    expect(await screen.findByRole('complementary', { name: /browser settings/i })).toBeVisible();
+    expect(await screen.findByRole('complementary', { name: /poppin settings/i })).toBeVisible();
     await user.selectOptions(screen.getByLabelText(/links open in/i), 'new-tab');
     expect(onUpdateSettings).toHaveBeenCalledWith({ linkOpening: 'new-tab' });
+  });
+
+  it('connects Tandem from Poppin settings instead of the workspace pane', async () => {
+    const user = userEvent.setup();
+    const onTandemCommand = vi.fn().mockResolvedValue(null);
+    render(
+      <BrowserToolbar
+        activeTab={TAB} address={TAB.url} addressError="" settings={DEFAULT_BROWSER_SETTINGS} settingsOpen
+        tandem={EMPTY_TANDEM_SNAPSHOT} canReopenClosedTab={false} addressInputRef={{ current: null }}
+        onAddressChange={vi.fn()} onAddressFocus={vi.fn()} onAddressBlur={vi.fn()} onBack={vi.fn()} onForward={vi.fn()} onReload={vi.fn()}
+        onReopenClosedTab={vi.fn()} onSettingsOpenChange={vi.fn()} onUpdateSettings={vi.fn()} onTandemCommand={onTandemCommand} onSubmit={vi.fn()}
+      />,
+    );
+    await user.type(screen.getByLabelText('Tandem address'), 'tandem.example.com');
+    await user.type(screen.getByLabelText('API key'), 'udm_secret');
+    await user.click(screen.getByRole('button', { name: 'Connect Tandem' }));
+    expect(onTandemCommand).toHaveBeenCalledWith({ type: 'connect', baseUrl: 'tandem.example.com', apiKey: 'udm_secret' });
+  });
+
+  it('keeps connected project settings collapsed until requested', async () => {
+    const user = userEvent.setup();
+    render(<ProjectSection project={{ repositoryPath: '/tmp/poppin', remote: 'origin', branch: 'main', installCommand: 'npm ci', devCommand: 'npm run dev', previewUrl: 'http://localhost:3000' }} onCommand={vi.fn().mockResolvedValue(null)} />);
+    expect(screen.queryByLabelText('Install command')).not.toBeVisible();
+    await user.click(screen.getByText('Project settings'));
+    expect(screen.getByLabelText('Install command')).toBeVisible();
   });
 });
 
@@ -462,5 +530,32 @@ describe('Codex controls', () => {
     expect(screen.getByRole('heading', { name: /guitar options/i })).toBeVisible();
     expect(screen.queryByText('Codex response')).not.toBeInTheDocument();
     expect(screen.queryByText(/tandem/i)).not.toBeInTheDocument();
+  });
+
+  it('renders follow-ups as one persistent task thread and exposes an explicit new-task action', async () => {
+    const user = userEvent.setup();
+    const onCommand = vi.fn().mockResolvedValue({ ok: true });
+    const snapshot: TaskSnapshot = {
+      ...READY_TASK,
+      task: {
+        state: 'Completed', kind: 'work', prompt: 'Tell me more', model: 'gpt-test', reasoningEffort: 'high',
+        documentId: 'document-1', threadId: 'thread-1', turnId: 'turn-2', baselineCommit: '', progress: [], pendingApproval: null,
+        result: 'Second answer', diff: '', error: null,
+        turns: [
+          { id: 'turn-1', prompt: 'First question', result: 'First answer', status: 'completed', sources: [], createdAt: '', completedAt: '' },
+          { id: 'turn-2', prompt: 'Tell me more', result: 'Second answer', status: 'completed', sources: [], createdAt: '', completedAt: '' },
+        ],
+        browserRun: { required: false, state: 'not-required', taskSpaceId: null, successfulActionCount: 0, retryCount: 0, lastActionAt: null, sources: [] },
+        createdAt: '', updatedAt: '',
+      },
+    };
+    render(<TaskTabView taskSnapshot={snapshot} workspace={EMPTY_WORKSPACE} onTaskCommand={onCommand} />);
+    expect(screen.getAllByText('First question')).toHaveLength(2);
+    expect(screen.getByText('First answer')).toBeVisible();
+    expect(screen.getByText('Tell me more')).toBeVisible();
+    expect(screen.getByText('Second answer')).toBeVisible();
+    expect(screen.queryByText(/agent thinking/i)).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /new task/i }));
+    expect(onCommand).toHaveBeenCalledWith({ type: 'finishTask' });
   });
 });
