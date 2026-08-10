@@ -1,12 +1,16 @@
+import { createHash } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
-import { mkdtemp } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdtemp, readFile } from 'node:fs/promises';
+import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { _electron as electron, type ElectronApplication, type Page } from 'playwright-core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 const compiledMainPath = path.resolve('.webpack/arm64/main/index.js');
+const DOWNLOAD_FIXTURE = Buffer.alloc(64 * 1024, 0x5a);
+DOWNLOAD_FIXTURE.write('bvxn', 0);
+const DOWNLOAD_FIXTURE_HASH = createHash('sha256').update(DOWNLOAD_FIXTURE).digest('hex');
 
 let server: Server;
 let origin: string;
@@ -18,6 +22,15 @@ beforeEach(async () => {
     if (route === '/favicon.svg') {
       response.setHeader('Content-Type', 'image/svg+xml');
       response.end('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><circle cx="16" cy="16" r="15" fill="#e8820b"/></svg>');
+      return;
+    }
+    if (route === '/fixture.dmg' || route.startsWith('/fixture.dmg?')) {
+      response.writeHead(200, {
+        'Content-Type': 'application/x-apple-diskimage',
+        'Content-Disposition': 'attachment; filename="Poppin-Smoke-Fixture.dmg"',
+        'Content-Length': String(DOWNLOAD_FIXTURE.length),
+      });
+      response.end(DOWNLOAD_FIXTURE);
       return;
     }
     response.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -74,6 +87,8 @@ beforeEach(async () => {
       <h1>Local fixture</h1>
       <a href="/second" id="second">Second page</a>
       <a href="http://localhost:${(server.address() as { port: number }).port}/second" id="external">External site</a>
+      <a href="/fixture.dmg" id="download" download>Download fixture</a>
+      <a href="/fixture.dmg" id="download-blank" target="_blank">Download fixture blank</a>
       <button id="popup" onclick="window.open('/popup', '_blank')">Open popup</button>`);
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -438,6 +453,37 @@ describe('packaged browser workflow', () => {
     expect(cookies).toEqual(
       expect.arrayContaining([expect.objectContaining({ name: 'poppin-session', value: 'restored' })]),
     );
+  });
+
+  it('saves target=_blank DMG downloads completely under Downloads with a progress bar', async () => {
+    const userDataPath = await mkdtemp(path.join(tmpdir(), 'poppin-smoke-dl-'));
+    const launched = await launch(userDataPath);
+    application = launched.app;
+    const shell = launched.shell;
+    const address = shell.getByLabel('Address and search');
+    await address.fill(origin);
+    await address.press('Enter');
+    await expect.poll(() => pageInfo(application!, origin)).toMatchObject({ title: 'Local fixture' });
+
+    await application.evaluate(({ webContents }, fixtureOrigin) => {
+      const contents = webContents.getAllWebContents().find((candidate) => candidate.getURL().startsWith(fixtureOrigin));
+      return contents?.executeJavaScript("document.getElementById('download-blank').click()");
+    }, origin);
+
+    await expect.poll(() => shell.getByRole('region', { name: /downloads/i }).isVisible()).toBe(true);
+    await expect.poll(async () => {
+      const snapshot = await shell.evaluate(async () => window.poppinDownloads.getSnapshot());
+      return snapshot.items.some((item) => item.filename.includes('Poppin-Smoke-Fixture') && item.state === 'completed');
+    }).toBe(true);
+
+    const completed = await shell.evaluate(async () => {
+      const snapshot = await window.poppinDownloads.getSnapshot();
+      return snapshot.items.find((item) => item.state === 'completed') ?? null;
+    });
+    expect(completed).not.toBeNull();
+    const bytes = await readFile(completed!.savePath);
+    expect(createHash('sha256').update(bytes).digest('hex')).toBe(DOWNLOAD_FIXTURE_HASH);
+    expect(completed!.savePath.startsWith(path.join(homedir(), 'Downloads'))).toBe(true);
   });
 });
 

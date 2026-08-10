@@ -37,6 +37,7 @@ import type { VisualSelectionSnapshot } from '../../shared/workspace';
 import { HtmlFullscreenCoordinator, type HtmlFullscreenTransition } from './html-fullscreen';
 import type { BrowserAgentAction, BrowserSemanticNode, BrowserSemanticSnapshot } from '../../shared/browser-agent';
 import { showPageContextMenu } from './context-menu';
+import { DownloadManager } from './downloads';
 
 const PAGE_MARGIN = 12;
 const DEFAULT_CHROME_HEIGHT = 103;
@@ -797,6 +798,12 @@ export class BrowserEngine {
           action: 'allow',
           overrideBrowserWindowOptions: this.authenticationWindowOptions(),
         };
+      }
+      // File downloads opened via target=_blank must not become tab navigations;
+      // that path left truncated/missing DMGs under WebContentsView.
+      if (DownloadManager.isLikelyDownloadUrl(url)) {
+        contents.downloadURL(url);
+        return { action: 'deny' };
       }
       if (tab.snapshot.taskSpaceId || this.settings.linkOpening === 'same-tab') {
         void contents.loadURL(url).catch(() => undefined);

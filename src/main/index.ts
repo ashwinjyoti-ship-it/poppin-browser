@@ -40,11 +40,18 @@ import {
   SETTINGS_OVERLAY_CHANNELS,
   type SettingsOverlayCommand,
 } from '../shared/settings-overlay';
+import {
+  DOWNLOAD_CHANNELS,
+  EMPTY_DOWNLOADS_SNAPSHOT,
+  type DownloadsCommand,
+} from '../shared/downloads';
+import { DownloadManager } from './browser/downloads';
 
 registerInternalScheme();
 
 let mainWindow: BrowserWindow | null = null;
 let browserEngine: BrowserEngine | null = null;
+let downloadManager: DownloadManager | null = null;
 let workspaceEngine: WorkspaceEngine | null = null;
 let workspaceStore: WorkspaceStore | null = null;
 let taskEngine: TaskEngine | null = null;
@@ -103,6 +110,12 @@ async function createWindow(): Promise<void> {
     };
   };
 
+  downloadManager = new DownloadManager(browserSession, () => mainWindow, (snapshot) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send(DOWNLOAD_CHANNELS.snapshot, snapshot);
+    }
+  });
+  downloadManager.register();
   browserEngine = new BrowserEngine(mainWindow, browserSession, stateStore, getWindowState);
   if (!workspaceStore) throw new Error('Workspace storage is not ready.');
   const git = new GitEngine();
@@ -233,6 +246,7 @@ async function createWindow(): Promise<void> {
     settingsOverlay = null;
     mainWindow = null;
     browserEngine = null;
+    downloadManager = null;
     workspaceEngine = null;
     pagesEngine = null;
     taskEngine = null;
@@ -295,6 +309,14 @@ app.whenReady().then(async () => {
   ipcMain.handle(BROWSER_CHANNELS.command, (event, command: BrowserCommand) => {
     if (!isTrustedShellSender(event.sender)) throw new Error('Untrusted browser command.');
     return browserEngine?.execute(command) ?? { ok: false, message: 'Browser is not ready.' };
+  });
+  ipcMain.handle(DOWNLOAD_CHANNELS.getSnapshot, (event) => {
+    if (!isTrustedShellSender(event.sender)) throw new Error('Untrusted downloads snapshot request.');
+    return downloadManager?.getSnapshot() ?? EMPTY_DOWNLOADS_SNAPSHOT;
+  });
+  ipcMain.handle(DOWNLOAD_CHANNELS.command, (event, command: DownloadsCommand) => {
+    if (!isTrustedShellSender(event.sender)) throw new Error('Untrusted downloads command.');
+    return downloadManager?.execute(command) ?? { ok: false, message: 'Downloads are not ready.' };
   });
   ipcMain.handle(WORKSPACE_CHANNELS.getSnapshot, (event) => {
     if (!isTrustedShellSender(event.sender)) throw new Error('Untrusted workspace snapshot request.');

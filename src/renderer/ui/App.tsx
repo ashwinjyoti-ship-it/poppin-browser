@@ -7,9 +7,11 @@ import type { TaskCommand, TaskCommandResult, TaskSnapshot } from '../../shared/
 import type { BrowserAgentCommand, BrowserAgentCommandResult, BrowserAgentSnapshot } from '../../shared/browser-agent';
 import type { PagesCommand, PagesSnapshot } from '../../shared/pages';
 import { EMPTY_TANDEM_SNAPSHOT, type TandemCommand, type TandemSnapshot } from '../../shared/tandem';
+import { downloadBarHeight, EMPTY_DOWNLOADS_SNAPSHOT, type DownloadsSnapshot } from '../../shared/downloads';
 import { Brand } from './Brand';
 import { BrowserToolbar } from './BrowserToolbar';
 import { TabStrip } from './TabStrip';
+import { DownloadBar } from './DownloadBar';
 import { WorkspacePane } from './WorkspacePane';
 import { TaskTabView } from './TaskTabView';
 import { AgentDock } from './AgentDock';
@@ -57,6 +59,7 @@ export function App() {
   const [browserAgentSnapshot, setBrowserAgentSnapshot] = useState<BrowserAgentSnapshot>(EMPTY_BROWSER_AGENT);
   const [pagesSnapshot, setPagesSnapshot] = useState<PagesSnapshot>(EMPTY_PAGES);
   const [tandemSnapshot, setTandemSnapshot] = useState<TandemSnapshot>(EMPTY_TANDEM_SNAPSHOT);
+  const [downloadsSnapshot, setDownloadsSnapshot] = useState<DownloadsSnapshot>(EMPTY_DOWNLOADS_SNAPSHOT);
   const [pagesRevision, setPagesRevision] = useState(0);
   const [commandCollapsed, setCommandCollapsed] = useState(false);
   const [commandOverlayHeight, setCommandOverlayHeight] = useState(0);
@@ -86,6 +89,8 @@ export function App() {
   const address = isEditingAddress ? addressDraft : activeTab?.url ?? (activeNativeTab ? `${activeNativeTab.kind}://${activeNativeTab.pageId}` : '');
   const addressError = visibleAddressIssue(addressIssue, activeTab);
   const chromeLayout = getChromeLayout(viewport.width, viewport.height);
+  const downloadsHeight = downloadBarHeight(downloadsSnapshot.items.length);
+  const chromeHeight = chromeLayout.height + downloadsHeight;
   const leftPaneWidth = normalizeLeftPaneWidth(preferredLeftPaneWidth, viewport.width);
   const dockPresentation = getAgentDockPresentation({
     taskSnapshot,
@@ -99,7 +104,7 @@ export function App() {
     ? AGENT_DOCK_CARD_HEIGHT
     : dockPresentation === 'pill' ? AGENT_DOCK_PILL_HEIGHT : 0;
   const paneStyle = {
-    '--chrome-height': `${chromeLayout.height}px`,
+    '--chrome-height': `${chromeHeight}px`,
     '--titlebar-left-inset': `${getTitlebarLeftInset(chromeLayout.density, snapshot.isFullScreen)}px`,
     '--workspace-pane-width': `${leftPaneWidth}px`,
     '--command-overlay-height': `${commandOverlayHeight}px`,
@@ -164,6 +169,12 @@ export function App() {
     const unsubscribeSettings = window.poppinSettings.subscribe((nextSnapshot) => {
       if (mounted) setSettingsOpen(nextSnapshot.open);
     });
+    void window.poppinDownloads.getSnapshot().then((initialSnapshot) => {
+      if (mounted) setDownloadsSnapshot(initialSnapshot);
+    });
+    const unsubscribeDownloads = window.poppinDownloads.subscribe((nextSnapshot) => {
+      if (mounted) setDownloadsSnapshot(nextSnapshot);
+    });
     return () => {
       mounted = false;
       unsubscribeSnapshot();
@@ -174,6 +185,7 @@ export function App() {
       unsubscribeTandem();
       unsubscribeFocus();
       unsubscribeSettings();
+      unsubscribeDownloads();
     };
   }, []);
 
@@ -201,12 +213,12 @@ export function App() {
   useEffect(() => {
     void window.poppinBrowser.command({
       type: 'setLayout',
-      topInset: chromeLayout.height,
+      topInset: chromeHeight,
       leftInset: workspaceCollapsed ? 46 : leftPaneWidth + 14,
       rightInset: 24,
       bottomInset: commandCollapsed ? 0 : 94 + commandOverlayHeight + agentDockHeight,
     });
-  }, [agentDockHeight, chromeLayout.height, commandCollapsed, commandOverlayHeight, leftPaneWidth, workspaceCollapsed]);
+  }, [agentDockHeight, chromeHeight, commandCollapsed, commandOverlayHeight, leftPaneWidth, workspaceCollapsed]);
 
   const resizeLeftPane = (requestedWidth: number) => {
     setPreferredLeftPaneWidth(clampResizedLeftPaneWidth(requestedWidth, viewport.width));
@@ -372,6 +384,12 @@ export function App() {
           onOpenTandemWorld={() => {
             void sendTandemCommand({ type: 'openWorld' });
           }}
+        />
+        <DownloadBar
+          snapshot={downloadsSnapshot}
+          onCancel={(id) => { void window.poppinDownloads.command({ type: 'cancel', id }); }}
+          onReveal={(id) => { void window.poppinDownloads.command({ type: 'reveal', id }); }}
+          onDismiss={(id) => { void window.poppinDownloads.command({ type: 'dismiss', id }); }}
         />
       </header>
       <WorkspacePane
