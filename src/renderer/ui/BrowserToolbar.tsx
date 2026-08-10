@@ -2,16 +2,14 @@ import { ArrowLeft, ArrowRight, LockKeyhole, RefreshCw, RotateCcw, Search, Setti
 import { type FormEvent, type RefObject, useState } from 'react';
 
 import type { BrowserSettings, BrowserTabSnapshot } from '../../shared/browser';
-import type { TandemCommand, TandemSnapshot } from '../../shared/tandem';
+import type { TandemSnapshot } from '../../shared/tandem';
+import type { TandemSettingsCommand } from '../../shared/settings-overlay';
 
 interface BrowserToolbarProps {
   activeTab: BrowserTabSnapshot | null;
   address: string;
   addressError: string;
-  settings: BrowserSettings;
   settingsOpen: boolean;
-  tandem?: TandemSnapshot;
-  canReopenClosedTab: boolean;
   addressInputRef: RefObject<HTMLInputElement | null>;
   onAddressChange: (value: string) => void;
   onAddressFocus: () => void;
@@ -19,10 +17,7 @@ interface BrowserToolbarProps {
   onBack: () => void;
   onForward: () => void;
   onReload: () => void;
-  onReopenClosedTab: () => void;
   onSettingsOpenChange: (open: boolean) => void;
-  onUpdateSettings: (settings: Partial<BrowserSettings>) => void;
-  onTandemCommand?: (command: TandemCommand) => Promise<string | null>;
   onSubmit: (event: FormEvent) => void;
 }
 
@@ -30,10 +25,7 @@ export function BrowserToolbar({
   activeTab,
   address,
   addressError,
-  settings,
   settingsOpen,
-  tandem,
-  canReopenClosedTab,
   addressInputRef,
   onAddressChange,
   onAddressFocus,
@@ -41,10 +33,7 @@ export function BrowserToolbar({
   onBack,
   onForward,
   onReload,
-  onReopenClosedTab,
   onSettingsOpenChange,
-  onUpdateSettings,
-  onTandemCommand,
   onSubmit,
 }: BrowserToolbarProps) {
   return (
@@ -93,18 +82,6 @@ export function BrowserToolbar({
           <Settings2 size={18} />
         </button>
       </div>
-
-      {settingsOpen ? (
-        <BrowserSettingsPanel
-          settings={settings}
-          canReopenClosedTab={canReopenClosedTab}
-          onClose={() => onSettingsOpenChange(false)}
-          onReopenClosedTab={onReopenClosedTab}
-          onUpdate={onUpdateSettings}
-          tandem={tandem}
-          onTandemCommand={onTandemCommand}
-        />
-      ) : null}
     </div>
   );
 }
@@ -116,10 +93,10 @@ interface BrowserSettingsPanelProps {
   onReopenClosedTab: () => void;
   onUpdate: (settings: Partial<BrowserSettings>) => void;
   tandem?: TandemSnapshot;
-  onTandemCommand?: (command: TandemCommand) => Promise<string | null>;
+  onTandemCommand?: (command: TandemSettingsCommand) => Promise<string | null>;
 }
 
-function BrowserSettingsPanel({ settings, canReopenClosedTab, onClose, onReopenClosedTab, onUpdate, tandem, onTandemCommand }: BrowserSettingsPanelProps) {
+export function BrowserSettingsPanel({ settings, canReopenClosedTab, onClose, onReopenClosedTab, onUpdate, tandem, onTandemCommand }: BrowserSettingsPanelProps) {
   return (
     <aside className="browser-settings-panel" aria-label="Poppin settings">
       <div className="settings-heading">
@@ -177,13 +154,13 @@ function BrowserSettingsPanel({ settings, canReopenClosedTab, onClose, onReopenC
   );
 }
 
-function TandemSettings({ snapshot, onCommand }: { snapshot: TandemSnapshot; onCommand: (command: TandemCommand) => Promise<string | null> }) {
+function TandemSettings({ snapshot, onCommand }: { snapshot: TandemSnapshot; onCommand: (command: TandemSettingsCommand) => Promise<string | null> }) {
   const [baseUrl, setBaseUrl] = useState(snapshot.connection.baseUrl ?? '');
   const [apiKey, setApiKey] = useState('');
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
 
-  const run = async (command: TandemCommand) => {
+  const run = async (command: TandemSettingsCommand) => {
     setBusy(true);
     const error = await onCommand(command);
     setBusy(false);

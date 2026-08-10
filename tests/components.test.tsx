@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
-import { BrowserToolbar } from '../src/renderer/ui/BrowserToolbar';
+import { BrowserSettingsPanel, BrowserToolbar } from '../src/renderer/ui/BrowserToolbar';
 import { TabStrip } from '../src/renderer/ui/TabStrip';
 import { CommandBar } from '../src/renderer/ui/CommandBar';
 import { TaskTabView } from '../src/renderer/ui/TaskTabView';
@@ -365,9 +365,7 @@ describe('browser chrome', () => {
         activeTab={TAB}
         address={TAB.url}
         addressError=""
-        settings={DEFAULT_BROWSER_SETTINGS}
         settingsOpen={false}
-        canReopenClosedTab={false}
         addressInputRef={ref}
         onAddressChange={vi.fn()}
         onAddressFocus={vi.fn()}
@@ -375,9 +373,7 @@ describe('browser chrome', () => {
         onBack={vi.fn()}
         onForward={vi.fn()}
         onReload={vi.fn()}
-        onReopenClosedTab={vi.fn()}
         onSettingsOpenChange={vi.fn()}
-        onUpdateSettings={vi.fn()}
         onSubmit={onSubmit}
       />,
     );
@@ -388,17 +384,15 @@ describe('browser chrome', () => {
     expect(onSubmit).toHaveBeenCalledOnce();
   });
 
-  it('opens browser settings and updates link behavior', async () => {
+  it('opens the browser settings overlay from the toolbar', async () => {
     const user = userEvent.setup();
-    const onUpdateSettings = vi.fn();
+    const onSettingsOpenChange = vi.fn();
     render(
       <BrowserToolbar
         activeTab={{ ...TAB, url: 'https://accounts.google.com/v3/signin/challenge/pk' }}
         address="https://accounts.google.com/v3/signin/challenge/pk"
         addressError=""
-        settings={DEFAULT_BROWSER_SETTINGS}
-        settingsOpen
-        canReopenClosedTab={false}
+        settingsOpen={false}
         addressInputRef={{ current: null }}
         onAddressChange={vi.fn()}
         onAddressFocus={vi.fn()}
@@ -406,14 +400,29 @@ describe('browser chrome', () => {
         onBack={vi.fn()}
         onForward={vi.fn()}
         onReload={vi.fn()}
-        onReopenClosedTab={vi.fn()}
-        onSettingsOpenChange={vi.fn()}
-        onUpdateSettings={onUpdateSettings}
+        onSettingsOpenChange={onSettingsOpenChange}
         onSubmit={vi.fn()}
       />,
     );
 
-    expect(await screen.findByRole('complementary', { name: /poppin settings/i })).toBeVisible();
+    await user.click(screen.getByRole('button', { name: 'Poppin settings' }));
+    expect(onSettingsOpenChange).toHaveBeenCalledWith(true);
+  });
+
+  it('updates link behavior from the settings overlay', async () => {
+    const user = userEvent.setup();
+    const onUpdateSettings = vi.fn();
+    render(
+      <BrowserSettingsPanel
+        settings={DEFAULT_BROWSER_SETTINGS}
+        canReopenClosedTab={false}
+        onClose={vi.fn()}
+        onReopenClosedTab={vi.fn()}
+        onUpdate={onUpdateSettings}
+      />,
+    );
+
+    expect(screen.getByRole('complementary', { name: /poppin settings/i })).toBeVisible();
     await user.selectOptions(screen.getByLabelText(/links open in/i), 'new-tab');
     expect(onUpdateSettings).toHaveBeenCalledWith({ linkOpening: 'new-tab' });
   });
@@ -422,11 +431,9 @@ describe('browser chrome', () => {
     const user = userEvent.setup();
     const onTandemCommand = vi.fn().mockResolvedValue(null);
     render(
-      <BrowserToolbar
-        activeTab={TAB} address={TAB.url} addressError="" settings={DEFAULT_BROWSER_SETTINGS} settingsOpen
-        tandem={EMPTY_TANDEM_SNAPSHOT} canReopenClosedTab={false} addressInputRef={{ current: null }}
-        onAddressChange={vi.fn()} onAddressFocus={vi.fn()} onAddressBlur={vi.fn()} onBack={vi.fn()} onForward={vi.fn()} onReload={vi.fn()}
-        onReopenClosedTab={vi.fn()} onSettingsOpenChange={vi.fn()} onUpdateSettings={vi.fn()} onTandemCommand={onTandemCommand} onSubmit={vi.fn()}
+      <BrowserSettingsPanel
+        settings={DEFAULT_BROWSER_SETTINGS} tandem={EMPTY_TANDEM_SNAPSHOT} canReopenClosedTab={false}
+        onClose={vi.fn()} onReopenClosedTab={vi.fn()} onUpdate={vi.fn()} onTandemCommand={onTandemCommand}
       />,
     );
     await user.type(screen.getByLabelText('Tandem address'), 'tandem.example.com');
