@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import {
   app,
   BrowserWindow,
+  type BrowserWindowConstructorOptions,
   dialog,
   Menu,
   type Input,
@@ -54,13 +55,12 @@ interface BrowserTabRecord {
   snapshot: BrowserTabSnapshot;
   lastExternalUrl: string;
   documentGeneration: number;
-  pauseYoutubeAutoplay: boolean;
 }
 
 interface SemanticReferenceRecord {
   tabId: string;
   documentGeneration: number;
-  nodes: Map<string, { backendNodeId: number; credential: boolean; target: string }>;
+  nodes: Map<string, { backendNodeId: number; credential: boolean; mediaControl: boolean; target: string }>;
 }
 
 type ClosedTab = PersistedTabState;
@@ -72,6 +72,7 @@ export class BrowserEngine {
   private readonly closedTabs: ClosedTab[] = [];
   private readonly faviconByOrigin = new Map<string, string[]>();
   private readonly semanticReferences = new Map<string, SemanticReferenceRecord>();
+  private readonly mediaBlockedTaskSpaces = new Set<string>();
   private settings: BrowserSettings = { ...DEFAULT_BROWSER_SETTINGS };
   private activeTabId = '';
   private saveTimer: NodeJS.Timeout | null = null;
@@ -80,6 +81,7 @@ export class BrowserEngine {
   private viewInsets = { top: DEFAULT_CHROME_HEIGHT, left: 0, right: 0, bottom: 0 };
   private closeConfirmed = false;
   private authenticationWindow: BrowserWindow | null = null;
+  private readonly authenticationWindows = new Set<BrowserWindow>();
   private overlayKind: 'authentication' | 'preview' | null = null;
   private contentVisible = true;
   /** The single reusable Tandem World surface, if it is open. */
@@ -230,6 +232,7 @@ export class BrowserEngine {
   }
 
   createTaskSpaceTabs(taskSpaceId: string, sourceTabIds: string[]): string[] {
+    this.mediaBlockedTaskSpaces.add(taskSpaceId);
     const sourceTabs = [...new Set(sourceTabIds)].flatMap((tabId) => {
       const tab = this.tabs.get(tabId);
       return tab && !tab.snapshot.taskSpaceId && !tab.view.webContents.isDestroyed() ? [tab] : [];
@@ -243,12 +246,13 @@ export class BrowserEngine {
     });
   }
 
-  createTaskSpaceExplorationTab(taskSpaceId: string): string | null {
+  createTaskSpaceExplorationTab(taskSpaceId: string, url = ''): string | null {
     if (this.tabs.size >= 50) return null;
+    this.mediaBlockedTaskSpaces.add(taskSpaceId);
     const id = randomUUID();
-    this.createTab('', id, false, {
-      id, url: NEW_TAB_URL, pinned: false, groupId: null, taskSpaceId,
-    }, false, 'end', false);
+    this.createTab(url, id, false, {
+      id, url: url || NEW_TAB_URL, pinned: false, groupId: null, taskSpaceId,
+    }, false, 'end', Boolean(url));
     return id;
   }
 
@@ -261,8 +265,25 @@ export class BrowserEngine {
   closeTaskSpaceTabs(taskSpaceId: string): void {
     const ids = this.tabOrder.filter((id) => this.tabs.get(id)?.snapshot.taskSpaceId === taskSpaceId);
     for (const id of ids) this.closeTab(id, false);
+    this.mediaBlockedTaskSpaces.delete(taskSpaceId);
     this.emitSnapshot();
     this.scheduleSave();
+  }
+
+  closeTaskSpaceTab(taskSpaceId: string, tabId: string): boolean {
+    const tab = this.tabs.get(tabId);
+    if (!tab || tab.snapshot.taskSpaceId !== taskSpaceId) return false;
+    return this.closeTab(tabId, false).ok;
+  }
+
+  setTaskSpaceMediaBlocked(taskSpaceId: string, blocked: boolean): void {
+    if (blocked) this.mediaBlockedTaskSpaces.add(taskSpaceId);
+    else this.mediaBlockedTaskSpaces.delete(taskSpaceId);
+    for (const tab of this.tabs.values()) {
+      if (tab.snapshot.taskSpaceId !== taskSpaceId || tab.view.webContents.isDestroyed()) continue;
+      tab.view.webContents.setAudioMuted(blocked);
+      if (blocked) this.pauseTaskOwnedMedia(tab);
+    }
   }
 
   async createSemanticSnapshot(tabId: string, snapshotId: string, taskSpaceId: string): Promise<BrowserSemanticSnapshot> {
@@ -287,8 +308,13 @@ export class BrowserEngine {
     const candidates = (response.nodes ?? []).filter(isUsefulAxNode).slice(0, 300);
     const records = await Promise.all(candidates.map(async (node, index) => this.semanticNodeFromAx(contents, node, index)));
     const nodes = records.flatMap((record) => record ? [record.node] : []);
-    const refs = new Map<string, { backendNodeId: number; credential: boolean; target: string }>();
-    for (const record of records) if (record) refs.set(record.node.ref, { backendNodeId: record.backendNodeId, credential: record.node.credential, target: record.node.name || record.node.role });
+    const refs = new Map<string, { backendNodeId: number; credential: boolean; mediaControl: boolean; target: string }>();
+    for (const record of records) if (record) refs.set(record.node.ref, {
+      backendNodeId: record.backendNodeId,
+      credential: record.node.credential,
+      mediaControl: record.node.role === 'button' && /^(?:play|pause|mute|unmute|volume)(?:\b|\s*\()/i.test(record.node.name),
+      target: record.node.name || record.node.role,
+    });
     this.semanticReferences.set(snapshotId, { tabId, documentGeneration: tab.documentGeneration, nodes: refs });
     for (const [id, record] of this.semanticReferences) if (record.tabId === tabId && id !== snapshotId) this.semanticReferences.delete(id);
     return {
@@ -349,7 +375,7 @@ export class BrowserEngine {
     };
   }
 
-  private resolveSemanticReference(tab: BrowserTabRecord, snapshotId: string, ref: string): { backendNodeId: number; credential: boolean; target: string } {
+  private resolveSemanticReference(tab: BrowserTabRecord, snapshotId: string, ref: string): { backendNodeId: number; credential: boolean; mediaControl: boolean; target: string } {
     const snapshot = this.semanticReferences.get(snapshotId);
     if (!snapshot || snapshot.tabId !== tab.snapshot.id || snapshot.documentGeneration !== tab.documentGeneration) {
       throw new Error('That semantic reference is stale. Read the page again.');
@@ -388,7 +414,9 @@ export class BrowserEngine {
       const resolved = this.resolveSemanticReference(tab, action.snapshotId, action.ref);
       if (resolved.credential) return { credential: true, consequential: null, target: 'Credential field' };
       const signal = resolved.target;
-      const takeover = /\b(sign[- ]?in|log[- ]?in|authenticate|oauth|captcha|verify you are human|two[- ]?factor)\b/i.test(signal)
+      const takeover = resolved.mediaControl
+        ? 'Media playback remains under user control. Take over the Agent Tab to use playback controls.'
+        : /\b(sign[- ]?in|log[- ]?in|authenticate|oauth|captcha|verify you are human|two[- ]?factor)\b/i.test(signal)
         ? 'Authentication or unusual manual interaction must be completed by the user.' : null;
       const consequential = !takeover && /\b(download|upload|purchase|pay|buy|delete|trash|discard|publish|send|submit|merge|create (?:pull request|record)|remove)\b/i.test(signal)
         ? 'This action may cause an external or irreversible effect.' : null;
@@ -411,8 +439,12 @@ export class BrowserEngine {
         || input?.type === 'password';
       let consequential = null;
       const signal = [text, href, form?.action || '', descriptor].join(' ');
-      const takeover = /\\b(sign[- ]?in|log[- ]?in|authenticate|oauth|captcha|verify you are human|two[- ]?factor)\\b/i.test(signal)
-        ? 'Authentication or unusual manual interaction must be completed by the user.' : null;
+      const mediaControl = (element.matches('button, [role="button"]') || element.closest('button, [role="button"]'))
+        && /^(play|pause|mute|unmute|volume)(\\b|\\s*\\()/i.test(text);
+      const takeover = mediaControl
+        ? 'Media playback remains under user control. Take over the Agent Tab to use playback controls.'
+        : /\\b(sign[- ]?in|log[- ]?in|authenticate|oauth|captcha|verify you are human|two[- ]?factor)\\b/i.test(signal)
+          ? 'Authentication or unusual manual interaction must be completed by the user.' : null;
       if (!takeover && (element.hasAttribute('download') || /\\b(download|upload|purchase|pay|buy|delete|trash|discard|publish|send|submit|merge|create (?:pull request|record)|remove (?:account|message|draft|file|record|item))\\b/i.test(signal))) {
         consequential = 'This action may cause an external or irreversible effect.';
       }
@@ -441,6 +473,8 @@ export class BrowserEngine {
       }
       case 'read':
         return String(await contents.executeJavaScript(READ_VISIBLE_PAGE_SCRIPT, true));
+      case 'readMetadata':
+        return String(await contents.executeJavaScript(READ_STRUCTURED_METADATA_SCRIPT, true));
       case 'captureTranscript':
         return String(await contents.executeJavaScript(CAPTURE_TRANSCRIPT_SCRIPT, true));
       case 'click': {
@@ -507,6 +541,9 @@ export class BrowserEngine {
       case 'search':
         contents.findInPage(action.text, { findNext: false, forward: true });
         return `Searched the visible page for “${action.text}”`;
+      case 'openTab':
+      case 'closeTab':
+        throw new Error('Agent Tab lifecycle actions must be handled by the task-space controller.');
     }
   }
 
@@ -731,12 +768,12 @@ export class BrowserEngine {
       snapshot,
       lastExternalUrl: initialUrl,
       documentGeneration: 0,
-      pauseYoutubeAutoplay: isYoutubeUrl(initialUrl),
     };
     this.tabs.set(id, record);
     this.insertTabId(id, position);
     this.window.contentView.addChildView(view);
     this.attachTabEvents(record);
+    if (snapshot.taskSpaceId && this.mediaBlockedTaskSpaces.has(snapshot.taskSpaceId)) view.webContents.setAudioMuted(true);
     if (activate) this.activateTab(id);
     if (loadInitial) void view.webContents.loadURL(initialUrl).catch(() => undefined);
 
@@ -758,20 +795,7 @@ export class BrowserEngine {
       if (authentication) {
         return {
           action: 'allow',
-          overrideBrowserWindowOptions: {
-            frame: true,
-            show: true,
-            backgroundColor: '#fbf8f2',
-            autoHideMenuBar: false,
-            webPreferences: {
-              session: this.browserSession,
-              nodeIntegration: false,
-              contextIsolation: true,
-              sandbox: true,
-              webSecurity: true,
-              allowRunningInsecureContent: false,
-            },
-          },
+          overrideBrowserWindowOptions: this.authenticationWindowOptions(),
         };
       }
       if (tab.snapshot.taskSpaceId || this.settings.linkOpening === 'same-tab') {
@@ -788,41 +812,8 @@ export class BrowserEngine {
         popup.close();
         return;
       }
-      this.authenticationWindow?.close();
-      this.authenticationWindow = popup;
-      this.overlayKind = kind;
-      popup.setTitle(kind === 'authentication' ? 'Secure sign-in' : 'Link preview');
-      // Publish the recovery controls before the child has painted. Some external
-      // sites delay their first paint or title update; waiting for either left a
-      // frameless preview above the app with no reachable Close/Open-in-tab UI.
-      this.emitSnapshot();
-      popup.webContents.on('will-navigate', (event, url) => {
-        const protocol = safeProtocol(url);
-        if (protocol !== 'http:' && protocol !== 'https:' && protocol !== 'about:') event.preventDefault();
-      });
-      popup.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-      popup.webContents.on('page-title-updated', (_event, title) => {
-        popup.setTitle(title || (kind === 'authentication' ? 'Secure sign-in' : 'Link preview'));
-        this.emitSnapshot();
-      });
-      popup.once('ready-to-show', () => {
-        if (popup.isDestroyed()) return;
-        this.layoutAuthenticationWindow();
-        popup.show();
-        popup.focus();
-        this.emitSnapshot();
-      });
-      popup.on('closed', () => {
-        if (this.authenticationWindow === popup) {
-          this.authenticationWindow = null;
-          this.overlayKind = null;
-        }
-        this.emitSnapshot();
-      });
-      popup.webContents.on('before-input-event', (_event, input) => {
-        if (input.type !== 'keyDown') return;
-        if (input.key === 'Escape' || (input.meta && input.key.toLowerCase() === 'w')) popup.close();
-      });
+      this.closeAuthenticationWindows();
+      this.registerAuthenticationWindow(popup);
     });
     contents.on('context-menu', (_event, params) => {
       showPageContextMenu(this.window, contents, params, {
@@ -871,9 +862,11 @@ export class BrowserEngine {
     });
     contents.on('dom-ready', () => {
       this.applyLinkOpeningPreference(tab);
-      this.pauseYoutubeMedia(tab);
+      if (tab.snapshot.taskSpaceId && this.mediaBlockedTaskSpaces.has(tab.snapshot.taskSpaceId)) this.pauseTaskOwnedMedia(tab);
     });
-    contents.on('media-started-playing', () => this.pauseYoutubeMedia(tab));
+    contents.on('media-started-playing', () => {
+      if (tab.snapshot.taskSpaceId && this.mediaBlockedTaskSpaces.has(tab.snapshot.taskSpaceId)) this.pauseTaskOwnedMedia(tab);
+    });
     contents.on('did-navigate', (_event, url) => this.handleNavigation(tab, url, true));
     contents.on('did-navigate-in-page', (_event, url) => this.handleNavigation(tab, url, false));
     contents.on('page-title-updated', (_event, title) => {
@@ -909,10 +902,83 @@ export class BrowserEngine {
     });
   }
 
+  private authenticationWindowOptions(): BrowserWindowConstructorOptions {
+    return {
+      frame: true,
+      show: true,
+      backgroundColor: '#fbf8f2',
+      autoHideMenuBar: false,
+      webPreferences: {
+        session: this.browserSession,
+        nodeIntegration: false,
+        contextIsolation: true,
+        sandbox: true,
+        webSecurity: true,
+        allowRunningInsecureContent: false,
+      },
+    };
+  }
+
+  private registerAuthenticationWindow(popup: BrowserWindow): void {
+    this.authenticationWindows.add(popup);
+    this.authenticationWindow = popup;
+    this.overlayKind = 'authentication';
+    popup.setTitle('Secure sign-in');
+    // Publish recovery controls before the child has painted. Some identity
+    // providers delay their first paint or title update.
+    this.emitSnapshot();
+    popup.webContents.on('will-navigate', (event, url) => {
+      const protocol = safeProtocol(url);
+      if (protocol !== 'http:' && protocol !== 'https:' && protocol !== 'about:') event.preventDefault();
+    });
+    // Google can continue its consent flow through another window. Preserve
+    // only authentication-scoped children and keep every child sandboxed in
+    // the same browser session; arbitrary popup creation remains denied.
+    popup.webContents.setWindowOpenHandler(({ url }) => isAuthenticationPopup(url, popup.webContents.getURL())
+      ? { action: 'allow', overrideBrowserWindowOptions: this.authenticationWindowOptions() }
+      : { action: 'deny' });
+    popup.webContents.on('did-create-window', (child, details) => {
+      if (!isAuthenticationPopup(details.url, popup.webContents.getURL())) {
+        child.close();
+        return;
+      }
+      this.registerAuthenticationWindow(child);
+    });
+    popup.webContents.on('page-title-updated', (_event, title) => {
+      popup.setTitle(title || 'Secure sign-in');
+      this.emitSnapshot();
+    });
+    popup.once('ready-to-show', () => {
+      if (popup.isDestroyed()) return;
+      this.layoutAuthenticationWindow(popup);
+      popup.show();
+      popup.focus();
+      this.emitSnapshot();
+    });
+    popup.on('closed', () => {
+      this.authenticationWindows.delete(popup);
+      if (this.authenticationWindow === popup) {
+        const remaining = Array.from(this.authenticationWindows).filter((candidate) => !candidate.isDestroyed());
+        this.authenticationWindow = remaining.at(-1) ?? null;
+        this.overlayKind = this.authenticationWindow ? 'authentication' : null;
+      }
+      this.emitSnapshot();
+    });
+    popup.webContents.on('before-input-event', (_event, input) => {
+      if (input.type !== 'keyDown') return;
+      if (input.key === 'Escape' || (input.meta && input.key.toLowerCase() === 'w')) popup.close();
+    });
+  }
+
+  private closeAuthenticationWindows(): void {
+    for (const popup of Array.from(this.authenticationWindows)) {
+      if (!popup.isDestroyed()) popup.close();
+    }
+  }
+
   private handleNavigation(tab: BrowserTabRecord, url: string, resetFavicon: boolean): void {
     if (url.startsWith('poppin://error')) return;
     if (resetFavicon) {
-      tab.pauseYoutubeAutoplay = isYoutubeUrl(url);
       tab.documentGeneration += 1;
       for (const [id, record] of this.semanticReferences) if (record.tabId === tab.snapshot.id) this.semanticReferences.delete(id);
     }
@@ -932,11 +998,9 @@ export class BrowserEngine {
     this.scheduleSave();
   }
 
-  private pauseYoutubeMedia(tab: BrowserTabRecord): void {
-    if (!tab.pauseYoutubeAutoplay || !isYoutubeUrl(tab.view.webContents.getURL())) return;
-    // Consume the guard before evaluating so a user who presses Play after the
-    // initial autoplay attempt is never fought by Poppin.
-    tab.pauseYoutubeAutoplay = false;
+  private pauseTaskOwnedMedia(tab: BrowserTabRecord): void {
+    if (!tab.snapshot.taskSpaceId || !this.mediaBlockedTaskSpaces.has(tab.snapshot.taskSpaceId)) return;
+    tab.view.webContents.setAudioMuted(true);
     void tab.view.webContents.executeJavaScript('document.querySelectorAll("video").forEach((video) => video.pause())', true).catch(() => undefined);
   }
 
@@ -1211,7 +1275,7 @@ export class BrowserEngine {
   private cancelAuthenticationPopup(): BrowserCommandResult {
     const popup = this.authenticationWindow;
     if (!popup || popup.isDestroyed() || this.overlayKind !== 'authentication') return { ok: false, message: 'There is no sign-in overlay to cancel.' };
-    popup.close();
+    this.closeAuthenticationWindows();
     return { ok: true };
   }
 
@@ -1335,8 +1399,8 @@ export class BrowserEngine {
     this.layoutAuthenticationWindow();
   }
 
-  private layoutAuthenticationWindow(): void {
-    const popup = this.authenticationWindow;
+  private layoutAuthenticationWindow(target?: BrowserWindow | null): void {
+    const popup = target ?? this.authenticationWindow;
     if (!popup || popup.isDestroyed() || this.window.isDestroyed()) return;
     const parent = this.window.getContentBounds();
     // Preview windows are deliberately large enough to feel like an in-app
@@ -1416,7 +1480,11 @@ export function isAuthenticationPopup(value: string, openerValue: string): boole
     const opener = new URL(openerValue);
     const localOpener = isLocalhostUrl(openerValue);
     if (opener.protocol !== 'https:' && !localOpener) return false;
-    if (value === 'about:blank') return opener.hostname === 'claude.ai';
+    if (value === 'about:blank') {
+      return opener.hostname === 'claude.ai'
+        || AUTHENTICATION_HOSTS.has(opener.hostname)
+        || opener.hostname.endsWith('.anthropic.com');
+    }
     const target = new URL(value);
     const localTarget = isLocalhostUrl(value);
     if (target.protocol !== 'https:' && !(localOpener && localTarget)) return false;
@@ -1437,15 +1505,6 @@ export function isExternalLinkPreview(value: string, openerValue: string): boole
     const allowedTarget = target.protocol === 'https:' || isLocalhostUrl(value);
     const allowedOpener = opener.protocol === 'https:' || isLocalhostUrl(openerValue);
     return allowedTarget && allowedOpener && target.origin !== opener.origin;
-  } catch {
-    return false;
-  }
-}
-
-export function isYoutubeUrl(value: string): boolean {
-  try {
-    const hostname = new URL(value).hostname.toLowerCase();
-    return hostname === 'youtube.com' || hostname.endsWith('.youtube.com') || hostname === 'youtu.be';
   } catch {
     return false;
   }
@@ -1476,7 +1535,7 @@ function isVisualSelectionCapture(value: unknown): value is {
 function agentActionTarget(action: BrowserAgentAction): string {
   if ('ref' in action && action.ref) return action.ref;
   if ('selector' in action && action.selector) return action.selector;
-  if ('url' in action) return action.url;
+  if ('url' in action && action.url) return action.url;
   if ('text' in action) return action.text;
   if ('deltaY' in action) return `${action.deltaY}px`;
   if ('milliseconds' in action) return `${action.milliseconds}ms`;
@@ -1557,6 +1616,70 @@ const READ_VISIBLE_PAGE_SCRIPT = `(() => {
     });
   }
   return JSON.stringify({ url: location.href, title: document.title, pageText, interactive });
+})()`;
+
+const READ_STRUCTURED_METADATA_SCRIPT = `(() => {
+  const compact = (value, limit) => String(value || '').replace(/\\s+/g, ' ').trim().slice(0, limit);
+  const absoluteHttpUrl = (value) => {
+    try {
+      const url = new URL(value, location.href);
+      return url.protocol === 'http:' || url.protocol === 'https:' ? url.toString() : '';
+    } catch { return ''; }
+  };
+  const meta = (key) => compact(document.querySelector('meta[property="' + key + '"], meta[name="' + key + '"]')?.getAttribute('content'), 1000);
+  const canonicalUrl = absoluteHttpUrl(document.querySelector('link[rel="canonical"]')?.getAttribute('href')) || location.href;
+  const seen = new Set();
+  const items = [];
+  for (const anchor of Array.from(document.querySelectorAll('a[href]'))) {
+    if (!(anchor instanceof HTMLAnchorElement) || items.length >= 40) break;
+    const rect = anchor.getBoundingClientRect();
+    const style = getComputedStyle(anchor);
+    if (rect.width < 1 || rect.height < 1 || style.display === 'none' || style.visibility === 'hidden') continue;
+    const url = absoluteHttpUrl(anchor.href);
+    if (!url || seen.has(url)) continue;
+    const container = anchor.closest('ytd-video-renderer, ytd-grid-video-renderer, ytd-rich-item-renderer, article, [role="article"], li') || anchor.parentElement;
+    const title = compact(anchor.getAttribute('title') || anchor.getAttribute('aria-label') || anchor.textContent, 300);
+    if (!title || title.length < 3) continue;
+    const metadata = compact(container instanceof HTMLElement ? container.innerText : anchor.innerText, 800);
+    if (!metadata) continue;
+    const image = container?.querySelector('img');
+    const thumbnailUrl = image instanceof HTMLImageElement ? absoluteHttpUrl(image.currentSrc || image.src) : '';
+    seen.add(url);
+    items.push({ title, url, metadata, ...(thumbnailUrl ? { thumbnailUrl } : {}) });
+  }
+  const structured = [];
+  for (const script of Array.from(document.querySelectorAll('script[type="application/ld+json"]')).slice(0, 12)) {
+    try {
+      const parsed = JSON.parse(script.textContent || 'null');
+      const values = Array.isArray(parsed) ? parsed : parsed && Array.isArray(parsed['@graph']) ? parsed['@graph'] : [parsed];
+      for (const value of values) {
+        if (!value || typeof value !== 'object' || structured.length >= 20) continue;
+        const author = typeof value.author === 'string' ? value.author : value.author && typeof value.author.name === 'string' ? value.author.name : '';
+        const thumbnail = Array.isArray(value.thumbnailUrl) ? value.thumbnailUrl[0] : value.thumbnailUrl;
+        const item = {
+          type: compact(value['@type'], 80),
+          name: compact(value.name || value.headline, 300),
+          description: compact(value.description, 1000),
+          url: absoluteHttpUrl(value.url || value.contentUrl || value.embedUrl),
+          author: compact(author, 200),
+          duration: compact(value.duration, 80),
+          uploadDate: compact(value.uploadDate || value.datePublished, 80),
+          thumbnailUrl: absoluteHttpUrl(thumbnail),
+        };
+        if (item.name || item.url) structured.push(item);
+      }
+    } catch { /* Invalid or non-JSON structured data is ignored. */ }
+  }
+  return JSON.stringify({
+    url: location.href,
+    canonicalUrl,
+    title: compact(document.title, 300),
+    description: meta('description') || meta('og:description') || meta('twitter:description'),
+    siteName: meta('og:site_name'),
+    imageUrl: absoluteHttpUrl(meta('og:image') || meta('twitter:image')),
+    items,
+    structured,
+  });
 })()`;
 
 const CAPTURE_TRANSCRIPT_SCRIPT = `(async () => {

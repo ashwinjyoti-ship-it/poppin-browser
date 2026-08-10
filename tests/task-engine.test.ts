@@ -247,6 +247,12 @@ describe('task engine', () => {
       params: { threadId: 'thread-1', turnId: 'turn-1', callId: 'call-search', tool: 'poppin_browser_action', arguments: { taskSpaceId: 'space-1', tabId: 'exploration-tab', action: { type: 'navigate', url: 'https://duckduckgo.com/?q=acoustic+guitars+under+10000' } } },
     });
     await vi.waitFor(() => expect(engine.getSnapshot().task?.browserRun).toMatchObject({ required: true, state: 'action-observed', successfulActionCount: 1 }));
+    fake.emit('request', {
+      id: 32,
+      method: 'item/tool/call',
+      params: { threadId: 'thread-1', turnId: 'turn-1', callId: 'call-metadata', tool: 'poppin_browser_action', arguments: { taskSpaceId: 'space-1', tabId: 'exploration-tab', action: { type: 'readMetadata' } } },
+    });
+    await vi.waitFor(() => expect(browserCommand).toHaveBeenCalledWith({ type: 'act', taskSpaceId: 'space-1', tabId: 'exploration-tab', action: { type: 'readMetadata' } }));
     expect(engine.getSnapshot().task?.browserRun.sources).toEqual([{
       title: 'duckduckgo.com', url: 'https://duckduckgo.com/?q=acoustic+guitars+under+10000',
     }]);

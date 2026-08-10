@@ -39,8 +39,10 @@ beforeEach(async () => {
       return;
     }
     if (route === '/agent') {
-      response.end(`<!doctype html><title>Browser agent fixture</title>
+      response.end(`<!doctype html><title>Browser agent fixture</title><meta name="description" content="A metadata-first research fixture">
         <h1>Draft a reply</h1>
+        <article><a href="/second" title="Research candidate">Research candidate</a><span>Fixture channel · 4 minutes</span></article>
+        <button id="play" type="button" aria-label="Play" onclick="document.body.dataset.played='true'">Play</button>
         <textarea id="draft" aria-label="Reply body"></textarea>
         <button id="save" type="button" onclick="document.body.dataset.saved='true'">Save draft</button>
         <button id="send" type="button" onclick="document.body.dataset.sent='true'">Send reply</button>`);
@@ -56,7 +58,13 @@ beforeEach(async () => {
     if (route === '/oauth-popup') {
       response.end(`<!doctype html><title>Secure fixture sign-in</title>
         <h1>Secure fixture sign-in</h1>
-        <button id="complete" onclick="window.opener.postMessage('oauth-complete', location.origin); window.close()">Complete sign-in</button>`);
+        <button id="continue" onclick="window.open('/oauth-consent', 'fixture-oauth-consent', 'width=560,height=640')">Continue to permissions</button>`);
+      return;
+    }
+    if (route === '/oauth-consent') {
+      response.end(`<!doctype html><title>Fixture permissions</title>
+        <h1>Fixture permissions</h1>
+        <button id="complete" onclick="window.opener.opener.postMessage('oauth-complete', location.origin); window.close(); window.opener.close()">Allow and complete sign-in</button>`);
       return;
     }
     response.setHeader('Set-Cookie', 'poppin-session=restored; Path=/; SameSite=Lax');
@@ -229,7 +237,11 @@ describe('packaged browser workflow', () => {
     await expect.poll(() => shell.evaluate(async () => (await window.poppinBrowser.getSnapshot()).authenticationPopup?.url ?? null)).toBe(`${origin}/oauth-popup`);
     await expect.poll(() => shell.getByRole('region', { name: 'Secure sign-in overlay' }).isVisible()).toBe(true);
     const authPopup = application.windows().find((page) => page.url() === `${origin}/oauth-popup`)!;
-    await authPopup.getByRole('button', { name: 'Complete sign-in' }).click();
+    await authPopup.getByRole('button', { name: 'Continue to permissions' }).click();
+    await expect.poll(() => application!.windows().some((page) => page.url() === `${origin}/oauth-consent`)).toBe(true);
+    await expect.poll(() => shell.evaluate(async () => (await window.poppinBrowser.getSnapshot()).authenticationPopup?.url ?? null)).toBe(`${origin}/oauth-consent`);
+    const consentPopup = application.windows().find((page) => page.url() === `${origin}/oauth-consent`)!;
+    await consentPopup.getByRole('button', { name: 'Allow and complete sign-in' }).click();
     await expect.poll(() => application!.evaluate(async ({ webContents }, targetUrl) => {
       const contents = webContents.getAllWebContents().find((candidate) => candidate.getURL() === targetUrl);
       return contents?.executeJavaScript('document.body.dataset.auth || null');
@@ -292,6 +304,16 @@ describe('packaged browser workflow', () => {
       if (snapshot.taskSpace?.contextTabIds.length !== 1 || snapshot.taskSpace.explorationTabIds.length !== 1) throw new Error('Mixed Agent Tabs were not created.');
       return { taskSpaceId: snapshot.taskSpace.id, tabId: snapshot.taskSpace.contextTabIds[0]! };
     });
+    await expect.poll(() => application!.evaluate(async ({ webContents }, targetUrl) => webContents.getAllWebContents()
+      .filter((contents) => contents.getURL() === targetUrl).map((contents) => contents.isAudioMuted()), `${origin}/agent`)).toContain(true);
+    const metadataResult = await shell.evaluate((scope) => window.poppinBrowserAgent.command({ type: 'act', ...scope, action: { type: 'readMetadata' } }), agentScope);
+    expect(metadataResult).toMatchObject({ ok: true, data: expect.stringContaining('A metadata-first research fixture') });
+    expect(JSON.parse(metadataResult.data!) as { items: Array<{ title: string }> }).toMatchObject({ items: expect.arrayContaining([expect.objectContaining({ title: 'Research candidate' })]) });
+    const openedTab = await shell.evaluate(({ scope, url }) => window.poppinBrowserAgent.command({ type: 'act', ...scope, action: { type: 'openTab', url } }), { scope: agentScope, url: `${origin}/second` });
+    expect(openedTab).toMatchObject({ ok: true, data: expect.stringContaining('tabId') });
+    const openedTabId = (JSON.parse(openedTab.data!) as { tabId: string }).tabId;
+    await expect.poll(() => shell.evaluate(async () => (await window.poppinBrowserAgent.getSnapshot()).taskSpace?.explorationTabIds.length)).toBe(2);
+    expect(await shell.evaluate(({ scope, tabId }) => window.poppinBrowserAgent.command({ type: 'act', taskSpaceId: scope.taskSpaceId, tabId, action: { type: 'closeTab' } }), { scope: agentScope, tabId: openedTabId })).toMatchObject({ ok: true });
     const readResult = await shell.evaluate((scope) => window.poppinBrowserAgent.command({ type: 'act', ...scope, action: { type: 'read' } }), agentScope);
     expect(readResult).toMatchObject({ ok: true, data: expect.stringContaining('"snapshotId"') });
     const firstSemantic = JSON.parse(readResult.data!) as { snapshotId: string; nodes: Array<{ ref: string; role: string; locator?: string }> };
@@ -318,7 +340,20 @@ describe('packaged browser workflow', () => {
       const candidates = webContents.getAllWebContents().filter((candidate) => candidate.getURL() === targetUrl);
       return await Promise.all(candidates.map((contents) => contents.executeJavaScript('document.body.dataset.sent || null')));
     }, `${origin}/agent`)).not.toContain('true');
+    expect(await shell.evaluate(() => window.poppinBrowserAgent.command({ type: 'resume' }))).toMatchObject({ ok: true });
+    const playbackRead = await shell.evaluate((scope) => window.poppinBrowserAgent.command({ type: 'act', ...scope, action: { type: 'read' } }), agentScope);
+    const playbackSemantic = JSON.parse(playbackRead.data!) as { snapshotId: string; nodes: Array<{ ref: string; name: string; locator?: string }> };
+    const playRef = playbackSemantic.nodes.find((node) => node.locator === '#play' || /^play$/i.test(node.name))?.ref;
+    expect(playRef).toBeTruthy();
+    expect(await shell.evaluate(({ scope, snapshotId, ref }) => window.poppinBrowserAgent.command({ type: 'act', ...scope, action: { type: 'click', snapshotId, ref } }), { scope: agentScope, snapshotId: playbackSemantic.snapshotId, ref: playRef! })).toEqual({ ok: false, message: 'User takeover required.' });
+    await expect.poll(() => shell.evaluate(async () => (await window.poppinBrowserAgent.getSnapshot()).taskSpace?.owner)).toBe('user');
+    await expect.poll(() => application!.evaluate(async ({ webContents }, targetUrl) => webContents.getAllWebContents()
+      .filter((contents) => contents.getURL() === targetUrl).map((contents) => contents.isAudioMuted()), `${origin}/agent`)).not.toContain(true);
+    expect(await application!.evaluate(async ({ webContents }, targetUrl) => await Promise.all(webContents.getAllWebContents()
+      .filter((contents) => contents.getURL() === targetUrl).map((contents) => contents.executeJavaScript('document.body.dataset.played || null'))), `${origin}/agent`)).not.toContain('true');
     expect(await shell.evaluate(() => window.poppinBrowserAgent.command({ type: 'stop' }))).toMatchObject({ ok: true });
+    await expect.poll(() => application!.evaluate(async ({ webContents }, targetUrl) => webContents.getAllWebContents()
+      .filter((contents) => contents.getURL() === targetUrl).map((contents) => contents.isAudioMuted()), `${origin}/agent`)).not.toContain(true);
     expect(await shell.evaluate(() => window.poppinBrowserAgent.command({ type: 'closeTaskTabs' }))).toMatchObject({ ok: true });
 
     expect(await shell.evaluate(() => window.poppinBrowserAgent.command({ type: 'start', taskId: 'smoke-browser-only-task', mode: 'browser-only', tabIds: [] }))).toMatchObject({ ok: true });

@@ -6,7 +6,7 @@ import path from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { isAuthenticationPopup, isExternalLinkPreview, isLocalhostUrl, isYoutubeUrl } from '../src/main/browser/browser-engine';
+import { isAuthenticationPopup, isExternalLinkPreview, isLocalhostUrl } from '../src/main/browser/browser-engine';
 import { WorkspaceStore } from '../src/main/workspace/workspace-store';
 import type { VisualSelectionSnapshot } from '../src/shared/workspace';
 
@@ -40,9 +40,12 @@ describe('authentication popup policy', () => {
   it('allows secure identity popups from Claude without allowing arbitrary popups', () => {
     expect(isAuthenticationPopup('https://accounts.google.com/o/oauth2/v2/auth?client_id=fixture', 'https://claude.ai/login')).toBe(true);
     expect(isAuthenticationPopup('about:blank', 'https://claude.ai/login')).toBe(true);
+    expect(isAuthenticationPopup('about:blank', 'https://accounts.google.com/o/oauth2/v2/auth')).toBe(true);
+    expect(isAuthenticationPopup('https://accounts.google.com/o/oauth2/consent', 'https://accounts.google.com/signin')).toBe(true);
     expect(isAuthenticationPopup('https://example.com/oauth/callback', 'https://example.com/login')).toBe(true);
     expect(isAuthenticationPopup('http://127.0.0.1:3000/oauth-popup', 'http://127.0.0.1:3000/login')).toBe(true);
     expect(isAuthenticationPopup('https://example.com/popup', 'https://claude.ai/login')).toBe(false);
+    expect(isAuthenticationPopup('about:blank', 'https://example.com/login')).toBe(false);
     expect(isAuthenticationPopup('http://accounts.google.com/login', 'https://claude.ai/login')).toBe(false);
     expect(isAuthenticationPopup('https://accounts.google.com/login', 'http://example.com/')).toBe(false);
   });
@@ -57,9 +60,4 @@ describe('Arc-style link preview policy', () => {
     expect(isExternalLinkPreview('javascript:alert(1)', 'https://example.com/')).toBe(false);
   });
 
-  it('recognises YouTube hosts for the one-time autoplay pause guard', () => {
-    expect(isYoutubeUrl('https://www.youtube.com/watch?v=abc')).toBe(true);
-    expect(isYoutubeUrl('https://youtu.be/abc')).toBe(true);
-    expect(isYoutubeUrl('https://notyoutube.com/watch?v=abc')).toBe(false);
-  });
 });

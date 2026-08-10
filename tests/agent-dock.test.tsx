@@ -75,13 +75,20 @@ describe('AgentDock', () => {
     expect(onBrowserAgentCommand).toHaveBeenCalledWith({ type: 'respondApproval', decision: 'approve' });
   });
 
-  it('offers Keep/Close tabs once browsing finishes on its Agent Tab', async () => {
+  it('offers Keep/Close tabs when browsing stops before successful cleanup', async () => {
     const user = userEvent.setup();
     const onBrowserAgentCommand = vi.fn().mockResolvedValue({ ok: true });
-    const browserAgentSnapshot: BrowserAgentSnapshot = { ...EMPTY_BROWSER_AGENT, state: 'completed', taskSpace: TASK_SPACE };
-    render(<AgentDock taskSnapshot={taskWith({ state: 'Completed' })} browserAgentSnapshot={browserAgentSnapshot} onTaskCommand={vi.fn()} onBrowserAgentCommand={onBrowserAgentCommand} onOpenTaskTab={vi.fn()} />);
+    const browserAgentSnapshot: BrowserAgentSnapshot = { ...EMPTY_BROWSER_AGENT, state: 'stopped', taskSpace: { ...TASK_SPACE, status: 'failed-stopped' } };
+    render(<AgentDock taskSnapshot={taskWith({ state: 'Failed' })} browserAgentSnapshot={browserAgentSnapshot} onTaskCommand={vi.fn()} onBrowserAgentCommand={onBrowserAgentCommand} onOpenTaskTab={vi.fn()} />);
     await user.click(screen.getByRole('button', { name: /keep tabs/i }));
     expect(onBrowserAgentCommand).toHaveBeenCalledWith({ type: 'keepTabs' });
+  });
+
+  it('offers only cleanup for a completed collection the user chose to keep', () => {
+    const browserAgentSnapshot: BrowserAgentSnapshot = { ...EMPTY_BROWSER_AGENT, state: 'completed', taskSpace: { ...TASK_SPACE, kept: true } };
+    render(<AgentDock taskSnapshot={taskWith({ state: 'Completed' })} browserAgentSnapshot={browserAgentSnapshot} onTaskCommand={vi.fn()} onBrowserAgentCommand={vi.fn()} onOpenTaskTab={vi.fn()} />);
+    expect(screen.getByRole('button', { name: /close task tabs/i })).toBeVisible();
+    expect(screen.queryByRole('button', { name: /keep tabs/i })).not.toBeInTheDocument();
   });
 
   it('renders no passive completion pill once everything is resolved', () => {

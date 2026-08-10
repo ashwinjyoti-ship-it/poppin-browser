@@ -29,11 +29,14 @@ export interface BrowserTaskSpace {
 export type BrowserAgentAction =
   | { type: 'navigate'; url: string }
   | { type: 'read' }
+  | { type: 'readMetadata' }
   | { type: 'click'; selector?: string; ref?: string; snapshotId?: string }
   | { type: 'type'; selector?: string; ref?: string; snapshotId?: string; text: string }
   | { type: 'scroll'; deltaY: number }
   | { type: 'wait'; milliseconds: number }
   | { type: 'search'; text: string }
+  | { type: 'openTab'; url?: string }
+  | { type: 'closeTab' }
   | { type: 'captureTranscript' };
 
 export interface BrowserSemanticNode {
@@ -106,6 +109,7 @@ export type BrowserAgentCommand =
   | { type: 'watch' }
   | { type: 'leaveWatch' }
   | { type: 'keepTabs' }
+  | { type: 'setKeepTabs'; keep: boolean }
   | { type: 'closeTaskTabs' }
   | { type: 'act'; taskSpaceId: string; tabId: string; action: BrowserAgentAction }
   | { type: 'batch'; taskSpaceId: string; tabId: string; snapshotId: string; steps: BrowserBatchStep[] }

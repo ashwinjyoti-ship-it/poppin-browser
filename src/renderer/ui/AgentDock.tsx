@@ -75,7 +75,7 @@ export function AgentDock({ taskSnapshot, browserAgentSnapshot, onTaskCommand, o
         <p>{browserAgentSnapshot.state === 'completed' ? 'Browsing finished.' : 'Browsing stopped.'}</p>
         <div className="dock-actions">
           <button type="button" className="dock-btn dock-btn-primary" onClick={() => { void onBrowserAgentCommand({ type: 'closeTaskTabs' }); }}>Close task tabs</button>
-          <button type="button" className="dock-btn" onClick={() => { void onBrowserAgentCommand({ type: 'keepTabs' }); }}>Keep tabs</button>
+          {!browserAgentSnapshot.taskSpace.kept ? <button type="button" className="dock-btn" onClick={() => { void onBrowserAgentCommand({ type: 'keepTabs' }); }}>Keep tabs</button> : null}
         </div>
       </div>
     );

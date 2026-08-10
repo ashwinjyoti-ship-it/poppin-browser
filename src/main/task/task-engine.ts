@@ -1143,6 +1143,7 @@ Use only the explicit context included in the user message and the task-owned br
 Do not access cookies, session tokens, passwords, passkeys, credential fields, Apple Passwords, or Keychain. Do not infer access to tabs or files that are not included.
 Do not browse, click, navigate, or type unless the Poppin browser action tool is available for the current task. Never download, upload, publish, send, purchase, delete, submit, or cross an authentication boundary without the tool’s critical-action approval.
 The Poppin browser action tool is restricted to the task-owned Agent Tabs supplied in TASK-OWNED AGENT TABS. Context tabs are URL-seeded clones of selected source tabs; exploration tabs are fresh and may navigate according to the user request. Prefer exploration tabs for new research so context clones remain useful references. Always pass the exact taskSpaceId and Agent Tab tabId supplied there. Read returns a semantic snapshot; act only with a ref and snapshotId from that latest read. Re-read after navigation or page-changing actions. Ordinary navigation, clicking, typing, and saving a reversible draft are already allowed; the tool itself pauses before a critical action such as sending, submitting, deleting, purchasing, publishing, uploading/downloading, or crossing an authentication boundary.
+For discovery and comparison requests, use readMetadata on a results or listing page before opening individual detail pages. In particular, finding videos does not require opening or playing them: prefer the search page's sanitized titles, URLs, channels, durations, dates, views, descriptions, and structured metadata. Open a video page only when the request requires details or a transcript that the results page does not expose. Media playback remains user-controlled: if the user explicitly asks to play something, navigate to it and let the user Take over rather than operating playback controls. You may open additional task-owned exploration tabs when comparison work genuinely benefits from preserving pages, but reuse tabs when practical, close finished tabs, and respect Poppin's six-exploration-tab limit.
 Do not claim that a browser action succeeded unless the tool output confirms it. For a requested draft, perform the browser actions, verify that the page reports the draft as saved, and leave it unsent.
 Use the bounded batch tool to reduce round trips when several refs from one snapshot can be acted on safely. End every batch with read or assert, and treat any pause, takeover, stale ref, skipped step, or failed assertion as a stop rather than retrying.
 When the Tandem capability tool is supplied, use it for every Tandem read and write. It speaks the Tandem REST API: search or list to resolve a page, read_page before editing, and prefer append or edit_section so existing content survives. Never navigate to Tandem in a browser tab or automate its interface to do something the tool can do, and never ask the user for a Tandem API key.
@@ -1196,7 +1197,7 @@ function buildTaskPrompt(
 
 const BROWSER_CAPABILITY_TOOLS: AgentToolSpec[] = [{
   name: BROWSER_TOOL_NAME,
-  description: 'Inspect or operate one task-owned context or exploration Agent Tab. Call read after page changes to receive a sanitized semantic snapshot and generation-scoped refs. Critical actions pause for the user’s exact approval.',
+  description: 'Inspect or operate one task-owned context or exploration Agent Tab. Prefer readMetadata for research listings such as video search results; it returns sanitized page and result metadata without opening the candidates. Call read after page changes to receive semantic refs. Agent Tabs are media-blocked while controlled. Critical actions pause for exact approval.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -1207,12 +1208,15 @@ const BROWSER_CAPABILITY_TOOLS: AgentToolSpec[] = [{
       action: {
         oneOf: [
           { type: 'object', additionalProperties: false, required: ['type'], properties: { type: { const: 'read' } } },
+          { type: 'object', additionalProperties: false, required: ['type'], properties: { type: { const: 'readMetadata' } } },
           { type: 'object', additionalProperties: false, required: ['type', 'ref', 'snapshotId'], properties: { type: { const: 'click' }, ref: { type: 'string' }, snapshotId: { type: 'string' } } },
           { type: 'object', additionalProperties: false, required: ['type', 'ref', 'snapshotId', 'text'], properties: { type: { const: 'type' }, ref: { type: 'string' }, snapshotId: { type: 'string' }, text: { type: 'string' } } },
           { type: 'object', additionalProperties: false, required: ['type', 'url'], properties: { type: { const: 'navigate' }, url: { type: 'string' } } },
           { type: 'object', additionalProperties: false, required: ['type', 'deltaY'], properties: { type: { const: 'scroll' }, deltaY: { type: 'number' } } },
           { type: 'object', additionalProperties: false, required: ['type', 'milliseconds'], properties: { type: { const: 'wait' }, milliseconds: { type: 'number', minimum: 100, maximum: 5000 } } },
           { type: 'object', additionalProperties: false, required: ['type', 'text'], properties: { type: { const: 'search' }, text: { type: 'string' } } },
+          { type: 'object', additionalProperties: false, required: ['type'], properties: { type: { const: 'openTab' }, url: { type: 'string', description: 'Optional HTTP(S) URL. The returned tabId must be used for that new Agent Tab.' } } },
+          { type: 'object', additionalProperties: false, required: ['type'], properties: { type: { const: 'closeTab' } } },
           { type: 'object', additionalProperties: false, required: ['type'], properties: { type: { const: 'captureTranscript' } } },
         ],
       },
@@ -1292,7 +1296,11 @@ function parseBrowserToolArguments(rawArguments: unknown): { taskSpaceId: string
   const taskSpaceId = stringValue(value.taskSpaceId);
   const type = stringValue(value.action.type);
   if (!taskSpaceId || !tabId) return null;
-  if (type === 'read' || type === 'captureTranscript') return { taskSpaceId, tabId, action: { type } };
+  if (type === 'read' || type === 'readMetadata' || type === 'captureTranscript' || type === 'closeTab') return { taskSpaceId, tabId, action: { type } };
+  if (type === 'openTab') {
+    const rawUrl = stringValue(value.action.url).slice(0, 8_000);
+    return { taskSpaceId, tabId, action: rawUrl ? { type, url: rawUrl } : { type } };
+  }
   if (type === 'click') {
     const ref = stringValue(value.action.ref).slice(0, 100);
     const snapshotId = stringValue(value.action.snapshotId).slice(0, 100);
@@ -1386,7 +1394,8 @@ function browserSourcesFromAction(
   if (!result.ok) return [];
   if (command.type === 'act') {
     if (command.action.type === 'navigate') return sourceForUrl(command.action.url);
-    if (command.action.type === 'read' && result.data) return semanticSource(result.data);
+    if (command.action.type === 'openTab' && command.action.url) return sourceForUrl(command.action.url);
+    if ((command.action.type === 'read' || command.action.type === 'readMetadata') && result.data) return semanticSource(result.data);
     return [];
   }
   if (!result.data) return [];
@@ -1439,9 +1448,10 @@ function countSuccessfulMeaningfulActions(
   result: BrowserAgentCommandResult,
 ): number {
   if (command.type === 'act') {
-    if (!result.ok || command.action.type === 'wait' || command.action.type === 'scroll') return 0;
-    if (command.action.type !== 'read') return 1;
-    return isLiveBrowserRead(result.data) ? 1 : 0;
+    if (!result.ok || command.action.type === 'wait' || command.action.type === 'scroll' || command.action.type === 'closeTab') return 0;
+    if (command.action.type === 'openTab') return command.action.url ? 1 : 0;
+    if (command.action.type === 'read' || command.action.type === 'readMetadata') return isLiveBrowserRead(result.data) ? 1 : 0;
+    return 1;
   }
 
   const completedSteps = parseCompletedBatchStepIndexes(result.data);

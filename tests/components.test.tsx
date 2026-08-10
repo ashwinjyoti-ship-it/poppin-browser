@@ -10,6 +10,7 @@ import { TandemSection } from '../src/renderer/ui/TandemSection';
 import { ProjectSection } from '../src/renderer/ui/ProjectSection';
 import { PaneResizer } from '../src/renderer/ui/PaneResizer';
 import { DEFAULT_BROWSER_SETTINGS, type BrowserTabSnapshot } from '../src/shared/browser';
+import type { BrowserAgentSnapshot } from '../src/shared/browser-agent';
 import type { TaskSnapshot } from '../src/shared/task';
 import type { WorkspaceSnapshot } from '../src/shared/workspace';
 import { EMPTY_TANDEM_SNAPSHOT } from '../src/shared/tandem';
@@ -540,6 +541,31 @@ describe('Codex controls', () => {
     expect(screen.getByText('npm test', { exact: false })).toBeVisible();
     await user.click(screen.getByRole('button', { name: /allow once/i }));
     expect(onCommand).toHaveBeenCalledWith({ type: 'respondApproval', decision: 'accept' });
+  });
+
+  it('lets the user explicitly keep Agent Tabs before successful completion', async () => {
+    const user = userEvent.setup();
+    const onBrowserAgentCommand = vi.fn().mockResolvedValue({ ok: true });
+    const snapshot: TaskSnapshot = {
+      ...READY_TASK,
+      task: {
+        state: 'Running', kind: 'work', prompt: 'Find two videos', model: 'gpt-test', reasoningEffort: 'high',
+        documentId: 'document-1', threadId: 'thread-1', turnId: 'turn-1', baselineCommit: '', progress: [], pendingApproval: null,
+        result: '', diff: '', error: null,
+        browserRun: { required: true, state: 'awaiting-action', taskSpaceId: 'space-1', successfulActionCount: 0, retryCount: 0, lastActionAt: null, sources: [] },
+        createdAt: '', updatedAt: '',
+      },
+    };
+    const browserAgentSnapshot: BrowserAgentSnapshot = {
+      state: 'running', taskId: 'task-1', watching: true, allowedTabIds: ['agent-tab'], activeTabId: 'agent-tab', currentAction: null, pendingApproval: null, log: [],
+      taskSpace: {
+        id: 'space-1', taskId: 'task-1', name: 'Find two videos', mode: 'browser-only', owner: 'agent', status: 'agent-controlling',
+        tabIds: ['agent-tab'], contextTabIds: [], explorationTabIds: ['agent-tab'], activeTabId: 'agent-tab', createdAt: '', updatedAt: '', kept: false,
+      },
+    };
+    render(<TaskTabView taskSnapshot={snapshot} workspace={EMPTY_WORKSPACE} browserAgentSnapshot={browserAgentSnapshot} onTaskCommand={vi.fn()} onBrowserAgentCommand={onBrowserAgentCommand} />);
+    await user.click(screen.getByRole('button', { name: /keep tabs after task/i }));
+    expect(onBrowserAgentCommand).toHaveBeenCalledWith({ type: 'setKeepTabs', keep: true });
   });
 
   it('renders a completed Work reply once, without duplicating it as live progress', () => {
