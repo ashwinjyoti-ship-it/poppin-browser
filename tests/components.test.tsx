@@ -71,6 +71,39 @@ describe('browser chrome', () => {
     expect(onCreate).toHaveBeenCalledOnce();
   });
 
+  it('places the new-tab control beside the last ordinary tab, not after the agent cluster', () => {
+    const { container } = render(
+      <TabStrip
+        tabs={[
+          TAB,
+          { id: 'tab-two', title: 'Docs', kind: 'browser' },
+          { id: 'task-reply', title: 'Reply', kind: 'task', taskKind: 'work', taskSpaceId: 'space-1' },
+        ]}
+        groups={[]}
+        activeTabId={TAB.id}
+        onActivate={vi.fn()}
+        onClose={vi.fn()}
+        onCreate={vi.fn()}
+        onReorder={vi.fn()}
+        onShowTabMenu={vi.fn()}
+        onToggleGroup={vi.fn()}
+        onRenameGroup={vi.fn()}
+        onShowGroupMenu={vi.fn()}
+        agentTaskSpace={{ id: 'space-1', taskId: 'task-1', name: 'Browser task', mode: 'mixed', owner: 'agent', status: 'agent-controlling', tabIds: [], contextTabIds: [], explorationTabIds: [], activeTabId: null, createdAt: '', updatedAt: '', kept: false }}
+      />,
+    );
+
+    const ordinaryStrip = container.querySelector('.tab-strip');
+    const agentStrip = container.querySelector('.tab-strip-agent');
+    const newTab = screen.getByRole('button', { name: /new tab/i });
+    expect(ordinaryStrip).not.toBeNull();
+    expect(ordinaryStrip!.contains(newTab)).toBe(true);
+    expect(agentStrip?.contains(newTab) ?? false).toBe(false);
+    const stripChildren = [...ordinaryStrip!.children];
+    expect(stripChildren.at(-1)).toBe(newTab);
+    expect(stripChildren.at(-2)?.getAttribute('title')).toBe('Docs');
+  });
+
   it('keeps the globe fallback when a tab favicon cannot load', () => {
     const { container } = render(
       <TabStrip
