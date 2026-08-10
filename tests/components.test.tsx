@@ -213,6 +213,46 @@ describe('browser chrome', () => {
     expect(onClose).toHaveBeenCalledWith('task-reply');
   });
 
+  it('docks Agent Tabs and the reply tab to the right, separate from ordinary browsing tabs', () => {
+    const { container } = render(
+      <TabStrip
+        tabs={[
+          TAB,
+          { id: 'agent-ctx', title: 'Docs', kind: 'browser', taskSpaceId: 'space-1' },
+          { id: 'task-reply', title: 'Reply', kind: 'task', taskKind: 'work', taskSpaceId: 'space-1' },
+        ]}
+        groups={[]}
+        activeTabId="task-reply"
+        onActivate={vi.fn()}
+        onClose={vi.fn()}
+        onCreate={vi.fn()}
+        onReorder={vi.fn()}
+        onShowTabMenu={vi.fn()}
+        onToggleGroup={vi.fn()}
+        onRenameGroup={vi.fn()}
+        onShowGroupMenu={vi.fn()}
+        agentTaskSpace={{ id: 'space-1', taskId: 'task-1', name: 'Browser task', mode: 'mixed', owner: 'agent', status: 'agent-controlling', tabIds: ['agent-ctx'], contextTabIds: ['agent-ctx'], explorationTabIds: [], activeTabId: 'agent-ctx', createdAt: '', updatedAt: '', kept: false }}
+      />,
+    );
+    const ordinaryStrip = container.querySelector('.tab-strip');
+    const agentStrip = container.querySelector('.tab-strip-agent');
+    expect(ordinaryStrip).not.toBeNull();
+    expect(agentStrip).not.toBeNull();
+    // Poppin (an ordinary tab) stays in the scrollable strip; the agent-owned
+    // context tab and the reply tab dock in the separate right-hand cluster,
+    // alongside the Agent Tabs entry pill.
+    expect(ordinaryStrip!.querySelector('[title="Poppin"]')).not.toBeNull();
+    expect(ordinaryStrip!.querySelector('[title="Docs"]')).toBeNull();
+    expect(ordinaryStrip!.querySelector('[title="Reply"]')).toBeNull();
+    expect(agentStrip!.querySelector('[title="Docs"]')).not.toBeNull();
+    expect(agentStrip!.querySelector('[title="Reply"]')).not.toBeNull();
+    expect(agentStrip!.querySelector('.agent-tabs-entry')).not.toBeNull();
+    // DOM order matches visual order: the agent cluster renders after (to the
+    // right of) the ordinary tab strip.
+    const strips = [...container.querySelectorAll('.tab-strip, .tab-strip-agent')];
+    expect(strips.indexOf(ordinaryStrip!)).toBeLessThan(strips.indexOf(agentStrip!));
+  });
+
   it('offers a pinned Tandem World launcher independent of the tab list', async () => {
     const user = userEvent.setup();
     const onOpenTandemWorld = vi.fn();

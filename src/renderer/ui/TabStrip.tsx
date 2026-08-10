@@ -68,6 +68,12 @@ export function TabStrip({
   const [groupName, setGroupName] = useState('');
   const cancelRenameRef = useRef(false);
   const renderedGroups = new Set<string>();
+  // The task's Agent Tabs (context/exploration browsing tabs while watching)
+  // and its reply/review tab are a distinct, agent-owned zone: they dock to
+  // the right of ordinary tabs instead of interleaving with them.
+  const ordinaryTabs = tabs.filter((tab) => !tab.taskSpaceId && tab.kind !== 'task');
+  const agentOwnedTabs = tabs.filter((tab) => tab.taskSpaceId || tab.kind === 'task');
+  const showAgentCluster = Boolean(agentTaskSpace) || agentOwnedTabs.length > 0;
 
   const startRename = (group: BrowserTabGroup) => {
     cancelRenameRef.current = false;
@@ -86,6 +92,60 @@ export function TabStrip({
     cancelRenameRef.current = true;
     setEditingGroupId(null);
     setGroupName('');
+  };
+
+  const renderTab = (tab: TabStripTabSnapshot, group?: BrowserTabGroup) => {
+    const hideTab = Boolean(group?.collapsed);
+    if (hideTab) return null;
+    const isActive = tab.id === activeTabId;
+    const isAgentOwned = Boolean(tab.taskSpaceId || tab.kind === 'task');
+    const groupClasses = group ? ` tab-grouped tab-grouped-${group.color}` : '';
+    return (
+      <div
+        className={`tab ${isActive ? 'tab-active' : ''} ${tab.pinned ? 'tab-pinned' : ''}${isAgentOwned ? ' tab-agent' : ''}${groupClasses}`}
+        key={tab.id}
+        role="tab"
+        aria-label={tab.pinned ? `${tab.title || 'Untitled'}, pinned` : group ? `${tab.title || 'Untitled'}, ${group.name} group` : undefined}
+        aria-selected={isActive}
+        tabIndex={isActive ? 0 : -1}
+        title={tab.title || 'Untitled'}
+        draggable={!isAgentOwned}
+        onDragStart={(event) => { if (!isAgentOwned) event.dataTransfer.setData('application/x-poppin-tab', tab.id); }}
+        onDragOver={(event) => event.preventDefault()}
+        onDrop={(event) => dropTab(event, tab.id, onReorder)}
+        onClick={() => onActivate(tab.id)}
+        onContextMenu={(event) => { event.preventDefault(); if (!tab.kind || tab.kind === 'browser') onShowTabMenu(tab.id); }}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            onActivate(tab.id);
+          }
+        }}
+      >
+        <span className="tab-icon" aria-hidden="true">
+          <TabFavicon key={`${tab.failure ? 'failed' : 'ready'}:${tab.faviconUrls?.join('|') ?? tab.kind}`} tab={tab} />
+        </span>
+        {tab.pinned ? null : <span className="tab-title">{tab.title || 'Untitled'}</span>}
+        {tab.isLoading ? <span className="tab-loading" aria-label="Loading" /> : null}
+        {tab.kind !== 'task' && (tab.pinned || tab.taskSpaceId) ? null : (
+          <button
+            className="tab-close"
+            type="button"
+            aria-label={`Close ${tab.title || 'tab'}`}
+            onClick={(event) => { event.stopPropagation(); onClose(tab.id); }}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                event.stopPropagation();
+                onClose(tab.id);
+              }
+            }}
+          >
+            <X size={13} />
+          </button>
+        )}
+      </div>
+    );
   };
 
   return (
@@ -110,27 +170,10 @@ export function TabStrip({
             <span className="tab-title">Tandem</span>
           </button>
         ) : null}
-        {agentTaskSpace ? (
-          <button
-            type="button"
-            className={`agent-tabs-entry ${watchingAgentTabs ? 'agent-tabs-entry-active' : ''}`}
-            aria-label={`Agent Tabs · ${agentTaskSpace.name}. Return to live view.`}
-            title={`Agent Tabs · ${agentTaskSpace.name}`}
-            onClick={onWatchAgentTabs}
-          >
-            <span className="agent-tabs-entry-label">Agent Tabs · {agentTaskSpace.name}</span>
-            <span className="agent-tabs-entry-count" aria-hidden="true">{agentTaskSpace.tabIds.length}</span>
-          </button>
-        ) : null}
-        {tabs.flatMap((tab) => {
+        {ordinaryTabs.flatMap((tab) => {
           const group = tab.groupId ? groupsById.get(tab.groupId) : undefined;
           const showGroup = Boolean(group && !renderedGroups.has(group.id));
           if (group) renderedGroups.add(group.id);
-          const hideTab = Boolean(group?.collapsed);
-          const isActive = tab.id === activeTabId;
-          const groupClasses = group
-            ? ` tab-grouped tab-grouped-${group.color}`
-            : '';
           return [
             showGroup && group ? (
               <TabGroupChip
@@ -147,55 +190,27 @@ export function TabStrip({
                 onShowMenu={() => onShowGroupMenu(group.id)}
               />
             ) : null,
-            hideTab ? null : (
-              <div
-                className={`tab ${isActive ? 'tab-active' : ''} ${tab.pinned ? 'tab-pinned' : ''}${(tab.taskSpaceId || tab.kind === 'task') ? ' tab-agent' : ''}${groupClasses}`}
-                key={tab.id}
-                role="tab"
-                aria-label={tab.pinned ? `${tab.title || 'Untitled'}, pinned` : group ? `${tab.title || 'Untitled'}, ${group.name} group` : undefined}
-                aria-selected={isActive}
-                tabIndex={isActive ? 0 : -1}
-                title={tab.title || 'Untitled'}
-                draggable={!tab.taskSpaceId && tab.kind !== 'task'}
-                onDragStart={(event) => { if (!tab.taskSpaceId && tab.kind !== 'task') event.dataTransfer.setData('application/x-poppin-tab', tab.id); }}
-                onDragOver={(event) => event.preventDefault()}
-                onDrop={(event) => dropTab(event, tab.id, onReorder)}
-                onClick={() => onActivate(tab.id)}
-                onContextMenu={(event) => { event.preventDefault(); if (!tab.kind || tab.kind === 'browser') onShowTabMenu(tab.id); }}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' || event.key === ' ') {
-                    event.preventDefault();
-                    onActivate(tab.id);
-                  }
-                }}
-              >
-                <span className="tab-icon" aria-hidden="true">
-                  <TabFavicon key={`${tab.failure ? 'failed' : 'ready'}:${tab.faviconUrls?.join('|') ?? tab.kind}`} tab={tab} />
-                </span>
-                {tab.pinned ? null : <span className="tab-title">{tab.title || 'Untitled'}</span>}
-                {tab.isLoading ? <span className="tab-loading" aria-label="Loading" /> : null}
-                {tab.kind !== 'task' && (tab.pinned || tab.taskSpaceId) ? null : (
-                  <button
-                    className="tab-close"
-                    type="button"
-                    aria-label={`Close ${tab.title || 'tab'}`}
-                    onClick={(event) => { event.stopPropagation(); onClose(tab.id); }}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter' || event.key === ' ') {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        onClose(tab.id);
-                      }
-                    }}
-                  >
-                    <X size={13} />
-                  </button>
-                )}
-              </div>
-            ),
+            renderTab(tab, group),
           ];
         })}
       </div>
+      {showAgentCluster ? (
+        <div className="tab-strip-agent" role="tablist" aria-label="Agent Tabs and reply">
+          {agentTaskSpace ? (
+            <button
+              type="button"
+              className={`agent-tabs-entry ${watchingAgentTabs ? 'agent-tabs-entry-active' : ''}`}
+              aria-label={`Agent Tabs · ${agentTaskSpace.name}. Return to live view.`}
+              title={`Agent Tabs · ${agentTaskSpace.name}`}
+              onClick={onWatchAgentTabs}
+            >
+              <span className="agent-tabs-entry-label">Agent Tabs · {agentTaskSpace.name}</span>
+              <span className="agent-tabs-entry-count" aria-hidden="true">{agentTaskSpace.tabIds.length}</span>
+            </button>
+          ) : null}
+          {agentOwnedTabs.map((tab) => renderTab(tab))}
+        </div>
+      ) : null}
       <button className="new-tab-button" type="button" aria-label="New tab" onClick={onCreate}>
         <Plus size={18} />
       </button>

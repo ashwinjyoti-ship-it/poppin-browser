@@ -325,8 +325,24 @@ button { color: inherit; }
   gap: 7px;
   -webkit-app-region: no-drag;
 }
-.tab-strip { display: flex; align-items: end; min-width: 0; max-width: calc(100% - 46px); gap: 6px; overflow-x: auto; padding: 5px 2px 0; scrollbar-width: none; }
+.tab-strip { display: flex; flex: 1 1 auto; align-items: end; min-width: 0; gap: 6px; overflow-x: auto; padding: 5px 2px 0; scrollbar-width: none; }
 .tab-strip::-webkit-scrollbar { display: none; }
+/* The agent-owned zone (Agent Tabs entry + the task's reply/review tab) docks
+   to the right of ordinary tabs instead of interleaving with them, so it
+   reads as a distinct, always-visible cluster regardless of tab count. */
+.tab-strip-agent {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: end;
+  gap: 6px;
+  max-width: min(46vw, 460px);
+  margin-left: 4px;
+  padding: 5px 0 0 10px;
+  overflow-x: auto;
+  border-left: 1px solid rgba(206, 122, 26, .22);
+  scrollbar-width: none;
+}
+.tab-strip-agent::-webkit-scrollbar { display: none; }
 .tab {
   position: relative;
   display: grid;
@@ -830,7 +846,8 @@ body.pane-is-resizing * { cursor: col-resize !important; user-select: none !impo
 .chrome-compact .address-error { top: 42px; font-size: 11px; }
 .chrome-compact .google-sign-in-help { top: 40px; min-height: 68px; padding-top: 8px; padding-bottom: 8px; }
 .chrome-compact .tab-row { height: 38px; margin-left: 15px; gap: 6px; }
-.chrome-compact .tab-strip { max-width: calc(100% - 42px); gap: 5px; padding-top: 4px; }
+.chrome-compact .tab-strip { gap: 5px; padding-top: 4px; }
+.chrome-compact .tab-strip-agent { gap: 5px; padding-top: 4px; }
 .chrome-compact .tab {
   grid-template-columns: 15px minmax(44px, 1fr) 17px;
   gap: 5px;
@@ -869,7 +886,8 @@ body.pane-is-resizing * { cursor: col-resize !important; user-select: none !impo
 .chrome-dense .google-sign-in-help p { font-size: 9px; line-height: 1.3; }
 .chrome-dense .google-sign-in-fallback { min-height: 28px; padding: 0 8px; font-size: 9px; }
 .chrome-dense .tab-row { height: 33px; margin-left: 10px; gap: 5px; }
-.chrome-dense .tab-strip { max-width: calc(100% - 38px); gap: 4px; padding-top: 3px; }
+.chrome-dense .tab-strip { gap: 4px; padding-top: 3px; }
+.chrome-dense .tab-strip-agent { gap: 4px; padding-top: 3px; }
 .chrome-dense .tab {
   grid-template-columns: 14px minmax(40px, 1fr) 16px;
   gap: 4px;
