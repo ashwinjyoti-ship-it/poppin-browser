@@ -158,6 +158,12 @@ export function App() {
       addressInputRef.current?.focus();
       addressInputRef.current?.select();
     });
+    void window.poppinSettings.getSnapshot().then((initialSnapshot) => {
+      if (mounted) setSettingsOpen(initialSnapshot.open);
+    });
+    const unsubscribeSettings = window.poppinSettings.subscribe((nextSnapshot) => {
+      if (mounted) setSettingsOpen(nextSnapshot.open);
+    });
     return () => {
       mounted = false;
       unsubscribeSnapshot();
@@ -167,6 +173,7 @@ export function App() {
       unsubscribePages();
       unsubscribeTandem();
       unsubscribeFocus();
+      unsubscribeSettings();
     };
   }, []);
 
@@ -196,10 +203,10 @@ export function App() {
       type: 'setLayout',
       topInset: chromeLayout.height,
       leftInset: workspaceCollapsed ? 46 : leftPaneWidth + 14,
-      rightInset: settingsOpen ? 390 : 24,
+      rightInset: 24,
       bottomInset: commandCollapsed ? 0 : 94 + commandOverlayHeight + agentDockHeight,
     });
-  }, [agentDockHeight, chromeLayout.height, commandCollapsed, commandOverlayHeight, leftPaneWidth, settingsOpen, workspaceCollapsed]);
+  }, [agentDockHeight, chromeLayout.height, commandCollapsed, commandOverlayHeight, leftPaneWidth, workspaceCollapsed]);
 
   const resizeLeftPane = (requestedWidth: number) => {
     setPreferredLeftPaneWidth(clampResizedLeftPaneWidth(requestedWidth, viewport.width));
@@ -246,7 +253,7 @@ export function App() {
       if (result.ok && command.type === 'openWorld') {
         setTaskTabActive(false);
         setWorkspaceCollapsed(true);
-        setSettingsOpen(false);
+        void window.poppinSettings.command({ type: 'close' });
         void window.poppinPages.command({ type: 'deactivateTabs' });
       }
       return result.ok ? null : result.message ?? 'Poppin could not complete that Tandem action.';
@@ -282,7 +289,7 @@ export function App() {
   };
 
   return (
-    <main className={`app-shell chrome-${chromeLayout.density} ${snapshot.isFullScreen ? 'window-fullscreen' : 'window-windowed'} ${commandCollapsed ? 'command-is-collapsed' : ''} ${settingsOpen ? 'settings-open' : ''}`} style={paneStyle}>
+    <main className={`app-shell chrome-${chromeLayout.density} ${snapshot.isFullScreen ? 'window-fullscreen' : 'window-windowed'} ${commandCollapsed ? 'command-is-collapsed' : ''}`} style={paneStyle}>
       {snapshot.authenticationPopup ? (
         <section className="authentication-overlay-status" aria-label="Secure sign-in overlay">
           <div><strong>{snapshot.authenticationPopup.title}</strong><span>Complete sign-in in the protected overlay. Poppin cannot read credentials.</span></div>
@@ -303,10 +310,7 @@ export function App() {
             activeTab={activeTab}
             address={address}
             addressError={addressError}
-            settings={snapshot.settings}
-            tandem={tandemSnapshot}
             settingsOpen={settingsOpen}
-            canReopenClosedTab={snapshot.canReopenClosedTab}
             addressInputRef={addressInputRef}
             onAddressChange={(value) => {
               setAddressDraft(value);
@@ -322,10 +326,7 @@ export function App() {
             onBack={() => withActiveTab('back')}
             onForward={() => withActiveTab('forward')}
             onReload={() => withActiveTab('reload')}
-            onReopenClosedTab={() => void sendCommand({ type: 'reopenClosedTab' })}
-            onSettingsOpenChange={setSettingsOpen}
-            onUpdateSettings={(settings) => void sendCommand({ type: 'updateSettings', settings })}
-            onTandemCommand={sendTandemCommand}
+            onSettingsOpenChange={(open) => { void window.poppinSettings.command({ type: open ? 'open' : 'close' }); }}
             onSubmit={submitAddress}
           />
         </div>
@@ -390,7 +391,7 @@ export function App() {
         onClearVisualSelection={() => { void sendWorkspaceCommand({ type: 'clearVisualSelection' }); }}
         tandem={tandemSnapshot}
         onTandemCommand={sendTandemCommand}
-        onOpenSettings={() => setSettingsOpen(true)}
+        onOpenSettings={() => { void window.poppinSettings.command({ type: 'open' }); }}
       />
       {!workspaceCollapsed ? (
         <PaneResizer

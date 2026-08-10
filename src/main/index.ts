@@ -6,6 +6,7 @@ import { app, BrowserWindow, dialog, ipcMain, Menu, safeStorage, screen, session
 
 import {
   BROWSER_CHANNELS,
+  DEFAULT_BROWSER_SETTINGS,
   type BrowserCommand,
   type WindowState,
 } from '../shared/browser';
@@ -34,6 +35,11 @@ import { EMPTY_TANDEM_SNAPSHOT, TANDEM_CHANNELS, type TandemCommand } from '../s
 import { TandemEngine } from './tandem/tandem-engine';
 import { TandemCredentialStore } from './tandem/tandem-credentials';
 import { executeTandemCapability } from './tandem/tandem-capability';
+import { SettingsOverlayController } from './browser/settings-overlay-controller';
+import {
+  SETTINGS_OVERLAY_CHANNELS,
+  type SettingsOverlayCommand,
+} from '../shared/settings-overlay';
 
 registerInternalScheme();
 
@@ -49,6 +55,7 @@ let browserAgentEngine: BrowserAgentEngine | null = null;
 let previewEngine: PreviewEngine | null = null;
 let tandemEngine: TandemEngine | null = null;
 let tandemCredentials: TandemCredentialStore | null = null;
+let settingsOverlay: SettingsOverlayController | null = null;
 const pendingExternalUrls: string[] = [];
 
 function openExternalUrl(url: string): void {
@@ -106,6 +113,21 @@ async function createWindow(): Promise<void> {
     closeWorld: () => browserEngine?.closeTandemWorld(),
     onContextChanged: () => workspaceEngine?.refreshTandemContexts(),
   });
+  settingsOverlay = new SettingsOverlayController(
+    mainWindow,
+    SETTINGS_OVERLAY_WEBPACK_ENTRY,
+    SETTINGS_OVERLAY_PRELOAD_WEBPACK_ENTRY,
+    () => {
+      const browser = browserEngine?.getSnapshot();
+      return {
+        browser: {
+          settings: browser?.settings ?? { ...DEFAULT_BROWSER_SETTINGS },
+          canReopenClosedTab: browser?.canReopenClosedTab ?? false,
+        },
+        tandem: tandemEngine?.getSnapshot() ?? EMPTY_TANDEM_SNAPSHOT,
+      };
+    },
+  );
   workspaceEngine = new WorkspaceEngine(
     mainWindow, workspaceStore, browserEngine, git, pagesStore ?? undefined,
     () => pagesEngine?.refresh(),
@@ -207,6 +229,8 @@ async function createWindow(): Promise<void> {
   mainWindow.on('leave-full-screen', () => browserEngine?.scheduleSave());
   mainWindow.on('closed', () => {
     const closingTaskEngine = taskEngine;
+    settingsOverlay?.destroy();
+    settingsOverlay = null;
     mainWindow = null;
     browserEngine = null;
     workspaceEngine = null;
@@ -233,6 +257,10 @@ async function createWindow(): Promise<void> {
 
 function isTrustedShellSender(sender: Electron.WebContents): boolean {
   return Boolean(mainWindow && sender === mainWindow.webContents);
+}
+
+function isTrustedSettingsSender(sender: Electron.WebContents): boolean {
+  return isTrustedShellSender(sender) || Boolean(settingsOverlay?.isOverlaySender(sender));
 }
 
 app.whenReady().then(async () => {
@@ -299,6 +327,36 @@ app.whenReady().then(async () => {
   ipcMain.handle(TANDEM_CHANNELS.command, (event, command: TandemCommand) => {
     if (!isTrustedShellSender(event.sender)) throw new Error('Untrusted Tandem command.');
     return tandemEngine?.execute(command) ?? { ok: false, message: 'Tandem is not ready.' };
+  });
+  ipcMain.handle(SETTINGS_OVERLAY_CHANNELS.getSnapshot, (event) => {
+    if (!isTrustedSettingsSender(event.sender)) throw new Error('Untrusted settings snapshot request.');
+    if (!settingsOverlay) throw new Error('Poppin Settings is not ready.');
+    return settingsOverlay.getSnapshot();
+  });
+  ipcMain.handle(SETTINGS_OVERLAY_CHANNELS.command, async (event, command: SettingsOverlayCommand) => {
+    const fromShell = isTrustedShellSender(event.sender);
+    const fromOverlay = Boolean(settingsOverlay?.isOverlaySender(event.sender));
+    if (!fromShell && !fromOverlay) throw new Error('Untrusted settings command.');
+    if (!settingsOverlay) return { ok: false, message: 'Poppin Settings is not ready.' };
+
+    if (command.type === 'open') {
+      if (!fromShell) return { ok: false, message: 'Only the Poppin shell can open Settings.' };
+      await settingsOverlay.open();
+      return { ok: true };
+    }
+    if (command.type === 'close') {
+      settingsOverlay.close(fromOverlay);
+      return { ok: true };
+    }
+    if (!fromOverlay) return { ok: false, message: 'Settings changes must come from the Settings panel.' };
+
+    const result = command.type === 'updateBrowserSettings'
+      ? await (browserEngine?.execute({ type: 'updateSettings', settings: command.settings }) ?? Promise.resolve({ ok: false, message: 'Browser settings are not ready.' }))
+      : command.type === 'reopenClosedTab'
+        ? await (browserEngine?.execute({ type: 'reopenClosedTab' }) ?? Promise.resolve({ ok: false, message: 'Browser settings are not ready.' }))
+        : await (tandemEngine?.execute(command.command) ?? Promise.resolve({ ok: false, message: 'Tandem is not ready.' }));
+    settingsOverlay.notify();
+    return result;
   });
   ipcMain.handle(TASK_CHANNELS.getSnapshot, (event) => {
     if (!isTrustedShellSender(event.sender)) throw new Error('Untrusted task snapshot request.');

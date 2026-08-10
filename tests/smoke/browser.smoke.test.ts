@@ -180,12 +180,18 @@ describe('packaged browser workflow', () => {
     await address.press('Enter');
     await expect.poll(() => exactPageInfo(application!, `${origin}/`)).toMatchObject({ title: 'Local fixture' });
 
+    const boundsBeforeSettings = await activeBrowserViewBounds(application);
     await shell.getByRole('button', { name: 'Poppin settings' }).click();
-    const settingsPanel = shell.getByRole('complementary', { name: 'Poppin settings' });
+    await expect.poll(() => shell.getByRole('button', { name: 'Poppin settings' }).getAttribute('aria-expanded')).toBe('true');
+    const settingsOverlay = await settingsOverlayPage(application);
+    const settingsPanel = settingsOverlay.getByRole('complementary', { name: 'Poppin settings' });
     await expect.poll(() => settingsPanel.isVisible()).toBe(true);
-    await shell.getByLabel('Links open in').selectOption('same-tab');
+    expect(await activeBrowserViewBounds(application)).toEqual(boundsBeforeSettings);
+    await settingsOverlay.getByLabel('Links open in').selectOption('same-tab');
     await expect.poll(() => shell.evaluate(async () => (await window.poppinBrowser.getSnapshot()).settings.linkOpening)).toBe('same-tab');
-    await shell.getByRole('button', { name: 'Close Poppin settings' }).click();
+    await settingsOverlay.getByRole('button', { name: 'Close Poppin settings' }).click();
+    await expect.poll(() => shell.getByRole('button', { name: 'Poppin settings' }).getAttribute('aria-expanded')).toBe('false');
+    expect(await activeBrowserViewBounds(application)).toEqual(boundsBeforeSettings);
     await application.evaluate(async ({ webContents }, prefix) => {
       const contents = webContents.getAllWebContents().find((candidate) => candidate.getURL().startsWith(prefix));
       await contents?.executeJavaScript("document.querySelector('#popup').click()");
@@ -195,9 +201,10 @@ describe('packaged browser workflow', () => {
     await address.fill(origin);
     await address.press('Enter');
     await shell.getByRole('button', { name: 'Poppin settings' }).click();
-    await shell.getByLabel('Links open in').selectOption('follow-site');
+    await expect.poll(() => shell.getByRole('button', { name: 'Poppin settings' }).getAttribute('aria-expanded')).toBe('true');
+    await settingsOverlay.getByLabel('Links open in').selectOption('follow-site');
     await expect.poll(() => shell.evaluate(async () => (await window.poppinBrowser.getSnapshot()).settings.linkOpening)).toBe('follow-site');
-    await shell.getByRole('button', { name: 'Close Poppin settings' }).click();
+    await settingsOverlay.getByRole('button', { name: 'Close Poppin settings' }).click();
 
     await application.evaluate(async ({ webContents }, targetUrl) => {
       const contents = webContents.getAllWebContents().find((candidate) => candidate.getURL() === targetUrl);
@@ -401,8 +408,13 @@ describe('packaged browser workflow', () => {
 
 async function activeBrowserViewBounds(app: ElectronApplication) {
   return app.evaluate(({ BrowserWindow }) => {
-    const window = BrowserWindow.getAllWindows()[0];
+    const window = BrowserWindow.getAllWindows().find((candidate) => candidate.contentView.children.length > 0);
     const child = window?.contentView.children.find((view) => view.getVisible());
     return child?.getBounds() ?? { x: -1, y: -1, width: -1, height: -1 };
   });
+}
+
+async function settingsOverlayPage(app: ElectronApplication) {
+  await expect.poll(() => app.windows().some((page) => page.url().includes('/renderer/settings_overlay/index.html'))).toBe(true);
+  return app.windows().find((page) => page.url().includes('/renderer/settings_overlay/index.html'))!;
 }
