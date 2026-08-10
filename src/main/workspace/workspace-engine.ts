@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { open, stat } from 'node:fs/promises';
+import { access, open, stat } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 
 import { dialog, type BrowserWindow } from 'electron';
@@ -11,6 +12,7 @@ import {
   type WorkspaceCommandResult,
   type WorkspaceSnapshot,
 } from '../../shared/workspace';
+import { parseProjectSource, repositoryFolderName } from '../../shared/project-source';
 import { WorkspaceStore } from './workspace-store';
 import { BrowserEngine } from '../browser/browser-engine';
 import { GitEngine } from '../project/git-engine';
@@ -93,12 +95,10 @@ export class WorkspaceEngine {
       case 'clearVisualSelection':
         this.store.clearVisualSelection();
         break;
-      case 'connectExistingProject':
-        return this.connectExistingProject();
-      case 'cloneRepository':
-        return this.cloneRepository(command.remote);
-      case 'createNewProject':
-        return this.createNewProject();
+      case 'addProject':
+        return this.addProject(command.source);
+      case 'chooseProjectFolder':
+        return this.chooseProjectFolder();
       case 'updateProjectSettings':
         return this.updateProjectSettings(command);
     }
@@ -210,22 +210,60 @@ export class WorkspaceEngine {
     }
   }
 
-  private async connectExistingProject(): Promise<WorkspaceCommandResult> {
-    const directory = await this.chooseDirectory('Connect existing local Git project');
-    if (!directory) return { ok: true };
-    return this.runGitOperation(() => this.git.inspect(directory));
+  private async addProject(rawSource: string): Promise<WorkspaceCommandResult> {
+    const parsed = parseProjectSource(rawSource);
+    if (parsed.kind === 'invalid') return { ok: false, message: parsed.message };
+    if (parsed.kind === 'remote') return this.cloneRemoteProject(parsed.remote);
+    return this.runGitOperation(() => this.git.openLocal(expandLocalPath(parsed.path)));
   }
 
-  private async cloneRepository(remote: string): Promise<WorkspaceCommandResult> {
-    const parent = await this.chooseDirectory('Choose where to clone the repository');
-    if (!parent) return { ok: true };
-    return this.runGitOperation(() => this.git.clone(remote, parent));
+  private async chooseProjectFolder(): Promise<WorkspaceCommandResult> {
+    const directory = await this.chooseDirectory('Choose a local Git project or an empty folder', true);
+    if (!directory) return { ok: true };
+    return this.runGitOperation(() => this.git.openLocal(directory));
   }
 
-  private async createNewProject(): Promise<WorkspaceCommandResult> {
-    const directory = await this.chooseDirectory('Choose or create an empty project folder', true);
-    if (!directory) return { ok: true };
-    return this.runGitOperation(() => this.git.create(directory));
+  private async cloneRemoteProject(remote: string): Promise<WorkspaceCommandResult> {
+    while (true) {
+      const parent = await this.chooseDirectory('Choose where to clone the repository', true);
+      if (!parent) return { ok: true };
+
+      let destination: string;
+      try {
+        destination = this.git.suggestedCloneDestination(parent, remote);
+      } catch (error) {
+        return { ok: false, message: error instanceof Error ? error.message : 'Poppin could not determine the repository folder name.' };
+      }
+
+      const folderName = repositoryFolderName(remote);
+      if (await pathExists(destination)) {
+        const choice = await dialog.showMessageBox(this.window, {
+          type: 'warning',
+          title: 'Folder already exists',
+          message: `A folder named ${folderName} already exists in that location.`,
+          detail: `${destination}\n\nConnect the existing checkout, choose another parent folder, or cancel.`,
+          buttons: ['Connect existing', 'Choose another location', 'Cancel'],
+          defaultId: 0,
+          cancelId: 2,
+        });
+        if (choice.response === 0) return this.runGitOperation(() => this.git.openLocal(destination));
+        if (choice.response === 1) continue;
+        return { ok: true };
+      }
+
+      const confirm = await dialog.showMessageBox(this.window, {
+        type: 'question',
+        title: 'Clone repository',
+        message: `Clone into ${destination}?`,
+        detail: `Remote: ${remote}\nDestination: ${destination}`,
+        buttons: ['Clone', 'Choose another location', 'Cancel'],
+        defaultId: 0,
+        cancelId: 2,
+      });
+      if (confirm.response === 0) return this.runGitOperation(() => this.git.clone(remote, destination));
+      if (confirm.response === 1) continue;
+      return { ok: true };
+    }
   }
 
   private updateProjectSettings(command: Extract<WorkspaceCommand, { type: 'updateProjectSettings' }>): WorkspaceCommandResult {
@@ -275,6 +313,16 @@ export class WorkspaceEngine {
   refreshTandemContexts(): void {
     this.emitSnapshot();
   }
+}
+
+async function pathExists(filePath: string): Promise<boolean> {
+  return access(filePath).then(() => true, () => false);
+}
+
+function expandLocalPath(value: string): string {
+  if (value === '~') return os.homedir();
+  if (value.startsWith('~/') || value.startsWith('~\\')) return path.join(os.homedir(), value.slice(2));
+  return path.resolve(value);
 }
 
 function normalizePreviewUrl(input: string): string | null {
