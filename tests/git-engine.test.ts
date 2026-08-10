@@ -69,4 +69,34 @@ describe('git engine', () => {
     expect(diff).toContain('diff --git a/new.txt b/new.txt');
     expect(diff).toContain('+new');
   });
+
+  it('updates the local base branch with a fast-forward and refuses a dirty tree', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'poppin-git-update-'));
+    const repositoryPath = path.join(directory, 'repo');
+    await execFileAsync('git', ['init', '-b', 'main', repositoryPath]);
+    await writeFile(path.join(repositoryPath, 'README.md'), '# Before\n');
+    await execFileAsync('git', ['-C', repositoryPath, 'add', 'README.md']);
+    await execFileAsync('git', ['-C', repositoryPath, '-c', 'user.name=Poppin Tests', '-c', 'user.email=tests@poppin.local', 'commit', '-m', 'initial']);
+    await execFileAsync('git', ['-C', repositoryPath, 'config', 'user.name', 'Poppin Tests']);
+    await execFileAsync('git', ['-C', repositoryPath, 'config', 'user.email', 'tests@poppin.local']);
+    await execFileAsync('git', ['-C', repositoryPath, 'switch', '-c', 'feature']);
+    await writeFile(path.join(repositoryPath, 'README.md'), '# After\n');
+    await execFileAsync('git', ['-C', repositoryPath, 'add', 'README.md']);
+    await execFileAsync('git', ['-C', repositoryPath, 'commit', '-m', 'feature']);
+
+    const bare = path.join(directory, 'origin.git');
+    await execFileAsync('git', ['clone', '--bare', repositoryPath, bare]);
+    await execFileAsync('git', ['-C', bare, 'branch', '-f', 'main', 'feature']);
+    await execFileAsync('git', ['-C', repositoryPath, 'remote', 'add', 'origin', bare]);
+
+    const engine = new GitEngine();
+    await writeFile(path.join(repositoryPath, 'dirty.txt'), 'nope\n');
+    await expect(engine.updateLocalBase(repositoryPath, 'main')).rejects.toThrow(/Commit or stash/);
+    await execFileAsync('git', ['-C', repositoryPath, 'clean', '-fd']);
+
+    const project = await engine.updateLocalBase(repositoryPath, 'main');
+    expect(project.branch).toBe('main');
+    expect((await execFileAsync('git', ['-C', repositoryPath, 'branch', '--show-current'])).stdout.trim()).toBe('main');
+    expect((await execFileAsync('git', ['-C', repositoryPath, 'show', 'HEAD:README.md'])).stdout).toContain('# After');
+  });
 });

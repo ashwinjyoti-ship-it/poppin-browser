@@ -72,6 +72,8 @@ interface TaskEngineOptions {
   onOpenPreview?: (project: NonNullable<WorkspaceSnapshot['project']>) => Promise<void>;
   github?: GitHubEngine;
   onOpenExternal?: (url: string) => void;
+  /** Refresh the workspace project snapshot after Git changes the connected checkout. */
+  onProjectUpdated?: (project: NonNullable<WorkspaceSnapshot['project']>) => void;
   onExportResult?: (task: TaskRecordSnapshot, format: 'markdown' | 'text') => Promise<string | null>;
   getBrowserAgentSnapshot?: () => BrowserAgentSnapshot;
   executeBrowserAgentCommand?: (command: BrowserAgentCommand) => Promise<BrowserAgentCommandResult>;
@@ -205,6 +207,8 @@ export class TaskEngine {
           return await this.refreshPullRequest();
         case 'requestMerge':
           return await this.requestMerge(command.strategy);
+        case 'requestUpdateLocal':
+          return this.requestUpdateLocal();
         case 'exportResult':
           return await this.exportResult(command.format);
       }
@@ -613,6 +617,7 @@ export class TaskEngine {
     const prepared = await this.git.prepareCommit(project.repositoryPath, rawBranch, rawMessage);
     task.delivery = {
       branch: prepared.branch, commit: prepared.commit, remote: project.remote, pushed: false, pullRequest: null,
+      localUpdated: false,
       message: `Prepared ${prepared.commit.slice(0, 7)} on ${prepared.branch}.`,
     };
     await this.captureDiff();
@@ -680,8 +685,36 @@ export class TaskEngine {
       'Merging changes the protected base branch and cannot be implied by prior approval.',
       async () => {
         delivery.pullRequest = await this.github().mergePullRequest(project.repositoryPath, status.number, strategy);
+        delivery.localUpdated = false;
         this.options.onOpenExternal?.(delivery.pullRequest.url);
         return `GitHub reports pull request #${status.number} as ${delivery.pullRequest.state}.`;
+      },
+    );
+  }
+
+  private requestUpdateLocal(): TaskCommandResult {
+    const { project, delivery } = this.requireDelivery();
+    if (!delivery.pullRequest) return { ok: false, message: 'Create a pull request first.' };
+    if (!isMergedPullRequest(delivery.pullRequest.state)) {
+      return { ok: false, message: 'Merge the pull request before updating the local folder.' };
+    }
+    if (delivery.localUpdated) return { ok: false, message: 'The local folder is already marked as updated.' };
+    const base = delivery.pullRequest.base;
+    return this.requestExternalApproval(
+      'git', `Update local ${base}`,
+      `Repository: ${project.repositoryPath}\nRemote: origin\nAction: check out ${base} and fast-forward from origin/${base}\nThis updates your local folder to match the merged remote branch.`,
+      'Updating the local checkout can move HEAD and is separately approved from the remote merge.',
+      async () => {
+        const updated = await this.git.updateLocalBase(project.repositoryPath, base, 'origin');
+        this.workspaceStore.saveProject({
+          ...project,
+          repositoryPath: updated.repositoryPath,
+          remote: updated.remote ?? project.remote,
+          branch: updated.branch,
+        });
+        this.options.onProjectUpdated?.(this.workspaceStore.getProject()!);
+        delivery.localUpdated = true;
+        return `Updated local ${updated.branch} to match origin/${base}.`;
       },
     );
   }
@@ -1538,7 +1571,19 @@ function hasSelectedContext(workspace: WorkspaceSnapshot): boolean {
 }
 
 function deliveryFor(task: TaskRecordSnapshot, project: WorkspaceSnapshot['project']): NonNullable<TaskRecordSnapshot['delivery']> {
-  return task.delivery ?? { branch: project?.branch ?? '', commit: '', remote: project?.remote ?? null, pushed: false, pullRequest: null, message: '' };
+  return task.delivery ?? {
+    branch: project?.branch ?? '',
+    commit: '',
+    remote: project?.remote ?? null,
+    pushed: false,
+    pullRequest: null,
+    localUpdated: false,
+    message: '',
+  };
+}
+
+function isMergedPullRequest(state: string): boolean {
+  return /^merged$/i.test(state.trim());
 }
 
 function githubCompareUrl(remote: string | null, base: string, head: string): string | null {

@@ -309,6 +309,11 @@ export class WorkspaceEngine {
     this.emitSnapshot();
   }
 
+  /** Re-emit after another engine updates the connected project checkout. */
+  refreshProject(): void {
+    this.emitSnapshot();
+  }
+
   /** Called when Tandem context selection or freshness changes. */
   refreshTandemContexts(): void {
     this.emitSnapshot();
