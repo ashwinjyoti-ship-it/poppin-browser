@@ -8,6 +8,7 @@ import type { BrowserAgentSnapshot } from '../src/shared/browser-agent';
 
 const READY_CONNECTION = { state: 'ready' as const, message: 'Codex is ready.', accountLabel: 'tester@example.com', models: [] };
 const EMPTY_BROWSER_AGENT: BrowserAgentSnapshot = { state: 'idle', taskId: null, taskSpace: null, watching: false, allowedTabIds: [], activeTabId: null, currentAction: null, pendingApproval: null, log: [] };
+const TASK_SPACE = { id: 'space-1', taskId: 'task-1', name: 'Browser task', mode: 'browser-only' as const, owner: 'user' as const, status: 'completed' as const, tabIds: ['agent-tab'], contextTabIds: [], explorationTabIds: ['agent-tab'], activeTabId: 'agent-tab', createdAt: '', updatedAt: '', kept: false };
 
 function taskWith(overrides: Partial<TaskRecordSnapshot>): TaskSnapshot {
   return {
@@ -74,17 +75,17 @@ describe('AgentDock', () => {
     expect(onBrowserAgentCommand).toHaveBeenCalledWith({ type: 'respondApproval', decision: 'approve' });
   });
 
-  it('offers Keep/Close tabs once browsing finishes, reachable from any tab', async () => {
+  it('offers Keep/Close tabs once browsing finishes on its Agent Tab', async () => {
     const user = userEvent.setup();
     const onBrowserAgentCommand = vi.fn().mockResolvedValue({ ok: true });
-    const browserAgentSnapshot: BrowserAgentSnapshot = { ...EMPTY_BROWSER_AGENT, state: 'completed' };
+    const browserAgentSnapshot: BrowserAgentSnapshot = { ...EMPTY_BROWSER_AGENT, state: 'completed', taskSpace: TASK_SPACE };
     render(<AgentDock taskSnapshot={taskWith({ state: 'Completed' })} browserAgentSnapshot={browserAgentSnapshot} onTaskCommand={vi.fn()} onBrowserAgentCommand={onBrowserAgentCommand} onOpenTaskTab={vi.fn()} />);
     await user.click(screen.getByRole('button', { name: /keep tabs/i }));
     expect(onBrowserAgentCommand).toHaveBeenCalledWith({ type: 'keepTabs' });
   });
 
-  it('shows a quiet completion pill once everything is resolved', () => {
-    render(<AgentDock taskSnapshot={taskWith({ state: 'Completed' })} onTaskCommand={vi.fn()} onOpenTaskTab={vi.fn()} />);
-    expect(screen.getByRole('button', { name: /task complete · view/i })).toBeVisible();
+  it('renders no passive completion pill once everything is resolved', () => {
+    const { container } = render(<AgentDock taskSnapshot={taskWith({ state: 'Completed' })} onTaskCommand={vi.fn()} onOpenTaskTab={vi.fn()} />);
+    expect(container).toBeEmptyDOMElement();
   });
 });

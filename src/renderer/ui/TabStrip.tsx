@@ -1,8 +1,9 @@
-import { BookOpenText, ChevronDown, ChevronRight, Database, FileDiff, FileText, Globe2, MessageSquareText, Pencil, Plus, TriangleAlert, X } from 'lucide-react';
+import { BookOpenText, Check, ChevronDown, ChevronRight, CircleAlert, CircleSlash2, Database, FileDiff, FileText, Globe2, MessageSquareText, Pencil, Plus, TriangleAlert, X } from 'lucide-react';
 import { type DragEvent, useMemo, useRef, useState } from 'react';
 
 import type { BrowserFailure, BrowserTabGroup } from '../../shared/browser';
 import type { BrowserTaskSpace } from '../../shared/browser-agent';
+import type { TaskTabStatus } from './task-surface';
 
 interface TabStripProps {
   tabs: TabStripTabSnapshot[];
@@ -31,6 +32,8 @@ export interface TabStripTabSnapshot {
   kind?: 'browser' | 'page' | 'database' | 'task' | 'tandem';
   /** Picks the task tab's icon: a reply bubble for Work, a diff mark for Code. */
   taskKind?: 'work' | 'code';
+  /** Persistent task state shown without consuming page viewport height. */
+  taskStatus?: TaskTabStatus;
   faviconUrls?: string[];
   pinned?: boolean;
   groupId?: string | null;
@@ -101,15 +104,20 @@ export function TabStrip({
     const isActive = tab.id === activeTabId;
     const isAgentOwned = Boolean(tab.taskSpaceId || tab.kind === 'task');
     const groupClasses = group ? ` tab-grouped tab-grouped-${group.color}` : '';
+    const taskStatus = tab.kind === 'task' && tab.taskStatus ? taskStatusLabel(tab.taskStatus) : null;
+    const tabTitle = tab.title || 'Untitled';
+    const accessibleName = taskStatus
+      ? `${tabTitle}, ${taskStatus}`
+      : tab.pinned ? `${tabTitle}, pinned` : group ? `${tabTitle}, ${group.name} group` : undefined;
     return (
       <div
         className={`tab ${isActive ? 'tab-active' : ''} ${tab.pinned ? 'tab-pinned' : ''}${isAgentOwned ? ' tab-agent' : ''}${groupClasses}`}
         key={tab.id}
         role="tab"
-        aria-label={tab.pinned ? `${tab.title || 'Untitled'}, pinned` : group ? `${tab.title || 'Untitled'}, ${group.name} group` : undefined}
+        aria-label={accessibleName}
         aria-selected={isActive}
         tabIndex={isActive ? 0 : -1}
-        title={tab.title || 'Untitled'}
+        title={taskStatus ? `${tabTitle} — ${taskStatus}` : tabTitle}
         draggable={!isAgentOwned}
         onDragStart={(event) => { if (!isAgentOwned) event.dataTransfer.setData('application/x-poppin-tab', tab.id); }}
         onDragOver={(event) => event.preventDefault()}
@@ -124,7 +132,7 @@ export function TabStrip({
         }}
       >
         <span className="tab-icon" aria-hidden="true">
-          <TabFavicon key={`${tab.failure ? 'failed' : 'ready'}:${tab.faviconUrls?.join('|') ?? tab.kind}`} tab={tab} />
+          <TabFavicon key={`${tab.failure ? 'failed' : 'ready'}:${tab.faviconUrls?.join('|') ?? tab.kind}:${tab.taskStatus ?? ''}`} tab={tab} />
         </span>
         {tab.pinned ? null : <span className="tab-title">{tab.title || 'Untitled'}</span>}
         {tab.isLoading ? <span className="tab-loading" aria-label="Loading" /> : null}
@@ -288,7 +296,18 @@ function TabFavicon({ tab }: { tab: TabStripTabSnapshot }) {
   if (tab.kind === 'page') return <FileText size={15} />;
   if (tab.kind === 'database') return <Database size={15} />;
   if (tab.kind === 'tandem') return <BookOpenText size={15} />;
-  if (tab.kind === 'task') return tab.taskKind === 'code' ? <FileDiff size={15} /> : <MessageSquareText size={15} />;
+  if (tab.kind === 'task') {
+    if (tab.taskStatus === 'complete') return <Check size={15} className="tab-task-status-complete" />;
+    if (tab.taskStatus === 'attention') return <CircleAlert size={15} className="tab-task-status-attention" />;
+    if (tab.taskStatus === 'failed') return <TriangleAlert size={15} className="tab-task-status-failed" />;
+    if (tab.taskStatus === 'cancelled' || tab.taskStatus === 'discarded') return <CircleSlash2 size={15} className="tab-task-status-cancelled" />;
+    return (
+      <>
+        {tab.taskKind === 'code' ? <FileDiff size={15} /> : <MessageSquareText size={15} />}
+        {tab.taskStatus === 'working' ? <span className="tab-task-working-dot" /> : null}
+      </>
+    );
+  }
   if (tab.failure) return <TriangleAlert size={15} className="tab-failure-icon" />;
   const source = tab.faviconUrls?.[candidateIndex];
   if (!source) return <Globe2 size={15} />;
@@ -300,6 +319,14 @@ function TabFavicon({ tab }: { tab: TabStripTabSnapshot }) {
       onError={() => setCandidateIndex((index) => index + 1)}
     />
   );
+}
+
+function taskStatusLabel(status: TaskTabStatus): string {
+  if (status === 'working') return 'task running';
+  if (status === 'attention') return 'task needs attention';
+  if (status === 'complete') return 'task completed';
+  if (status === 'failed') return 'task failed';
+  return status === 'cancelled' ? 'task cancelled' : 'task discarded';
 }
 
 function dropTab(event: DragEvent, beforeTabId: string | null, onReorder: (tabId: string, beforeTabId: string | null) => void) {

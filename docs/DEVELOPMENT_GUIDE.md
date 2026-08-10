@@ -78,7 +78,7 @@ Electron main process (src/main/index.ts)
 | `src/renderer/ui/TabStrip.tsx` | tab and group interaction UI |
 | `src/renderer/ui/WorkspacePane.tsx` | left-pane workspace UI |
 | `src/renderer/ui/TaskTabView.tsx` | task tab's live progress/approval, Work reply, and Code review UI |
-| `src/renderer/ui/AgentDock.tsx` | floating status dock for approvals and running-task/browser-use status, reachable from any tab |
+| `src/renderer/ui/AgentDock.tsx` | blocking approvals on any non-task surface, plus running/browser controls while an Agent Tab is active |
 | `src/renderer/ui/CommandBar.tsx` | bottom task-entry and preflight UI |
 | `src/renderer/styles.css` | Poppin visual tokens, responsive browser chrome, pane and tab styling |
 
@@ -104,11 +104,12 @@ These rules are non-negotiable:
 - Web content has no privileged Poppin API access.
 - User-entered addresses are restricted to HTTP(S). Do not open arbitrary custom schemes from the address bar.
 - Explicitly asking for browser use grants ordinary visible actions inside that task's Agent Tabs. Selected tabs, documents, or visual selections provide explicit grounding for mixed work; a browser-only task receives only a fresh exploration tab. Credential forms and critical actions pause for exact approval; reversible draft creation and saving do not.
-- Task approvals must remain reachable regardless of which tab is active: a new blocking approval or question switches to the task's tab once, and the floating agent dock always offers an escape hatch back to it. Preserve the browser page and tab state while doing so.
+- Task approvals must remain reachable regardless of which tab is active: a new blocking approval or question switches to the task's tab once, and a temporary dock remains available if the user returns to another tab. Passive running/completion status must not reserve viewport space on ordinary websites or Tandem World.
 
 ## Key interaction details and recent regressions
 
 - Every task has a stable document identity independent of its replaceable Codex thread ID. Each follow-up appends a user/reply turn to the same dedicated task tab. Live thinking/progress appears only on the running turn; completed turns remain readable until the user chooses **New task**, which ends and clears that current task thread. Task output is not persisted as a cross-task document.
+- The Reply/Review tab remains visible for the lifetime of the current task and carries an accessible running, attention, completed, failed, or cancelled state icon. The bottom agent dock is surface-aware: non-blocking status and Agent Tab cleanup controls appear only while an Agent Tab is active; terminal task state never shrinks a manual website or Tandem viewport.
 - Tandem is reached through the narrow `TandemProvider` boundary. The current provider hosts the remote app in a sandboxed, closable `tandem-world` browser surface and supplies the REST capability used by the agent. Neither the renderer nor `BrowserEngine` constructs a Tandem URL, and remote Tandem code receives no Poppin privilege.
 - Tandem address and API-key setup live in Poppin Settings. The workspace pane exposes only connection status, the World opener, and collapsible explicit-context lists; project execution settings are collapsed by default so they do not crowd out pages.
 - Tandem's exact GFM renderer formats headings, links, emphasis, lists, code, and tables. Poppin sanitizes the generated HTML at the native renderer boundary; HTTP(S) links open in normal Poppin tabs.
