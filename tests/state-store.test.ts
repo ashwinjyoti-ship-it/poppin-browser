@@ -10,7 +10,7 @@ import { DEFAULT_BROWSER_SETTINGS, type PersistedBrowserStateV1, type PersistedB
 
 const VALID_STATE: PersistedBrowserStateV2 = {
   version: 2,
-  tabs: [{ id: 'tab-one', url: 'https://example.com/', pinned: true, groupId: null }],
+  tabs: [{ id: 'tab-one', url: 'https://example.com/', pinned: false, groupId: null, surface: 'tandem-world' }],
   groups: [],
   activeTabId: 'tab-one',
   settings: DEFAULT_BROWSER_SETTINGS,
@@ -27,6 +27,7 @@ const LEGACY_STATE: PersistedBrowserStateV1 = {
 describe('browser state persistence', () => {
   it('validates a complete versioned state', () => {
     expect(isPersistedBrowserState(VALID_STATE)).toBe(true);
+    expect(isPersistedBrowserState({ ...VALID_STATE, tabs: [{ ...VALID_STATE.tabs[0], surface: 'unknown' }] })).toBe(false);
     expect(isPersistedBrowserState({ ...VALID_STATE, activeTabId: 'missing' })).toBe(false);
     expect(isPersistedBrowserState({ ...VALID_STATE, version: 3 })).toBe(false);
   });

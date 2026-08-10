@@ -89,6 +89,7 @@ export function normalizePersistedBrowserState(value: unknown): PersistedBrowser
         pinned: tab.pinned === true,
         groupId: tab.groupId ?? null,
         ...(Object.hasOwn(tab, 'taskSpaceId') ? { taskSpaceId: tab.taskSpaceId ?? null } : {}),
+        ...(tab.surface === 'tandem-world' ? { surface: tab.surface } : {}),
       };
     }),
     groups,
@@ -105,7 +106,8 @@ function isPersistedTab(value: unknown): value is PersistedTabState {
     && typeof tab.url === 'string'
     && (tab.pinned === undefined || typeof tab.pinned === 'boolean')
     && (tab.groupId === undefined || tab.groupId === null || typeof tab.groupId === 'string')
-    && (tab.taskSpaceId === undefined || tab.taskSpaceId === null || typeof tab.taskSpaceId === 'string');
+    && (tab.taskSpaceId === undefined || tab.taskSpaceId === null || typeof tab.taskSpaceId === 'string')
+    && (tab.surface === undefined || tab.surface === 'tandem-world');
 }
 
 function isBrowserTabGroup(value: unknown): value is BrowserTabGroup {

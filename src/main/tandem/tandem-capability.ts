@@ -1,5 +1,5 @@
 import type { AgentToolSpec } from '../agent/agent-adapter';
-import type { TandemClient } from './tandem-client';
+import type { TandemProvider } from './tandem-provider';
 
 /**
  * The agent-facing Tandem capability.
@@ -15,7 +15,7 @@ import type { TandemClient } from './tandem-client';
 export const TANDEM_TOOL_NAME = 'tandem';
 
 export interface TandemCapabilityContext {
-  client: () => TandemClient | null;
+  provider: () => TandemProvider | null;
   workspaceId: () => string | null;
   writable: () => boolean;
   /** Opens a page in Tandem World for the human, after the agent wrote it. */
@@ -64,8 +64,8 @@ export async function executeTandemCapability(
   context: TandemCapabilityContext,
   rawArguments: unknown,
 ): Promise<TandemCapabilityResult> {
-  const client = context.client();
-  if (!client) return { ok: false, text: 'Tandem is not connected in Poppin.' };
+  const provider = context.provider();
+  if (!provider) return { ok: false, text: 'Tandem is not connected in Poppin.' };
   const args = parseArguments(rawArguments);
   if (!args) return { ok: false, text: 'The Tandem action arguments were invalid.' };
   const action = stringArg(args, 'action');
@@ -80,76 +80,76 @@ export async function executeTandemCapability(
     switch (action) {
       case 'list_pages': {
         if (!workspaceId) return { ok: false, text: 'No Tandem workspace is selected.' };
-        const pages = await client.listPages(workspaceId);
+        const pages = await provider.listPages(workspaceId);
         return { ok: true, text: JSON.stringify(pages.slice(0, 300)) };
       }
       case 'search': {
         const query = stringArg(args, 'query');
         if (!query) return { ok: false, text: 'query is required for search.' };
-        return { ok: true, text: JSON.stringify(await client.search(query)) };
+        return { ok: true, text: JSON.stringify(await provider.search(query)) };
       }
       case 'read_page': {
         const pageId = stringArg(args, 'pageId');
         if (!pageId) return { ok: false, text: 'pageId is required for read_page.' };
-        return { ok: true, text: JSON.stringify(await client.readMarkdown(pageId)) };
+        return { ok: true, text: JSON.stringify(await provider.readMarkdown(pageId)) };
       }
       case 'create_page': {
         if (!workspaceId) return { ok: false, text: 'No Tandem workspace is selected.' };
         const title = stringArg(args, 'title');
         if (!title) return { ok: false, text: 'title is required for create_page.' };
-        const page = await client.createPage(workspaceId, title, stringArg(args, 'parentId') || null);
+        const page = await provider.createPage(workspaceId, title, stringArg(args, 'parentId') || null);
         const markdown = stringArg(args, 'markdown');
-        if (markdown) await client.writeMarkdown(page.id, markdown);
+        if (markdown) await provider.writeMarkdown(page.id, markdown);
         return { ok: true, text: JSON.stringify(page) };
       }
       case 'write_markdown': {
         const pageId = stringArg(args, 'pageId');
         if (!pageId) return { ok: false, text: 'pageId is required for write_markdown.' };
-        await client.writeMarkdown(pageId, stringArg(args, 'markdown'));
+        await provider.writeMarkdown(pageId, stringArg(args, 'markdown'));
         return { ok: true, text: `Replaced the content of Tandem page ${pageId}.` };
       }
       case 'append': {
         const pageId = stringArg(args, 'pageId');
         const markdown = stringArg(args, 'markdown');
         if (!pageId || !markdown) return { ok: false, text: 'pageId and markdown are required for append.' };
-        await client.appendMarkdown(pageId, markdown);
+        await provider.appendMarkdown(pageId, markdown);
         return { ok: true, text: `Appended to Tandem page ${pageId} without changing existing content.` };
       }
       case 'edit_section': {
         const pageId = stringArg(args, 'pageId');
         const oldText = stringArg(args, 'oldText');
         if (!pageId || !oldText) return { ok: false, text: 'pageId and oldText are required for edit_section.' };
-        await client.editSection(pageId, oldText, stringArg(args, 'newText'));
+        await provider.editSection(pageId, oldText, stringArg(args, 'newText'));
         return { ok: true, text: `Replaced the anchored section on Tandem page ${pageId}.` };
       }
       case 'list_comments': {
         const pageId = stringArg(args, 'pageId');
         if (!pageId) return { ok: false, text: 'pageId is required for list_comments.' };
-        return { ok: true, text: JSON.stringify(await client.listComments(pageId)) };
+        return { ok: true, text: JSON.stringify(await provider.listComments(pageId)) };
       }
       case 'add_comment': {
         const pageId = stringArg(args, 'pageId');
         const content = stringArg(args, 'content');
         if (!pageId || !content) return { ok: false, text: 'pageId and content are required for add_comment.' };
-        await client.addComment(pageId, content);
+        await provider.addComment(pageId, content);
         return { ok: true, text: `Added a comment to Tandem page ${pageId}.` };
       }
       case 'list_agent_comments': {
         const pageId = stringArg(args, 'pageId');
         if (!pageId) return { ok: false, text: 'pageId is required for list_agent_comments.' };
-        return { ok: true, text: JSON.stringify(await client.listAgentComments(pageId)) };
+        return { ok: true, text: JSON.stringify(await provider.listAgentComments(pageId)) };
       }
       case 'apply_agent_comment': {
         const commentId = stringArg(args, 'commentId');
         if (!commentId) return { ok: false, text: 'commentId is required for apply_agent_comment.' };
-        await client.applyAgentComment(commentId, stringArg(args, 'newText'));
+        await provider.applyAgentComment(commentId, stringArg(args, 'newText'));
         return { ok: true, text: `Applied and resolved Tandem instruction ${commentId}.` };
       }
       case 'import_url': {
         if (!workspaceId) return { ok: false, text: 'No Tandem workspace is selected.' };
         const url = stringArg(args, 'url');
         if (!url) return { ok: false, text: 'url is required for import_url.' };
-        const page = await client.importUrl(workspaceId, url, stringArg(args, 'parentId') || null);
+        const page = await provider.importUrl(workspaceId, url, stringArg(args, 'parentId') || null);
         return { ok: true, text: page ? JSON.stringify(page) : 'Tandem imported the URL.' };
       }
       case 'open_in_world': {

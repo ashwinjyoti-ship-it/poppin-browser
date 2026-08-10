@@ -180,12 +180,12 @@ describe('packaged browser workflow', () => {
     await address.press('Enter');
     await expect.poll(() => exactPageInfo(application!, `${origin}/`)).toMatchObject({ title: 'Local fixture' });
 
-    await shell.getByRole('button', { name: 'Browser settings' }).click();
-    const settingsPanel = shell.getByRole('complementary', { name: 'Browser settings' });
+    await shell.getByRole('button', { name: 'Poppin settings' }).click();
+    const settingsPanel = shell.getByRole('complementary', { name: 'Poppin settings' });
     await expect.poll(() => settingsPanel.isVisible()).toBe(true);
     await shell.getByLabel('Links open in').selectOption('same-tab');
     await expect.poll(() => shell.evaluate(async () => (await window.poppinBrowser.getSnapshot()).settings.linkOpening)).toBe('same-tab');
-    await shell.getByRole('button', { name: 'Close browser settings' }).click();
+    await shell.getByRole('button', { name: 'Close Poppin settings' }).click();
     await application.evaluate(async ({ webContents }, prefix) => {
       const contents = webContents.getAllWebContents().find((candidate) => candidate.getURL().startsWith(prefix));
       await contents?.executeJavaScript("document.querySelector('#popup').click()");
@@ -194,10 +194,10 @@ describe('packaged browser workflow', () => {
     expect(await shell.getByRole('tab').count()).toBe(1);
     await address.fill(origin);
     await address.press('Enter');
-    await shell.getByRole('button', { name: 'Browser settings' }).click();
+    await shell.getByRole('button', { name: 'Poppin settings' }).click();
     await shell.getByLabel('Links open in').selectOption('follow-site');
     await expect.poll(() => shell.evaluate(async () => (await window.poppinBrowser.getSnapshot()).settings.linkOpening)).toBe('follow-site');
-    await shell.getByRole('button', { name: 'Close browser settings' }).click();
+    await shell.getByRole('button', { name: 'Close Poppin settings' }).click();
 
     await application.evaluate(async ({ webContents }, targetUrl) => {
       const contents = webContents.getAllWebContents().find((candidate) => candidate.getURL() === targetUrl);

@@ -18,8 +18,8 @@ It is not a general chat app or IDE. The centre browser is always the primary su
 | --- | --- |
 | Normal browsing | Sandboxed Chromium `WebContentsView` tabs, address/search, back/forward/reload, persistent session, native edit/page/tab menus, default-browser protocol registration, fullscreen, and stable favicons. |
 | Tab organization | Reorder, pin, duplicate, reopen closed tabs, named and color-coded groups, persistent settings, contiguous group ordering, colored group underlines, named/countable collapsed groups, direct rename, and group color selection. |
-| Workspace/context | One workspace; selected tabs, documents, and Tandem pages; exact frozen context preview; encrypted local Memory; optional localhost visual selection capture; connected project metadata. Tandem is the document/database source of truth. |
-| Tasks | One active Work or Code conversation via the installed Codex app-server and the user’s existing account. Follow-ups reuse the current Codex thread; Work results do not require approval before the next turn. Work does not require Git; Code requires a connected clean Git project. |
+| Workspace/context | One workspace; selected tabs, documents, and Tandem pages; exact frozen context preview; encrypted local Memory; optional localhost visual selection capture; connected project metadata. The compact Tandem picker keeps recent pages visible, collapses larger project/page lists, and leaves Tandem as the document/database source of truth. |
+| Tasks | One active Work or Code conversation via the installed Codex app-server and the user’s existing account. Its dedicated task tab retains every request and reply in the current thread; transient thinking/progress disappears when a turn finishes. “New task” explicitly closes the completed thread. Work does not require Git; Code requires a connected clean Git project. |
 | Controlled browsing | Browser-use Work tasks receive task-owned Agent Tabs in the existing persistent partition: a fresh exploration tab for browser-only work, or selected-context clones plus a fresh exploration tab for mixed work. Codex uses sanitized semantic snapshots and bounded batches, with pause/takeover, per-step logs, stale-ref rejection, and exact approval gates for critical actions. |
 | Results and delivery | Trusted centre-browser result page, copy/save/export/revise/approve actions, localhost preview, code diff, and reviewed Git/GitHub preparation actions. |
 
@@ -46,7 +46,8 @@ Preload bridge (src/preload/index.ts)
 Electron main process (src/main/index.ts)
         ├── BrowserEngine ── sandboxed WebContentsView tabs + JSON browser state
         ├── WorkspaceEngine ── SQLite workspace/context/project metadata
-        ├── TaskEngine ── active task, approvals, result/review/delivery state
+        ├── TaskEngine ── active task thread, turns, approvals, result/review/delivery state
+        ├── TandemEngine ── provider-selected Tandem REST capability + World URL
         ├── BrowserAgentEngine ── visible, task-scoped browser actions
         ├── CodexAppServer ── local installed Codex app-server JSON-RPC process
         ├── GitEngine / GitHubEngine ── argument-safe local Git and reviewed delivery
@@ -85,7 +86,7 @@ Electron main process (src/main/index.ts)
 
 | Data | Storage | Notes |
 | --- | --- | --- |
-| Browser tabs, groups, settings, active tab, window geometry | versioned JSON through `BrowserStateStore` | Current persisted format is version 2; task-owned tabs carry an optional task-space ID. |
+| Browser tabs, groups, settings, active tab, window geometry | versioned JSON through `BrowserStateStore` | Current persisted format is version 2; task-owned tabs carry an optional task-space ID and integration surfaces carry a typed surface marker. |
 | Active Agent Tabs ownership and lifecycle | versioned JSON through `BrowserAgentStateStore` | Version 2 records browser-only/mixed mode and context/exploration roles. Interrupted work restores paused and user-controlled; automation never resumes on launch. |
 | Workspace, documents, selected context, project metadata, task state | SQLite through `WorkspaceStore` and `TaskStore` | Stored under Electron user data. |
 | Browser cookies and login session | Electron partition `persist:poppin-browser` | Do not import sessions from another browser/app. |
@@ -107,7 +108,9 @@ These rules are non-negotiable:
 
 ## Key interaction details and recent regressions
 
-- Every task has a stable document identity independent of its replaceable Codex thread ID. The task's reply/review is rendered live in its dedicated tab, not persisted as a cross-task document; only the current task's result is available once a new task starts.
+- Every task has a stable document identity independent of its replaceable Codex thread ID. Each follow-up appends a user/reply turn to the same dedicated task tab. Live thinking/progress appears only on the running turn; completed turns remain readable until the user chooses **New task**, which ends and clears that current task thread. Task output is not persisted as a cross-task document.
+- Tandem is reached through the narrow `TandemProvider` boundary. The current provider hosts the remote app in a sandboxed, closable `tandem-world` browser surface and supplies the REST capability used by the agent. Neither the renderer nor `BrowserEngine` constructs a Tandem URL, and remote Tandem code receives no Poppin privilege.
+- Tandem address and API-key setup live in Poppin Settings. The workspace pane exposes only connection status, the World opener, and collapsible explicit-context lists; project execution settings are collapsed by default so they do not crowd out pages.
 - Tandem's exact GFM renderer formats headings, links, emphasis, lists, code, and tables. Poppin sanitizes the generated HTML at the native renderer boundary; HTTP(S) links open in normal Poppin tabs.
 - An ordinary Work result is complete when Codex finishes. Its Reply tab becomes available automatically, while the prompt bar immediately accepts a follow-up in the same conversation. Result approval remains a Code review gate, not a per-turn conversation gate.
 - Assistant streaming is kept per Codex message item. A progress/preamble message can never be concatenated into the final document result.

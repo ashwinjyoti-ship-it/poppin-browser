@@ -93,7 +93,7 @@ export function AgentDock({ taskSnapshot, browserAgentSnapshot, onTaskCommand, o
   if (['Completed', 'Failed', 'Cancelled'].includes(task.state)) {
     return (
       <button type="button" className={`agent-dock agent-dock-pill agent-dock-${slug(task.state)}`} onClick={onOpenTaskTab}>
-        {task.state === 'Completed' ? '✓ Done' : task.state === 'Failed' ? '! Failed' : 'Cancelled'}
+        {task.state === 'Completed' ? '✓ Task complete · View' : task.state === 'Failed' ? '! Task failed · View' : 'Task cancelled · View'}
       </button>
     );
   }

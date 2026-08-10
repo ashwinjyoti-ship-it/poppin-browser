@@ -19,6 +19,8 @@ export interface BrowserTabSnapshot {
   pinned: boolean;
   groupId: string | null;
   taskSpaceId?: string | null;
+  /** Dedicated hosted integration surface; ordinary remote pages omit this. */
+  surface?: 'tandem-world';
   isLoading: boolean;
   canGoBack: boolean;
   canGoForward: boolean;
@@ -114,6 +116,7 @@ export interface PersistedTabState {
   pinned?: boolean;
   groupId?: string | null;
   taskSpaceId?: string | null;
+  surface?: 'tandem-world';
 }
 
 export interface PersistedBrowserStateV1 {

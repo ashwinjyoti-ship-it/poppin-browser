@@ -143,7 +143,11 @@ async function createWindow(): Promise<void> {
         filters: [{ name: format === 'markdown' ? 'Markdown' : 'Text', extensions: [extension] }],
       });
       if (result.canceled || !result.filePath) return null;
-      await writeFile(result.filePath, task.result, 'utf8');
+      const turns = task.turns?.length ? task.turns : [{ prompt: task.prompt, result: task.result }];
+      const contents = turns.map((turn, index) => format === 'markdown'
+        ? `## Turn ${index + 1}\n\n**Request**\n\n${turn.prompt}\n\n**Reply**\n\n${turn.result}`
+        : `TURN ${index + 1}\nREQUEST\n${turn.prompt}\n\nREPLY\n${turn.result}`).join('\n\n---\n\n');
+      await writeFile(result.filePath, `${contents}\n`, 'utf8');
       return result.filePath;
     },
     getBrowserAgentSnapshot: () => browserAgentEngine?.getSnapshot() ?? {
@@ -157,7 +161,7 @@ async function createWindow(): Promise<void> {
     getTandemAvailability: () => tandemEngine?.getAvailability() ?? { available: false, writable: false },
     // Agents reach Tandem through its REST API, never by automating Tandem World.
     executeTandemCapability: async (args) => executeTandemCapability({
-      client: () => tandemEngine?.getClient() ?? null,
+      provider: () => tandemEngine?.getProvider() ?? null,
       workspaceId: () => tandemEngine?.getActiveWorkspaceId() ?? null,
       writable: () => tandemEngine?.getAvailability().writable ?? false,
       openInWorld: (pageId) => tandemEngine?.openWorldForPage(pageId),

@@ -85,6 +85,6 @@ describe('AgentDock', () => {
 
   it('shows a quiet completion pill once everything is resolved', () => {
     render(<AgentDock taskSnapshot={taskWith({ state: 'Completed' })} onTaskCommand={vi.fn()} onOpenTaskTab={vi.fn()} />);
-    expect(screen.getByRole('button', { name: /done/i })).toBeVisible();
+    expect(screen.getByRole('button', { name: /task complete · view/i })).toBeVisible();
   });
 });

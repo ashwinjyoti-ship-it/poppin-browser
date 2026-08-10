@@ -39,8 +39,9 @@ const EMPTY_TASK: TaskSnapshot = { connection: { state: 'checking', message: 'Co
 const EMPTY_BROWSER_AGENT: BrowserAgentSnapshot = { state: 'idle', taskId: null, taskSpace: null, watching: false, allowedTabIds: [], activeTabId: null, currentAction: null, pendingApproval: null, log: [] };
 const EMPTY_PAGES: PagesSnapshot = { pages: [], tabs: [], activeTabId: null, selectedPageIds: [] };
 const TASK_TAB_ID = 'task-reply';
-/** Fixed reserved height for the dock's chrome strip, above the command bar. Not measured — its content is small and bounded. */
-const AGENT_DOCK_RESERVED_HEIGHT = 84;
+/** Bounded dock reservations: compact status pill versus approval/control card. */
+const AGENT_DOCK_PILL_HEIGHT = 48;
+const AGENT_DOCK_CARD_HEIGHT = 126;
 
 export function App() {
   const [snapshot, setSnapshot] = useState<BrowserSnapshot>(EMPTY_SNAPSHOT);
@@ -73,7 +74,7 @@ export function App() {
   // to gate on, so their tab is simply always there.
   const showTaskTab = Boolean(taskSnapshot.task) && (!hasBrowserTaskSpace || browserAgentSnapshot.watching || taskTabActive);
   const visibleTabs = [
-    ...browserTabs.map((tab) => ({ ...tab, kind: 'browser' as const })),
+    ...browserTabs.map((tab) => ({ ...tab, kind: tab.surface === 'tandem-world' ? 'tandem' as const : 'browser' as const })),
     ...(showTaskTab && taskSnapshot.task ? [{
       id: TASK_TAB_ID,
       title: taskSnapshot.task.kind === 'code' ? 'Review' : 'Reply',
@@ -89,12 +90,19 @@ export function App() {
   const chromeLayout = getChromeLayout(viewport.width, viewport.height);
   const leftPaneWidth = normalizeLeftPaneWidth(preferredLeftPaneWidth, viewport.width);
   const showAgentDock = !commandCollapsed && Boolean(taskSnapshot.task);
+  const agentDockHeight = showAgentDock
+    ? (taskSnapshot.task?.pendingApproval
+      || browserAgentSnapshot.pendingApproval
+      || browserAgentSnapshot.taskSpace?.status === 'user-controlling'
+      || ['completed', 'stopped'].includes(browserAgentSnapshot.state)
+      ? AGENT_DOCK_CARD_HEIGHT : AGENT_DOCK_PILL_HEIGHT)
+    : 0;
   const paneStyle = {
     '--chrome-height': `${chromeLayout.height}px`,
     '--titlebar-left-inset': `${getTitlebarLeftInset(chromeLayout.density, snapshot.isFullScreen)}px`,
     '--workspace-pane-width': `${leftPaneWidth}px`,
     '--command-overlay-height': `${commandOverlayHeight}px`,
-    '--agent-dock-height': `${showAgentDock ? AGENT_DOCK_RESERVED_HEIGHT : 0}px`,
+    '--agent-dock-height': `${agentDockHeight}px`,
   } as CSSProperties;
   const attentionKey = taskAttentionKey(taskSnapshot) || browserApprovalAttentionKey(browserAgentSnapshot) || null;
   const [seenAttentionKey, setSeenAttentionKey] = useState<string | null>(null);
@@ -187,10 +195,10 @@ export function App() {
       type: 'setLayout',
       topInset: chromeLayout.height,
       leftInset: workspaceCollapsed ? 46 : leftPaneWidth + 14,
-      rightInset: settingsOpen ? 350 : 24,
-      bottomInset: commandCollapsed ? 0 : 94 + commandOverlayHeight + (showAgentDock ? AGENT_DOCK_RESERVED_HEIGHT : 0),
+      rightInset: settingsOpen ? 390 : 24,
+      bottomInset: commandCollapsed ? 0 : 94 + commandOverlayHeight + agentDockHeight,
     });
-  }, [chromeLayout.height, commandCollapsed, commandOverlayHeight, leftPaneWidth, settingsOpen, showAgentDock, workspaceCollapsed]);
+  }, [agentDockHeight, chromeLayout.height, commandCollapsed, commandOverlayHeight, leftPaneWidth, settingsOpen, workspaceCollapsed]);
 
   const resizeLeftPane = (requestedWidth: number) => {
     setPreferredLeftPaneWidth(clampResizedLeftPaneWidth(requestedWidth, viewport.width));
@@ -234,6 +242,12 @@ export function App() {
   const sendTandemCommand = async (command: TandemCommand): Promise<string | null> => {
     try {
       const result = await window.poppinTandem.command(command);
+      if (result.ok && command.type === 'openWorld') {
+        setTaskTabActive(false);
+        setWorkspaceCollapsed(true);
+        setSettingsOpen(false);
+        void window.poppinPages.command({ type: 'deactivateTabs' });
+      }
       return result.ok ? null : result.message ?? 'Poppin could not complete that Tandem action.';
     } catch {
       return 'Poppin could not reach Tandem.';
@@ -250,7 +264,9 @@ export function App() {
 
   const sendTaskCommand = async (command: TaskCommand): Promise<TaskCommandResult> => {
     try {
-      return await window.poppinTask.command(command);
+      const result = await window.poppinTask.command(command);
+      if (result.ok && command.type === 'finishTask') setTaskTabActive(false);
+      return result;
     } catch {
       return { ok: false, message: 'Poppin could not reach Codex.' };
     }
@@ -287,6 +303,7 @@ export function App() {
             address={address}
             addressError={addressError}
             settings={snapshot.settings}
+            tandem={tandemSnapshot}
             settingsOpen={settingsOpen}
             canReopenClosedTab={snapshot.canReopenClosedTab}
             addressInputRef={addressInputRef}
@@ -307,6 +324,7 @@ export function App() {
             onReopenClosedTab={() => void sendCommand({ type: 'reopenClosedTab' })}
             onSettingsOpenChange={setSettingsOpen}
             onUpdateSettings={(settings) => void sendCommand({ type: 'updateSettings', settings })}
+            onTandemCommand={sendTandemCommand}
             onSubmit={submitAddress}
           />
         </div>
@@ -327,6 +345,7 @@ export function App() {
               return;
             }
             const tab = snapshot.tabs.find((candidate) => candidate.id === tabId);
+            if (tab?.surface === 'tandem-world') setWorkspaceCollapsed(true);
             if (browserAgentSnapshot.watching && !tab?.taskSpaceId) void sendBrowserAgentCommand({ type: 'leaveWatch' });
             void sendPagesCommand({ type: 'deactivateTabs' });
             void sendCommand({ type: 'activate', tabId });
@@ -334,6 +353,7 @@ export function App() {
           onClose={(tabId) => {
             if (tabId === TASK_TAB_ID) { setTaskTabActive(false); return; }
             if (pagesSnapshot.tabs.some((tab) => tab.id === tabId)) void sendPagesCommand({ type: 'closeTab', tabId });
+            else if (snapshot.tabs.find((tab) => tab.id === tabId)?.surface === 'tandem-world') void sendTandemCommand({ type: 'closeWorld' });
             else void sendCommand({ type: 'close', tabId });
           }}
           onCreate={() => { void sendPagesCommand({ type: 'deactivateTabs' }); void sendCommand({ type: 'create' }); }}
@@ -348,8 +368,6 @@ export function App() {
           tandemReady={tandemSnapshot.connection.state === 'ready'}
           tandemMessage={tandemSnapshot.connection.message}
           onOpenTandemWorld={() => {
-            setTaskTabActive(false);
-            void sendPagesCommand({ type: 'deactivateTabs' });
             void sendTandemCommand({ type: 'openWorld' });
           }}
         />
@@ -371,6 +389,7 @@ export function App() {
         onClearVisualSelection={() => { void sendWorkspaceCommand({ type: 'clearVisualSelection' }); }}
         tandem={tandemSnapshot}
         onTandemCommand={sendTandemCommand}
+        onOpenSettings={() => setSettingsOpen(true)}
       />
       {!workspaceCollapsed ? (
         <PaneResizer

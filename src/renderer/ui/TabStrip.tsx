@@ -28,7 +28,7 @@ interface TabStripProps {
 export interface TabStripTabSnapshot {
   id: string;
   title: string;
-  kind?: 'browser' | 'page' | 'database' | 'task';
+  kind?: 'browser' | 'page' | 'database' | 'task' | 'tandem';
   /** Picks the task tab's icon: a reply bubble for Work, a diff mark for Code. */
   taskKind?: 'work' | 'code';
   faviconUrls?: string[];
@@ -74,6 +74,7 @@ export function TabStrip({
   const ordinaryTabs = tabs.filter((tab) => !tab.taskSpaceId && tab.kind !== 'task');
   const agentOwnedTabs = tabs.filter((tab) => tab.taskSpaceId || tab.kind === 'task');
   const showAgentCluster = Boolean(agentTaskSpace) || agentOwnedTabs.length > 0;
+  const hasTandemWorldTab = ordinaryTabs.some((tab) => tab.kind === 'tandem');
 
   const startRename = (group: BrowserTabGroup) => {
     cancelRenameRef.current = false;
@@ -127,7 +128,7 @@ export function TabStrip({
         </span>
         {tab.pinned ? null : <span className="tab-title">{tab.title || 'Untitled'}</span>}
         {tab.isLoading ? <span className="tab-loading" aria-label="Loading" /> : null}
-        {tab.kind !== 'task' && (tab.pinned || tab.taskSpaceId) ? null : (
+        {tab.kind !== 'task' && tab.kind !== 'tandem' && (tab.pinned || tab.taskSpaceId) ? null : (
           <button
             className="tab-close"
             type="button"
@@ -157,7 +158,7 @@ export function TabStrip({
         onDragOver={(event) => event.preventDefault()}
         onDrop={(event) => dropTab(event, null, onReorder)}
       >
-        {onOpenTandemWorld ? (
+        {onOpenTandemWorld && !hasTandemWorldTab ? (
           <button
             type="button"
             className="tab tab-tandem-world"
@@ -286,6 +287,7 @@ function TabFavicon({ tab }: { tab: TabStripTabSnapshot }) {
 
   if (tab.kind === 'page') return <FileText size={15} />;
   if (tab.kind === 'database') return <Database size={15} />;
+  if (tab.kind === 'tandem') return <BookOpenText size={15} />;
   if (tab.kind === 'task') return tab.taskKind === 'code' ? <FileDiff size={15} /> : <MessageSquareText size={15} />;
   if (tab.failure) return <TriangleAlert size={15} className="tab-failure-icon" />;
   const source = tab.faviconUrls?.[candidateIndex];

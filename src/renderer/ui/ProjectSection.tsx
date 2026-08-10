@@ -75,12 +75,15 @@ function ConnectedProject({ project, busy, onSave }: ConnectedProjectProps) {
         <span title={project.repositoryPath}>{project.repositoryPath}</span>
         <dl><dt>Branch</dt><dd>{project.branch}</dd><dt>Remote</dt><dd>{project.remote ?? 'No origin remote'}</dd></dl>
       </div>
-      <form className="project-settings" onSubmit={save}>
-        <label>Install command<input value={settings.installCommand} placeholder="npm install" onChange={(event) => setSettings((current) => ({ ...current, installCommand: event.target.value }))} /></label>
-        <label>Dev command<input value={settings.devCommand} placeholder="npm run dev" onChange={(event) => setSettings((current) => ({ ...current, devCommand: event.target.value }))} /></label>
-        <label>Preview URL<input value={settings.previewUrl} placeholder="http://localhost:3000" onChange={(event) => setSettings((current) => ({ ...current, previewUrl: event.target.value }))} /></label>
-        <button type="submit" className="secondary-button" disabled={busy}>Save project settings</button>
-      </form>
+      <details className="project-settings-disclosure">
+        <summary>Project settings</summary>
+        <form className="project-settings" onSubmit={save}>
+          <label>Install command<input value={settings.installCommand} placeholder="npm install" onChange={(event) => setSettings((current) => ({ ...current, installCommand: event.target.value }))} /></label>
+          <label>Dev command<input value={settings.devCommand} placeholder="npm run dev" onChange={(event) => setSettings((current) => ({ ...current, devCommand: event.target.value }))} /></label>
+          <label>Preview URL<input value={settings.previewUrl} placeholder="http://localhost:3000" onChange={(event) => setSettings((current) => ({ ...current, previewUrl: event.target.value }))} /></label>
+          <button type="submit" className="secondary-button" disabled={busy}>Save project settings</button>
+        </form>
+      </details>
     </>
   );
 }

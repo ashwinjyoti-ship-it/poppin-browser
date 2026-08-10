@@ -1,4 +1,5 @@
-import type { TandemPageKind, TandemPageSnapshot, TandemWorkspaceSnapshot } from '../../shared/tandem';
+import { tandemWorldUrl, type TandemPageKind, type TandemPageSnapshot, type TandemWorkspaceSnapshot } from '../../shared/tandem';
+import type { TandemProvider } from './tandem-provider';
 
 /**
  * Thin REST client for the Tandem application (`unified-doc-management`).
@@ -30,12 +31,18 @@ export class TandemApiError extends Error {
   }
 }
 
-export class TandemClient {
+export class TandemClient implements TandemProvider {
+  readonly id = 'tandem' as const;
+
   constructor(
     private readonly baseUrl: string,
     private readonly apiKey: string,
     private readonly fetchImpl: typeof fetch = fetch,
   ) {}
+
+  worldUrl(pageId?: string): string {
+    return tandemWorldUrl(this.baseUrl, pageId);
+  }
 
   /** Tandem's own capability catalog. Used to confirm the API surface is live. */
   async catalog(): Promise<Record<string, unknown>> {
