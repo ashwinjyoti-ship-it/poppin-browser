@@ -98,8 +98,8 @@ describe('AcpAgentAdapter', () => {
       clientCapabilities: { fs: { readTextFile: true, writeTextFile: true }, terminal: false },
       clientInfo: { name: 'poppin-browser' },
     });
-    // Without session configOptions, Poppin keeps a neutral default and hides selectors.
-    expect(info.controls).toEqual({ model: false, reasoning: false });
+    // Without session configOptions, Poppin still exposes the agent default model.
+    expect(info.controls).toEqual({ model: true, reasoning: false });
     expect(info.models).toHaveLength(1);
     // Without an MCP bridge, Poppin must not promise Browser/Tandem tools.
     expect(info.capabilities.clientTools).toBe(false);

@@ -1,15 +1,15 @@
-import { ArrowLeft, ArrowRight, BookOpenText, ChevronDown, LockKeyhole, RefreshCw, RotateCcw, Search, Settings2, Unplug, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, BookOpenText, LockKeyhole, RefreshCw, RotateCcw, Search, Settings2, Unplug, X } from 'lucide-react';
 import { type FormEvent, type ReactNode, type RefObject, useEffect, useMemo, useRef, useState } from 'react';
 
-import type { BrowserSettings, BrowserTabSnapshot } from '../../shared/browser';
+import type { BrowserEnteredUrl, BrowserSettings, BrowserTabSnapshot } from '../../shared/browser';
 import type { ContinuityCommand, ContinuitySnapshot } from '../../shared/continuity';
 import type { TandemSnapshot } from '../../shared/tandem';
 import type { TandemSettingsCommand } from '../../shared/settings-overlay';
-import { previousHistoryEntries, suggestSessionUrls } from './url-recall';
+import { previousHistoryEntries, suggestEnteredUrls } from './url-recall';
 
 interface BrowserToolbarProps {
   activeTab: BrowserTabSnapshot | null;
-  tabs?: BrowserTabSnapshot[];
+  enteredUrls?: BrowserEnteredUrl[];
   address: string;
   addressError: string;
   settingsOpen: boolean;
@@ -34,9 +34,11 @@ interface BrowserToolbarProps {
   downloadsSlot?: ReactNode;
 }
 
+const BACK_LONG_PRESS_MS = 450;
+
 export function BrowserToolbar({
   activeTab,
-  tabs = [],
+  enteredUrls = [],
   address,
   addressError,
   settingsOpen,
@@ -59,10 +61,12 @@ export function BrowserToolbar({
   const [backMenuOpen, setBackMenuOpen] = useState(false);
   const [suggestionsOpen, setSuggestionsOpen] = useState(false);
   const backMenuRef = useRef<HTMLDivElement>(null);
+  const backLongPressRef = useRef(false);
+  const backPressTimerRef = useRef<number | null>(null);
   const previousEntries = useMemo(() => previousHistoryEntries(activeTab), [activeTab]);
   const suggestions = useMemo(
-    () => (suggestionsOpen ? suggestSessionUrls(address, activeTab, tabs) : []),
-    [activeTab, address, suggestionsOpen, tabs],
+    () => (suggestionsOpen ? suggestEnteredUrls(address, enteredUrls) : []),
+    [address, enteredUrls, suggestionsOpen],
   );
 
   useEffect(() => {
@@ -78,22 +82,46 @@ export function BrowserToolbar({
     return () => window.removeEventListener('mousedown', onPointerDown);
   }, [backMenuOpen]);
 
+  const clearBackPressTimer = () => {
+    if (backPressTimerRef.current !== null) {
+      window.clearTimeout(backPressTimerRef.current);
+      backPressTimerRef.current = null;
+    }
+  };
+
   return (
     <div className="toolbar-controls">
       <div className="navigation-buttons">
         <div className="back-control" ref={backMenuRef}>
-          <button type="button" aria-label="Go back" disabled={!activeTab?.canGoBack} onClick={onBack}>
-            <ArrowLeft size={20} strokeWidth={1.8} />
-          </button>
           <button
             type="button"
-            className="back-history-toggle"
-            aria-label="Show previous sites"
+            aria-label="Go back"
             aria-expanded={backMenuOpen}
-            disabled={previousEntries.length === 0}
-            onClick={() => setBackMenuOpen((open) => !open)}
+            disabled={!activeTab?.canGoBack && previousEntries.length === 0}
+            onPointerDown={() => {
+              backLongPressRef.current = false;
+              clearBackPressTimer();
+              if (previousEntries.length === 0) return;
+              backPressTimerRef.current = window.setTimeout(() => {
+                backLongPressRef.current = true;
+                setBackMenuOpen(true);
+              }, BACK_LONG_PRESS_MS);
+            }}
+            onPointerUp={clearBackPressTimer}
+            onPointerLeave={clearBackPressTimer}
+            onClick={() => {
+              if (backLongPressRef.current) {
+                backLongPressRef.current = false;
+                return;
+              }
+              if (backMenuOpen) {
+                setBackMenuOpen(false);
+                return;
+              }
+              onBack();
+            }}
           >
-            <ChevronDown size={12} strokeWidth={2} />
+            <ArrowLeft size={20} strokeWidth={1.8} />
           </button>
           {backMenuOpen && previousEntries.length > 0 ? (
             <ul className="back-history-menu" role="listbox" aria-label="Previous sites in this tab">
@@ -155,6 +183,8 @@ export function BrowserToolbar({
           aria-invalid={Boolean(addressError)}
           aria-autocomplete="list"
           aria-expanded={suggestionsOpen && suggestions.length > 0}
+          autoComplete="off"
+          name="poppin-address"
           placeholder="Search or enter address"
           autoCapitalize="off"
           autoCorrect="off"
@@ -163,9 +193,9 @@ export function BrowserToolbar({
         {activeTab?.isLoading ? <span className="address-progress" /> : null}
         {addressError ? <span className="address-error" role="alert">{addressError}</span> : null}
         {suggestionsOpen && suggestions.length > 0 ? (
-          <ul className="address-suggestions" role="listbox" aria-label="Visited URLs">
+          <ul className="address-suggestions" role="listbox" aria-label="Previously entered addresses">
             {suggestions.map((suggestion) => (
-              <li key={`${suggestion.source}-${suggestion.url}`}>
+              <li key={suggestion.url}>
                 <button
                   type="button"
                   role="option"

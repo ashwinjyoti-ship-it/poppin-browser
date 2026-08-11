@@ -264,6 +264,9 @@ export class TaskEngine {
     if (this.task && ['Running', 'Needs Approval'].includes(this.task.state)) {
       return { ok: false, message: 'Finish or cancel the current task before switching agent.' };
     }
+    if (this.task && ['Completed', 'Failed', 'Cancelled'].includes(this.task.state)) {
+      await this.finishTask();
+    }
     if (agentId === this.agentId && this.connection.state === 'ready') return { ok: true };
     this.agentId = agentId;
     this.store.setSelectedAgentId(agentId);

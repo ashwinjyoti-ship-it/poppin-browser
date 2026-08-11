@@ -1,21 +1,20 @@
-import type { BrowserHistoryEntry, BrowserTabSnapshot } from '../../shared/browser';
+import type { BrowserEnteredUrl, BrowserHistoryEntry, BrowserTabSnapshot } from '../../shared/browser';
 
 const INTERNAL_PREFIXES = ['poppin://', 'about:', 'chrome://', 'devtools://'];
 
 export interface UrlSuggestion {
   url: string;
   title: string;
-  source: 'history' | 'tab';
+  source: 'entered';
 }
 
 /**
- * Suggest URLs already visited in this Poppin session (tab history + open tabs)
- * while the user types in the address bar.
+ * Suggest URLs the user previously entered in the address bar this session.
+ * Matches typed prefixes against titles, full URLs, and hostnames (e.g. `you` → YouTube).
  */
-export function suggestSessionUrls(
+export function suggestEnteredUrls(
   query: string,
-  activeTab: BrowserTabSnapshot | null,
-  tabs: BrowserTabSnapshot[],
+  enteredUrls: BrowserEnteredUrl[],
   limit = 8,
 ): UrlSuggestion[] {
   const normalized = query.trim().toLowerCase();
@@ -24,27 +23,14 @@ export function suggestSessionUrls(
   const seen = new Set<string>();
   const results: UrlSuggestion[] = [];
 
-  const consider = (url: string, title: string, source: UrlSuggestion['source']) => {
-    if (!url || INTERNAL_PREFIXES.some((prefix) => url.startsWith(prefix))) return;
-    const key = url.toLowerCase();
-    if (seen.has(key)) return;
-    const haystack = `${title} ${url}`.toLowerCase();
-    if (!haystack.includes(normalized)) return;
+  for (const entry of enteredUrls) {
+    if (!entry.url || INTERNAL_PREFIXES.some((prefix) => entry.url.startsWith(prefix))) continue;
+    const key = entry.url.toLowerCase();
+    if (seen.has(key)) continue;
+    if (!matchesEnteredQuery(normalized, entry.url, entry.title)) continue;
     seen.add(key);
-    results.push({ url, title: title || url, source });
-  };
-
-  for (const entry of activeTab?.history ?? []) {
-    consider(entry.url, entry.title, 'history');
+    results.push({ url: entry.url, title: entry.title || entry.url, source: 'entered' });
     if (results.length >= limit) return results;
-  }
-
-  for (const tab of tabs) {
-    consider(tab.url, tab.title, 'tab');
-    for (const entry of tab.history) {
-      consider(entry.url, entry.title, 'history');
-      if (results.length >= limit) return results;
-    }
   }
 
   return results;
@@ -57,4 +43,18 @@ export function previousHistoryEntries(tab: BrowserTabSnapshot | null): BrowserH
     .filter((entry) => entry.index < tab.historyIndex)
     .slice()
     .reverse();
+}
+
+function matchesEnteredQuery(query: string, url: string, title: string): boolean {
+  const q = query.toLowerCase();
+  if (title.toLowerCase().startsWith(q)) return true;
+  try {
+    const host = new URL(url).hostname.replace(/^www\./u, '').toLowerCase();
+    const domain = host.split('.')[0] ?? host;
+    if (domain.startsWith(q)) return true;
+    if (q.length >= 3 && (domain.includes(q) || host.includes(q))) return true;
+  } catch {
+    // ignore malformed URLs
+  }
+  return false;
 }

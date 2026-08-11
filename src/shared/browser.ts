@@ -18,6 +18,12 @@ export interface BrowserHistoryEntry {
   title: string;
 }
 
+/** A URL submitted through the address bar during this browser session. */
+export interface BrowserEnteredUrl {
+  url: string;
+  title: string;
+}
+
 export interface BrowserTabSnapshot {
   id: string;
   url: string;
@@ -98,6 +104,8 @@ export interface BrowserSnapshot {
   isFullScreen: boolean;
   canReopenClosedTab: boolean;
   settings: BrowserSettings;
+  /** URLs entered in the address bar this session (newest first). */
+  enteredUrls: BrowserEnteredUrl[];
   authenticationPopup: { title: string; url: string } | null;
   linkPreview: { title: string; url: string } | null;
   /** Dual live-page layout; null when only one centre surface is shown. */

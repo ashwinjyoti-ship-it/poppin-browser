@@ -45,7 +45,7 @@ interface PendingRequest {
 export class AcpConnection extends EventEmitter<AcpConnectionEvents> {
   private child: ChildProcessWithoutNullStreams | null = null;
   private nextRequestId = 1;
-  private readonly pending = new Map<number, PendingRequest>();
+  private readonly pending = new Map<number | string, PendingRequest>();
   private stderr = '';
   private closing = false;
 
@@ -148,10 +148,11 @@ export class AcpConnection extends EventEmitter<AcpConnectionEvents> {
       return;
     }
     if (!isRecord(message)) return;
-    if (typeof message.id === 'number' && (message.result !== undefined || message.error !== undefined)) {
-      const pending = this.pending.get(message.id);
+    const responseId = typeof message.id === 'number' || typeof message.id === 'string' ? message.id : null;
+    if (responseId !== null && (message.result !== undefined || message.error !== undefined)) {
+      const pending = this.pending.get(responseId);
       if (!pending) return;
-      this.pending.delete(message.id);
+      this.pending.delete(responseId);
       clearTimeout(pending.timeout);
       if (message.error !== undefined) pending.reject(new Error(errorMessage(message.error)));
       else pending.resolve(message.result);

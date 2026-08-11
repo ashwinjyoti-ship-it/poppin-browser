@@ -100,6 +100,8 @@ export class BrowserEngine {
 
   /** Optional workspace hook so tab menus can save a session via a dialog-free flow. */
   private saveSessionRequested: (() => void) | null = null;
+  /** Address-bar submissions this session, newest first. */
+  private enteredUrls: Array<{ url: string; title: string }> = [];
 
   setSaveSessionHandler(handler: (() => void) | null): void {
     this.saveSessionRequested = handler;
@@ -182,6 +184,7 @@ export class BrowserEngine {
       isFullScreen: this.window.isFullScreen(),
       canReopenClosedTab: this.closedTabs.length > 0,
       settings: { ...this.settings },
+      enteredUrls: this.enteredUrls.map((entry) => ({ ...entry })),
       authenticationPopup: this.authenticationWindow && !this.authenticationWindow.isDestroyed() && this.overlayKind === 'authentication' ? {
         title: this.authenticationWindow.getTitle() || 'Secure sign-in',
         url: this.authenticationWindow.webContents.getURL(),
@@ -1126,7 +1129,22 @@ export class BrowserEngine {
         : {}),
     });
     if (tab.snapshot.surface === 'tandem-world' && !isNewTab) this.applyTandemHostTheme(tab);
+    if (!isNewTab) this.touchEnteredUrlTitle(remembered, tab.snapshot.title);
     this.scheduleSave();
+  }
+
+  private recordEnteredUrl(url: string, title = ''): void {
+    const key = url.toLowerCase();
+    this.enteredUrls = [
+      { url, title: title || url },
+      ...this.enteredUrls.filter((entry) => entry.url.toLowerCase() !== key),
+    ].slice(0, 100);
+  }
+
+  private touchEnteredUrlTitle(url: string, title: string): void {
+    const key = url.toLowerCase();
+    const entry = this.enteredUrls.find((candidate) => candidate.url.toLowerCase() === key);
+    if (entry && title && title !== 'New Tab') entry.title = title;
   }
 
   /** Keep Tandem's Poppin amber theme even when its SPA drops `?host=poppin`. */
@@ -1226,6 +1244,7 @@ export class BrowserEngine {
     const normalized = normalizeAddressInput(input, this.settings.searchEngine);
     if (normalized.kind === 'invalid') return { ok: false, message: normalized.message };
     tab.snapshot.failure = null;
+    if (normalized.kind === 'url') this.recordEnteredUrl(normalized.url, tab.snapshot.title);
     // A page can intentionally replace or redirect its initial navigation. Electron
     // rejects the superseded loadURL promise with ERR_ABORTED even when the final
     // page succeeds, so command acceptance must not be treated as load completion.

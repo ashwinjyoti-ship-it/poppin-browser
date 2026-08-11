@@ -40,7 +40,14 @@ export function CommandBar({ snapshot, workspace, collapsed, onCollapseChange, o
   const controls = snapshot.connection.controls ?? { model: true, reasoning: true };
   const canSend = canContinue
     ? Boolean(prompt.trim() && !sending && !isBlocking && snapshot.connection.state === 'ready')
-    : Boolean(prompt.trim() && selectedModelId && selectedEffort && !sending && !isBlocking && snapshot.connection.state === 'ready');
+    : Boolean(
+      prompt.trim()
+      && selectedModelId
+      && (!controls.reasoning || selectedEffort)
+      && !sending
+      && !isBlocking
+      && snapshot.connection.state === 'ready',
+    );
 
   useLayoutEffect(() => {
     if (!preflight && !browserQuestion) {

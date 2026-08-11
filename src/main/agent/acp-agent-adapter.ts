@@ -159,32 +159,36 @@ export class AcpAgentAdapter extends EventEmitter<AgentAdapterEvents> implements
     const authMethods = Array.isArray(response.authMethods) ? response.authMethods : [];
     if (authMethods.length > 0) {
       const methodId = authMethods[0]?.id;
-      if (!methodId) {
-        throw new AgentSignedOutError(`${this.descriptor.name} requires sign-in, but offered no auth method.`);
-      }
-      try {
-        await connection.request(ACP_METHODS.authenticate, { methodId }, 60_000);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : `Sign in to ${this.descriptor.name} failed.`;
-        throw new AgentSignedOutError(`${message} Sign in to the agent (for Cursor: \`agent login\`), then reconnect.`);
+      if (methodId) {
+        try {
+          await connection.request(ACP_METHODS.authenticate, { methodId }, 60_000);
+        } catch {
+          // Some agents require interactive sign-in at task time; keep the
+          // connection alive so model discovery and harness switching still work.
+        }
       }
     }
 
     await this.discoverSessionControls(connection);
 
+    const fallbackModels = this.discoveredModels.length > 0
+      ? this.discoveredModels
+      : [{
+          id: AGENT_DEFAULT_MODEL_ID,
+          name: `${this.agentLabel ?? this.descriptor.name} default`,
+          description: 'The model configured inside the selected ACP agent.',
+          reasoningEfforts: [AGENT_DEFAULT_EFFORT],
+          defaultReasoningEffort: AGENT_DEFAULT_EFFORT,
+          isDefault: true,
+        }];
+    const controls = this.discoveredModels.length > 0
+      ? this.discoveredControls
+      : { model: true, reasoning: false };
+
     return {
       accountLabel: this.agentLabel ? `${this.agentLabel} over ACP` : `${this.descriptor.name} over ACP`,
-      models: this.discoveredModels.length > 0
-        ? this.discoveredModels
-        : [{
-            id: AGENT_DEFAULT_MODEL_ID,
-            name: `${this.agentLabel ?? this.descriptor.name} default`,
-            description: 'The model configured inside the selected ACP agent.',
-            reasoningEfforts: [AGENT_DEFAULT_EFFORT],
-            defaultReasoningEffort: AGENT_DEFAULT_EFFORT,
-            isDefault: true,
-          }],
-      controls: this.discoveredControls,
+      models: fallbackModels,
+      controls,
       capabilities: {
         // Capability tools reach ACP agents only through Poppin's MCP bridge.
         clientTools: this.options.mcpBridgeAvailable?.() === true,

@@ -35,6 +35,7 @@ import {
 const EMPTY_SNAPSHOT: BrowserSnapshot = {
   tabs: [], groups: [], activeTabId: '', isFullScreen: false, canReopenClosedTab: false,
   settings: { ...DEFAULT_BROWSER_SETTINGS },
+  enteredUrls: [],
   authenticationPopup: null,
   linkPreview: null,
   split: null,
@@ -373,7 +374,7 @@ export function App() {
           <Brand />
           <BrowserToolbar
             activeTab={activeTab}
-            tabs={snapshot.tabs}
+            enteredUrls={snapshot.enteredUrls}
             address={address}
             addressError={addressError}
             settingsOpen={settingsOpen}

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { BrowserTabSnapshot } from '../src/shared/browser';
-import { previousHistoryEntries, suggestSessionUrls } from '../src/renderer/ui/url-recall';
+import { previousHistoryEntries, suggestEnteredUrls } from '../src/renderer/ui/url-recall';
 
 const tab = (overrides: Partial<BrowserTabSnapshot>): BrowserTabSnapshot => ({
   id: 'tab',
@@ -23,17 +23,19 @@ const tab = (overrides: Partial<BrowserTabSnapshot>): BrowserTabSnapshot => ({
 });
 
 describe('url recall', () => {
-  it('suggests previously visited session URLs while typing', () => {
-    const active = tab({});
-    const other = tab({
-      id: 'other',
-      url: 'https://docs.poppin.test/guide',
-      title: 'Poppin Guide',
-      historyIndex: 0,
-      history: [{ index: 0, url: 'https://docs.poppin.test/guide', title: 'Poppin Guide' }],
-    });
-    expect(suggestSessionUrls('news', active, [active, other]).map((item) => item.url)).toEqual(['https://news.example/']);
-    expect(suggestSessionUrls('poppin', active, [active, other]).map((item) => item.url)).toEqual(['https://docs.poppin.test/guide']);
+  it('suggests previously entered addresses while typing', () => {
+    const entered = [
+      { url: 'https://mail.google.com/', title: 'Gmail' },
+      { url: 'https://www.youtube.com/', title: 'YouTube' },
+      { url: 'https://outlook.live.com/', title: 'Outlook' },
+    ];
+    expect(suggestEnteredUrls('gm', entered).map((item) => item.url)).toEqual(['https://mail.google.com/']);
+    expect(suggestEnteredUrls('you', entered).map((item) => item.url)).toEqual(['https://www.youtube.com/']);
+    expect(suggestEnteredUrls('ou', entered).map((item) => item.url)).toEqual(['https://outlook.live.com/']);
+  });
+
+  it('does not suggest anything when no addresses were entered', () => {
+    expect(suggestEnteredUrls('news', [])).toEqual([]);
   });
 
   it('lists earlier sites for the back-history menu', () => {
