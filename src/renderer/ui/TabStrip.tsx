@@ -141,6 +141,7 @@ export function TabStrip({
             className="tab-close"
             type="button"
             aria-label={`Close ${tab.title || 'tab'}`}
+            title="Close tab"
             onClick={(event) => { event.stopPropagation(); onClose(tab.id); }}
             onKeyDown={(event) => {
               if (event.key === 'Enter' || event.key === ' ') {
@@ -203,7 +204,7 @@ export function TabStrip({
           ];
         })}
         {/* Keep + beside the last ordinary tab; do not dock it at the viewport edge. */}
-        <button className="new-tab-button" type="button" aria-label="New tab" onClick={onCreate}>
+        <button className="new-tab-button" type="button" aria-label="New tab" title="New tab" onClick={onCreate}>
           <Plus size={18} />
         </button>
       </div>

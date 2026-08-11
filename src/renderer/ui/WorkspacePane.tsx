@@ -66,7 +66,7 @@ export function WorkspacePane({
   if (collapsed) {
     return (
       <aside className="side-rail side-rail-left" aria-label="Workspace collapsed">
-        <button type="button" className="pane-toggle" onClick={() => onCollapseChange(false)} aria-label="Open workspace">
+        <button type="button" className="pane-toggle" onClick={() => onCollapseChange(false)} aria-label="Open workspace" title="Open workspace">
           <ChevronRight size={17} />
         </button>
         <Layers3 size={17} aria-hidden="true" />
@@ -81,7 +81,7 @@ export function WorkspacePane({
           <span className="eyebrow">Workspace</span>
           <h2>{snapshot.workspace?.name ?? 'Create your workspace'}</h2>
         </div>
-        <button type="button" className="pane-toggle" onClick={() => onCollapseChange(true)} aria-label="Collapse workspace">
+        <button type="button" className="pane-toggle" onClick={() => onCollapseChange(true)} aria-label="Collapse workspace" title="Collapse workspace">
           <ChevronLeft size={17} />
         </button>
       </div>
@@ -109,7 +109,7 @@ export function WorkspacePane({
                       <input type="checkbox" checked={Boolean(context)} disabled={!selectable} onChange={(event) => { void onCommand({ type: 'setTabSelected', tabId: tab.id, selected: event.target.checked }); }} />
                       <Globe2 size={14} />
                       <span>{tab.title}</span>
-                      {context ? <button type="button" className="context-refresh" onClick={() => onRefreshTab(tab.id)} aria-label={`Refresh ${tab.title} context`}><RefreshCw size={12} /></button> : null}
+                      {context ? <button type="button" className="context-refresh" onClick={() => onRefreshTab(tab.id)} aria-label={`Refresh ${tab.title} context`} title="Refresh context"><RefreshCw size={12} /></button> : null}
                     </label>
                     {context ? (
                       <div className="context-preview">
@@ -129,7 +129,7 @@ export function WorkspacePane({
             ) : null}
             {snapshot.visualSelection ? (
               <div className="context-preview visual-selection-card">
-                <div className="context-card-heading"><strong>Selected localhost UI</strong><button type="button" onClick={onClearVisualSelection} aria-label="Clear visual selection"><X size={13} /></button></div>
+                <div className="context-card-heading"><strong>Selected localhost UI</strong><button type="button" onClick={onClearVisualSelection} aria-label="Clear visual selection" title="Clear selection"><X size={13} /></button></div>
                 <span className="context-source">{snapshot.visualSelection.selector}</span>
                 <img src={snapshot.visualSelection.screenshotDataUrl} alt="Captured localhost element" />
                 <pre>{snapshot.visualSelection.html}</pre>
@@ -150,7 +150,7 @@ export function WorkspacePane({
                       <span>{document.name}</span>
                     </label>
                     <span />
-                    <button type="button" onClick={() => { void onCommand({ type: 'removeDocument', documentId: document.id }); }} aria-label={`Remove ${document.name}`}><X size={13} /></button>
+                    <button type="button" onClick={() => { void onCommand({ type: 'removeDocument', documentId: document.id }); }} aria-label={`Remove ${document.name}`} title="Remove"><X size={13} /></button>
                   </div>
                   {document.selected ? (
                     <div className="context-preview">
@@ -279,7 +279,7 @@ function ContextPackRow({ pack, onCommand }: ContextPackRowProps) {
       <div className="context-pack-actions">
         <button type="button" onClick={() => { void onCommand({ type: 'applyContextPack', packId: pack.id }); }}>Apply</button>
         <button type="button" onClick={() => setRenaming(true)}>Rename</button>
-        <button type="button" onClick={() => { void onCommand({ type: 'deleteContextPack', packId: pack.id }); }} aria-label={`Delete ${pack.name}`}><X size={13} /></button>
+        <button type="button" onClick={() => { void onCommand({ type: 'deleteContextPack', packId: pack.id }); }} aria-label={`Delete ${pack.name}`} title="Delete"><X size={13} /></button>
       </div>
     </div>
   );
@@ -379,7 +379,7 @@ function BrowserSessionRow({ session, onCommand }: BrowserSessionRowProps) {
         <button type="button" onClick={() => { void onCommand({ type: 'openBrowserSession', sessionId: session.id, mode: 'merge' }); }}>Merge</button>
         <button type="button" onClick={() => { void onCommand({ type: 'openBrowserSession', sessionId: session.id, mode: 'replace' }); }}>Replace</button>
         <button type="button" onClick={() => setRenaming(true)}>Rename</button>
-        <button type="button" onClick={() => { void onCommand({ type: 'deleteBrowserSession', sessionId: session.id }); }} aria-label={`Delete ${session.name}`}><X size={13} /></button>
+        <button type="button" onClick={() => { void onCommand({ type: 'deleteBrowserSession', sessionId: session.id }); }} aria-label={`Delete ${session.name}`} title="Delete"><X size={13} /></button>
       </div>
     </div>
   );
@@ -446,7 +446,7 @@ function RecipeRow({ recipe, onCommand, onRunRecipe }: {
           {recipe.enabled ? 'Disable' : 'Enable'}
         </button>
         <button type="button" onClick={() => setRenaming(true)}>Rename</button>
-        <button type="button" onClick={() => { void onCommand({ type: 'deleteRecipe', recipeId: recipe.id }); }} aria-label={`Delete ${recipe.name}`}><X size={13} /></button>
+        <button type="button" onClick={() => { void onCommand({ type: 'deleteRecipe', recipeId: recipe.id }); }} aria-label={`Delete ${recipe.name}`} title="Delete"><X size={13} /></button>
       </div>
     </div>
   );

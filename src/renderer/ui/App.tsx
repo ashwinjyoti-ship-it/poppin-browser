@@ -241,10 +241,13 @@ export function App() {
   useEffect(() => {
     void window.poppinBrowser.command({
       type: 'setLayout',
-      // Downloads hang below chrome into the page; reserve space so WebContentsView does not cover the popover.
-      topInset: chromeHeight + (downloadsOpen || urlOverlayOpen ? 280 : 0),
+      // The address suggestions dropdown spans near the full width under the
+      // toolbar, so it needs the page pushed down to stay uncovered.
+      topInset: chromeHeight + (urlOverlayOpen ? 280 : 0),
       leftInset: workspaceCollapsed ? 46 : leftPaneWidth + 14,
-      rightInset: 24,
+      // Downloads popover is right-anchored under its toolbar button; reserve
+      // a right-side strip for it instead of shoving the whole page down.
+      rightInset: downloadsOpen ? 400 : 24,
       // Keep a strip for the collapsed reopen control; native views paint above DOM otherwise.
       bottomInset: commandCollapsed ? 64 : 94 + commandOverlayHeight + agentDockHeight,
     });
@@ -346,7 +349,6 @@ export function App() {
         <section className="authentication-overlay-status" aria-label="Secure sign-in overlay">
           <div>
             <strong>{snapshot.authenticationPopup.title || 'Secure sign-in'}</strong>
-            <span>Finish sign-in in the smaller window. Close it with Cancel, the window close button, or Escape. Poppin cannot read credentials.</span>
           </div>
           <button type="button" onClick={() => { void sendCommand({ type: 'cancelAuthenticationPopup' }); }}>Cancel</button>
         </section>
@@ -405,7 +407,22 @@ export function App() {
             }}
             onOverlayOpenChange={setUrlOverlayOpen}
             onOpenTabSearch={() => setTabSearchOpen(true)}
-            onOpenTandemBeside={() => { void sendCommand({ type: 'openTandemBeside' }); }}
+            onOpenTandemBeside={() => {
+              // Tandem beside needs a live Tandem World tab to split against.
+              // Rather than silently failing when one has never been opened,
+              // open it first (or send the user to connect Tandem).
+              if (tandemSnapshot.connection.state !== 'ready') {
+                void window.poppinSettings.command({ type: 'open' });
+                return;
+              }
+              void (async () => {
+                if (!tandemSnapshot.worldOpen) {
+                  const error = await sendTandemCommand({ type: 'openWorld' });
+                  if (error) return;
+                }
+                void sendCommand({ type: 'openTandemBeside' });
+              })();
+            }}
             onSettingsOpenChange={(open) => { void window.poppinSettings.command({ type: open ? 'open' : 'close' }); }}
             onSubmit={submitAddress}
             downloadsSlot={

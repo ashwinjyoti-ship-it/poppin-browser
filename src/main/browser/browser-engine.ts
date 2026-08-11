@@ -988,6 +988,7 @@ export class BrowserEngine {
       this.applyLinkOpeningPreference(tab);
       if (tab.snapshot.surface === 'tandem-world') this.applyTandemHostTheme(tab);
       if (tab.snapshot.taskSpaceId && this.mediaBlockedTaskSpaces.has(tab.snapshot.taskSpaceId)) this.pauseTaskOwnedMedia(tab);
+      void contents.executeJavaScript(CURSOR_AUTOHIDE_SCRIPT, true).catch(() => undefined);
     });
     contents.on('media-started-playing', () => {
       if (tab.snapshot.taskSpaceId && this.mediaBlockedTaskSpaces.has(tab.snapshot.taskSpaceId)) this.pauseTaskOwnedMedia(tab);
@@ -2066,6 +2067,46 @@ function safeLocator(attributes: Record<string, string>, role: string, name: str
   if (name && ['button', 'link', 'textbox', 'checkbox', 'radio', 'option'].includes(role)) return { locator: `role=${role};name=${name.slice(0, 160)}` };
   return {};
 }
+
+/**
+ * Hides the OS pointer while a video plays and the mouse has been idle,
+ * mirroring native fullscreen-video behavior for inline playback too.
+ * Idempotent per document so re-injection on subsequent dom-ready events
+ * (e.g. in-page navigations) does not stack listeners.
+ */
+const CURSOR_AUTOHIDE_SCRIPT = `(() => {
+  if (window.__poppinCursorAutohide) return;
+  window.__poppinCursorAutohide = true;
+  const IDLE_MS = 2200;
+  let hideTimer = null;
+  let styleEl = null;
+  const hideCursor = () => {
+    if (styleEl) return;
+    styleEl = document.createElement('style');
+    styleEl.textContent = '*{cursor:none!important}';
+    document.documentElement.appendChild(styleEl);
+  };
+  const showCursor = () => {
+    styleEl?.remove();
+    styleEl = null;
+  };
+  const anyVideoPlaying = () => Array.from(document.querySelectorAll('video'))
+    .some((video) => !video.paused && !video.ended && video.readyState > 2);
+  const scheduleHide = () => {
+    if (hideTimer) clearTimeout(hideTimer);
+    hideTimer = setTimeout(() => { if (anyVideoPlaying()) hideCursor(); }, IDLE_MS);
+  };
+  const onActivity = () => {
+    showCursor();
+    if (anyVideoPlaying()) scheduleHide();
+  };
+  document.addEventListener('mousemove', onActivity, true);
+  document.addEventListener('mousedown', onActivity, true);
+  document.addEventListener('keydown', onActivity, true);
+  document.addEventListener('play', (event) => { if (event.target instanceof HTMLVideoElement) scheduleHide(); }, true);
+  document.addEventListener('pause', showCursor, true);
+  document.addEventListener('ended', showCursor, true);
+})()`;
 
 const READ_VISIBLE_PAGE_SCRIPT = `(() => {
   const clone = document.body?.cloneNode(true);
