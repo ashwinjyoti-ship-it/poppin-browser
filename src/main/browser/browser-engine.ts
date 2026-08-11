@@ -1020,9 +1020,15 @@ export class BrowserEngine {
   private authenticationWindowOptions(): BrowserWindowConstructorOptions {
     return {
       frame: true,
-      show: true,
+      show: false,
+      title: 'Secure sign-in',
       backgroundColor: '#fbf8f2',
-      autoHideMenuBar: false,
+      autoHideMenuBar: true,
+      minimizable: false,
+      maximizable: false,
+      fullscreenable: false,
+      closable: true,
+      // Keep traffic-light close visible so Escape is not the only exit.
       webPreferences: {
         session: this.browserSession,
         nodeIntegration: false,
@@ -1796,17 +1802,7 @@ export class BrowserEngine {
     const popup = target ?? this.authenticationWindow;
     if (!popup || popup.isDestroyed() || this.window.isDestroyed()) return;
     const parent = this.window.getContentBounds();
-    // Preview windows are deliberately large enough to feel like an in-app
-    // Arc-style surface, while leaving a clear, persistent control rail in
-    // the parent window for Close and Open in tab.
-    const width = Math.min(1_280, Math.max(420, parent.width - 160));
-    const height = Math.min(920, Math.max(420, parent.height - 132));
-    popup.setBounds({
-      x: parent.x + Math.round((parent.width - width) / 2),
-      y: parent.y + Math.max(58, Math.round((parent.height - height) / 2)),
-      width,
-      height,
-    });
+    popup.setBounds(authenticationDialogBounds(parent));
   }
 
   private applyFullscreenTransition(transition: HtmlFullscreenTransition): void {
@@ -1899,6 +1895,29 @@ export function isAuthenticationPopup(value: string, openerValue: string): boole
   } catch {
     return false;
   }
+}
+
+/**
+ * Compact sign-in dialog bounds. Leaves a clear top strip on the parent so the
+ * Cancel control stays visible and the sheet never feels like a full-screen hang.
+ */
+export function authenticationDialogBounds(parent: { x: number; y: number; width: number; height: number }): {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+} {
+  const topChrome = 76;
+  const bottomMargin = 36;
+  const sideMargin = Math.max(56, Math.round(parent.width * 0.14));
+  const width = Math.min(720, Math.max(440, parent.width - sideMargin * 2));
+  const height = Math.min(620, Math.max(420, parent.height - topChrome - bottomMargin));
+  return {
+    x: parent.x + Math.round((parent.width - width) / 2),
+    y: parent.y + topChrome + Math.max(0, Math.round((parent.height - topChrome - bottomMargin - height) / 2)),
+    width,
+    height,
+  };
 }
 
 /** True for known auth hosts or login/sign-in URL shapes — skip filmstrip capture. */

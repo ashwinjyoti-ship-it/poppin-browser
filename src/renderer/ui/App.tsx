@@ -354,7 +354,10 @@ export function App() {
     <main className={`app-shell chrome-${chromeLayout.density} ${snapshot.isFullScreen ? 'window-fullscreen' : 'window-windowed'} ${commandCollapsed ? 'command-is-collapsed' : ''}`} style={paneStyle}>
       {snapshot.authenticationPopup ? (
         <section className="authentication-overlay-status" aria-label="Secure sign-in overlay">
-          <div><strong>{snapshot.authenticationPopup.title}</strong><span>Complete sign-in in the protected overlay. Poppin cannot read credentials.</span></div>
+          <div>
+            <strong>{snapshot.authenticationPopup.title || 'Secure sign-in'}</strong>
+            <span>Finish sign-in in the smaller window. Close it with Cancel, the window close button, or Escape. Poppin cannot read credentials.</span>
+          </div>
           <button type="button" onClick={() => { void sendCommand({ type: 'cancelAuthenticationPopup' }); }}>Cancel</button>
         </section>
       ) : null}
