@@ -182,7 +182,7 @@ interface SubSectionProps {
   onCommand: (command: import('../../shared/workspace').WorkspaceCommand) => Promise<string | null>;
 }
 
-function ContextPacksSection({ snapshot, onCommand }: SubSectionProps) {
+export function ContextPacksSection({ snapshot, onCommand }: SubSectionProps) {
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
@@ -285,7 +285,7 @@ function ContextPackRow({ pack, onCommand }: ContextPackRowProps) {
   );
 }
 
-function BrowserSessionsSection({ snapshot, onCommand }: SubSectionProps) {
+export function BrowserSessionsSection({ snapshot, onCommand }: SubSectionProps) {
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
@@ -385,7 +385,7 @@ function BrowserSessionRow({ session, onCommand }: BrowserSessionRowProps) {
   );
 }
 
-function RecipesSection({ snapshot, onCommand, onRunRecipe }: SubSectionProps & { onRunRecipe?: (prompt: string) => void }) {
+export function RecipesSection({ snapshot, onCommand, onRunRecipe }: SubSectionProps & { onRunRecipe?: (prompt: string) => void }) {
   const recipes = snapshot.recipes ?? [];
   return (
     <section className="workspace-section" aria-label="Recipes">
