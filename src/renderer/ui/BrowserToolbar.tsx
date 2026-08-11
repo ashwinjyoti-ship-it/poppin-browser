@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowRight, LockKeyhole, RefreshCw, RotateCcw, Search, Settings2, Unplug, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, BookOpenText, LockKeyhole, RefreshCw, RotateCcw, Search, Settings2, Unplug, X } from 'lucide-react';
 import { type FormEvent, type ReactNode, type RefObject, useState } from 'react';
 
 import type { BrowserSettings, BrowserTabSnapshot } from '../../shared/browser';
@@ -17,6 +17,8 @@ interface BrowserToolbarProps {
   onBack: () => void;
   onForward: () => void;
   onReload: () => void;
+  onOpenTabSearch?: () => void;
+  onOpenTandemBeside?: () => void;
   onSettingsOpenChange: (open: boolean) => void;
   onSubmit: (event: FormEvent) => void;
   /**
@@ -38,6 +40,8 @@ export function BrowserToolbar({
   onBack,
   onForward,
   onReload,
+  onOpenTabSearch,
+  onOpenTandemBeside,
   onSettingsOpenChange,
   onSubmit,
   downloadsSlot,
@@ -78,6 +82,29 @@ export function BrowserToolbar({
       </form>
 
       <div className="toolbar-actions">
+        {onOpenTabSearch ? (
+          <button
+            type="button"
+            className="settings-button"
+            aria-label="Find in open tabs"
+            title="Find in open tabs (⌘F)"
+            onClick={onOpenTabSearch}
+          >
+            <Search size={17} />
+          </button>
+        ) : null}
+        {onOpenTandemBeside ? (
+          <button
+            type="button"
+            className="settings-button"
+            aria-label="Tandem beside page"
+            title="Keep this page open and annotate in Tandem beside it"
+            disabled={!activeTab || activeTab.surface === 'tandem-world'}
+            onClick={onOpenTandemBeside}
+          >
+            <BookOpenText size={17} />
+          </button>
+        ) : null}
         {downloadsSlot}
         <button
           type="button"

@@ -1,11 +1,12 @@
-import { BookmarkPlus, ChevronLeft, ChevronRight, FilePlus2, FileText, Globe2, Layers3, Package, RefreshCw, Save, X } from 'lucide-react';
+import { BookmarkPlus, ChevronLeft, ChevronRight, FilePlus2, FileText, Globe2, Layers3, Package, Play, RefreshCw, Save, X } from 'lucide-react';
 import { type FormEvent, useState } from 'react';
 
-import type { WorkspaceSnapshot } from '../../shared/workspace';
+import type { RecipeSnapshot, WorkspaceSnapshot } from '../../shared/workspace';
 import type { BrowserTabSnapshot } from '../../shared/browser';
 import type { PagesCommand } from '../../shared/pages';
 import type { TandemCommand, TandemSnapshot } from '../../shared/tandem';
 import type { WorkspaceCommandResult } from '../../shared/workspace';
+import { recipeRunPrompt } from '../../shared/recipes';
 import { ProjectSection } from './ProjectSection';
 import { MemorySection } from './MemorySection';
 import { TandemSection } from './TandemSection';
@@ -25,6 +26,7 @@ interface WorkspacePaneProps {
   tandem: TandemSnapshot;
   onTandemCommand: (command: TandemCommand) => Promise<string | null>;
   onOpenSettings?: () => void;
+  onRunRecipe?: (prompt: string) => void;
 }
 
 /**
@@ -35,7 +37,7 @@ interface WorkspacePaneProps {
 export function WorkspacePane({
   collapsed, snapshot, tabs, activeTab, onCollapseChange, onCreate, onCommand, onPagesCommand,
   onRefreshTab, onCaptureVisualSelection, onClearVisualSelection, tandem, onTandemCommand,
-  onOpenSettings,
+  onOpenSettings, onRunRecipe,
 }: WorkspacePaneProps) {
   const [name, setName] = useState('My Workspace');
   const [error, setError] = useState('');
@@ -94,6 +96,7 @@ export function WorkspacePane({
           />
           <ContextPacksSection snapshot={snapshot} onCommand={onCommand} />
           <BrowserSessionsSection snapshot={snapshot} onCommand={onCommand} />
+          <RecipesSection snapshot={snapshot} onCommand={onCommand} onRunRecipe={onRunRecipe} />
           <section className="workspace-section">
             <div className="section-heading"><span>Tabs</span><span>{tabs.length}</span></div>
             <div className="selection-list">
@@ -377,6 +380,73 @@ function BrowserSessionRow({ session, onCommand }: BrowserSessionRowProps) {
         <button type="button" onClick={() => { void onCommand({ type: 'openBrowserSession', sessionId: session.id, mode: 'replace' }); }}>Replace</button>
         <button type="button" onClick={() => setRenaming(true)}>Rename</button>
         <button type="button" onClick={() => { void onCommand({ type: 'deleteBrowserSession', sessionId: session.id }); }} aria-label={`Delete ${session.name}`}><X size={13} /></button>
+      </div>
+    </div>
+  );
+}
+
+function RecipesSection({ snapshot, onCommand, onRunRecipe }: SubSectionProps & { onRunRecipe?: (prompt: string) => void }) {
+  const recipes = snapshot.recipes ?? [];
+  return (
+    <section className="workspace-section" aria-label="Recipes">
+      <div className="section-heading"><span>Recipes</span><span>{recipes.length}</span></div>
+      <p className="context-note">Saved from successful Agent Tabs runs. Credentials are never stored.</p>
+      <div className="selection-list">
+        {recipes.length === 0 ? <span className="section-empty">No recipes yet. Save one from a completed Work reply.</span> : null}
+        {recipes.map((recipe) => (
+          <RecipeRow key={recipe.id} recipe={recipe} onCommand={onCommand} onRunRecipe={onRunRecipe} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function RecipeRow({ recipe, onCommand, onRunRecipe }: {
+  recipe: RecipeSnapshot;
+  onCommand: SubSectionProps['onCommand'];
+  onRunRecipe?: (prompt: string) => void;
+}) {
+  const [renaming, setRenaming] = useState(false);
+  const [name, setName] = useState(recipe.name);
+  const summary = `${recipe.steps.length} step${recipe.steps.length === 1 ? '' : 's'}${recipe.enabled ? '' : ' · disabled'}`;
+  return (
+    <div className={`context-pack-row ${recipe.enabled ? '' : 'recipe-disabled'}`}>
+      <div className="context-pack-meta">
+        {renaming ? (
+          <input
+            value={name}
+            maxLength={80}
+            onChange={(event) => setName(event.target.value)}
+            onBlur={() => {
+              const trimmed = name.trim();
+              setRenaming(false);
+              if (trimmed && trimmed !== recipe.name) void onCommand({ type: 'renameRecipe', recipeId: recipe.id, name: trimmed });
+              else setName(recipe.name);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') (event.target as HTMLInputElement).blur();
+              if (event.key === 'Escape') { setName(recipe.name); setRenaming(false); }
+            }}
+            autoFocus
+          />
+        ) : (
+          <span className="context-pack-name" onDoubleClick={() => setRenaming(true)}>
+            <Package size={13} /> {recipe.name}
+          </span>
+        )}
+        <span className="context-pack-summary">{summary}</span>
+      </div>
+      <div className="context-pack-actions">
+        {onRunRecipe && recipe.enabled ? (
+          <button type="button" onClick={() => onRunRecipe(recipeRunPrompt(recipe))} aria-label={`Run ${recipe.name}`}>
+            <Play size={12} /> Run
+          </button>
+        ) : null}
+        <button type="button" onClick={() => { void onCommand({ type: 'setRecipeEnabled', recipeId: recipe.id, enabled: !recipe.enabled }); }}>
+          {recipe.enabled ? 'Disable' : 'Enable'}
+        </button>
+        <button type="button" onClick={() => setRenaming(true)}>Rename</button>
+        <button type="button" onClick={() => { void onCommand({ type: 'deleteRecipe', recipeId: recipe.id }); }} aria-label={`Delete ${recipe.name}`}><X size={13} /></button>
       </div>
     </div>
   );

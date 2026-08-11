@@ -78,6 +78,13 @@ export interface BrowserAgentLogEntry {
   target: string;
   outcome: 'started' | 'completed' | 'paused' | 'rejected' | 'failed';
   detail: string;
+  /**
+   * Quiet automation filmstrip frame: a small JPEG data URL captured after a
+   * visible completed action. Omitted for non-visual / failed / credential steps.
+   */
+  frameDataUrl?: string;
+  /** Semantic ref when the step targeted a generation-scoped node. */
+  ref?: string;
 }
 
 export interface BrowserAgentApproval {

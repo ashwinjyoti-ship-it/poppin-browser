@@ -470,7 +470,16 @@ describe('packaged browser workflow', () => {
       return contents?.executeJavaScript("document.getElementById('download-blank').click()");
     }, origin);
 
-    await expect.poll(() => shell.getByRole('region', { name: /downloads/i }).isVisible()).toBe(true);
+    // Downloads live in a settings-adjacent popover (no viewport shelf). Wait for
+    // the toolbar control to show activity, open it, then assert completion.
+    const downloadsButton = shell.getByRole('button', { name: /downloads/i });
+    await expect.poll(() => downloadsButton.isVisible()).toBe(true);
+    await expect.poll(async () => {
+      const label = await downloadsButton.getAttribute('aria-label');
+      return Boolean(label && /\d/.test(label));
+    }).toBe(true);
+    await downloadsButton.click();
+    await expect.poll(() => shell.getByRole('dialog', { name: /downloads/i }).isVisible()).toBe(true);
     await expect.poll(async () => {
       const snapshot = await shell.evaluate(async () => window.poppinDownloads.getSnapshot());
       return snapshot.items.some((item) => item.filename.includes('Poppin-Smoke-Fixture') && item.state === 'completed');

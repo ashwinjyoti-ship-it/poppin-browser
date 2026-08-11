@@ -22,8 +22,10 @@ import {
   type BrowserCommandResult,
   type BrowserSettings,
   type BrowserSnapshot,
+  type BrowserSplitSnapshot,
   type BrowserTabGroup,
   type BrowserTabSnapshot,
+  type TabSearchMatch,
   type PersistedBrowserStateV2,
   type PersistedTabState,
   type WindowState,
@@ -44,6 +46,12 @@ const DEFAULT_CHROME_HEIGHT = 103;
 const SAVE_DELAY_MS = 250;
 const MAX_LAYOUT_INSET = 520;
 const MAX_TAB_CONTEXT_CHARACTERS = 60_000;
+const SPLIT_GAP = 8;
+const MIN_SPLIT_RATIO = 0.28;
+const MAX_SPLIT_RATIO = 0.72;
+const MAX_TAB_SEARCH_TEXT = 8000;
+const MAX_TAB_SEARCH_RESULTS = 20;
+const TAB_SEARCH_SNIPPET_RADIUS = 80;
 const CLOSED_TAB_LIMIT = 12;
 const GROUP_COLORS: BrowserGroupColor[] = ['amber', 'blue', 'green', 'rose', 'violet'];
 const AUTHENTICATION_HOSTS = new Set([
@@ -87,6 +95,7 @@ export class BrowserEngine {
   private contentVisible = true;
   /** The single reusable Tandem World surface, if it is open. */
   private tandemWorldTabId: string | null = null;
+  private split: BrowserSplitSnapshot | null = null;
 
   /** Optional workspace hook so tab menus can save a session via a dialog-free flow. */
   private saveSessionRequested: (() => void) | null = null;
@@ -179,6 +188,7 @@ export class BrowserEngine {
         title: this.authenticationWindow.getTitle() || 'Link preview',
         url: this.authenticationWindow.webContents.getURL(),
       } : null,
+      split: this.split ? { ...this.split } : null,
     };
   }
 
@@ -635,6 +645,27 @@ export class BrowserEngine {
     }
   }
 
+  /**
+   * Quiet automation filmstrip frame: a small JPEG data URL of the visible
+   * Agent Tab. Skips auth hosts and login-looking URLs so credential UI never
+   * enters the automation trail. Never inspects password fields themselves.
+   */
+  async captureActionFrame(tabId: string): Promise<string | null> {
+    const tab = this.tabs.get(tabId);
+    if (!tab || tab.view.webContents.isDestroyed()) return null;
+    const currentUrl = tab.view.webContents.getURL();
+    if (!currentUrl.startsWith('http://') && !currentUrl.startsWith('https://')) return null;
+    if (isCredentialSensitiveUrl(currentUrl)) return null;
+    try {
+      const image = await tab.view.webContents.capturePage();
+      if (image.isEmpty()) return null;
+      const resized = image.resize({ width: 192, quality: 'good' });
+      return `data:image/jpeg;base64,${resized.toJPEG(62).toString('base64')}`;
+    } catch {
+      return null;
+    }
+  }
+
   async captureVisualSelection(tabId: string): Promise<VisualSelectionSnapshot | null> {
     const tab = this.tabs.get(tabId);
     if (!tab || tab.view.webContents.isDestroyed()) return null;
@@ -713,6 +744,22 @@ export class BrowserEngine {
         return this.closeLinkPreview();
       case 'openLinkPreviewInTab':
         return this.openLinkPreviewInTab();
+      case 'openLinkPreviewInSplit':
+        return this.openLinkPreviewInSplit();
+      case 'openSplit':
+        return this.openSplit(command.secondaryTabId, command.mode);
+      case 'openTandemBeside':
+        return this.openTandemBeside();
+      case 'closeSplit':
+        return this.closeSplit();
+      case 'setSplitRatio':
+        return this.setSplitRatio(command.ratio);
+      case 'focusSplitSide':
+        return this.focusSplitSide(command.side);
+      case 'swapSplit':
+        return this.swapSplit();
+      case 'searchOpenTabs':
+        return this.searchOpenTabs(command.query);
       case 'setContentVisible':
         this.contentVisible = command.visible;
         this.layoutViews();
@@ -946,6 +993,7 @@ export class BrowserEngine {
       if (origin) this.faviconByOrigin.set(origin, candidates);
       this.updateTab(tab, { faviconUrls: candidates });
     });
+    contents.on('focus', () => this.handleSplitPaneFocus(tab.snapshot.id));
     contents.on('did-fail-load', (_event, code, description, url, isMainFrame) => {
       if (!isMainFrame || code === -3 || url.startsWith('poppin://')) return;
       const failure = { code, description, url };
@@ -1078,6 +1126,24 @@ export class BrowserEngine {
       const group = this.groups.get(tab.snapshot.groupId);
       if (group) group.collapsed = false;
     }
+    if (this.split) {
+      const { primaryTabId, secondaryTabId } = this.split;
+      if (tabId === primaryTabId) {
+        this.split.focusedSide = 'primary';
+      } else if (tabId === secondaryTabId) {
+        this.split.focusedSide = 'secondary';
+      } else {
+        this.split.primaryTabId = tabId;
+        this.split.focusedSide = 'primary';
+      }
+      this.activeTabId = tabId;
+      this.applySplitVisibility();
+      this.layoutViews();
+      tab.view.webContents.focus();
+      this.emitSnapshot();
+      this.scheduleSave();
+      return { ok: true };
+    }
     for (const [id, candidate] of this.tabs) candidate.view.setVisible(id === tabId);
     this.activeTabId = tabId;
     this.layoutViews();
@@ -1090,6 +1156,10 @@ export class BrowserEngine {
   private closeTab(tabId: string, remember = true): BrowserCommandResult {
     const tab = this.tabs.get(tabId);
     if (!tab) return { ok: false, message: 'That tab is already closed.' };
+    const closedSplitPane = Boolean(
+      this.split && (tabId === this.split.primaryTabId || tabId === this.split.secondaryTabId),
+    );
+    if (closedSplitPane) this.split = null;
     const orderedIds = [...this.tabOrder];
     const closingIndex = orderedIds.indexOf(tabId);
     if (remember && !tab.snapshot.taskSpaceId && !tab.snapshot.surface && tab.lastExternalUrl) {
@@ -1119,6 +1189,8 @@ export class BrowserEngine {
         return { ok: true };
       }
       this.activateTab(remainingIds[Math.min(closingIndex, remainingIds.length - 1)]!);
+    } else if (closedSplitPane) {
+      this.activateTab(this.activeTabId);
     } else {
       this.emitSnapshot();
       this.scheduleSave();
@@ -1365,6 +1437,221 @@ export class BrowserEngine {
     return { ok: true };
   }
 
+  private openLinkPreviewInSplit(): BrowserCommandResult {
+    const popup = this.authenticationWindow;
+    if (!popup || popup.isDestroyed() || this.overlayKind !== 'preview') return { ok: false, message: 'There is no link preview to open.' };
+    const url = popup.webContents.getURL();
+    popup.close();
+    const primaryTabId = this.activeTabId;
+    if (!this.tabs.has(primaryTabId)) return { ok: false, message: 'That tab is no longer available.' };
+    const secondaryTabId = randomUUID();
+    this.createTab(url, secondaryTabId, false, undefined, false);
+    this.split = {
+      mode: 'peek-compare',
+      primaryTabId,
+      secondaryTabId,
+      focusedSide: 'secondary',
+      ratio: 0.5,
+    };
+    this.activeTabId = secondaryTabId;
+    this.applySplitVisibility();
+    this.layoutViews();
+    const secondary = this.tabs.get(secondaryTabId);
+    secondary?.view.webContents.focus();
+    this.emitSnapshot();
+    this.scheduleSave();
+    return { ok: true };
+  }
+
+  private openSplit(secondaryTabId: string, mode: 'sticky' | 'peek-compare' = 'sticky'): BrowserCommandResult {
+    if (secondaryTabId === this.activeTabId) return { ok: false, message: 'Choose a different tab for the split pane.' };
+    const secondary = this.tabs.get(secondaryTabId);
+    if (!secondary || secondary.view.webContents.isDestroyed()) return { ok: false, message: 'That tab is no longer available.' };
+    this.split = {
+      mode,
+      primaryTabId: this.activeTabId,
+      secondaryTabId,
+      focusedSide: 'primary',
+      ratio: 0.5,
+    };
+    this.applySplitVisibility();
+    this.layoutViews();
+    this.tabs.get(this.activeTabId)?.view.webContents.focus();
+    this.emitSnapshot();
+    this.scheduleSave();
+    return { ok: true };
+  }
+
+  private openTandemBeside(): BrowserCommandResult {
+    let primaryTabId = this.activeTabId;
+    if (this.tandemWorldTabId === primaryTabId) {
+      const alternative = this.tabOrder.find((id) => {
+        const candidate = this.tabs.get(id);
+        return candidate
+          && id !== this.tandemWorldTabId
+          && !candidate.snapshot.taskSpaceId
+          && !candidate.view.webContents.isDestroyed()
+          && /^https?:\/\//i.test(candidate.lastExternalUrl);
+      });
+      if (!alternative) return { ok: false, message: 'Open a web page first, then open Tandem beside it.' };
+      primaryTabId = alternative;
+    }
+    const tandemId = this.tandemWorldTabId;
+    if (!tandemId) return { ok: false, message: 'Open Tandem World first from the workspace or tab strip.' };
+    const tandemTab = this.tabs.get(tandemId);
+    if (!tandemTab || tandemTab.view.webContents.isDestroyed()) {
+      return { ok: false, message: 'Open Tandem World first from the workspace or tab strip.' };
+    }
+    if (primaryTabId === tandemId) return { ok: false, message: 'Open a web page first, then open Tandem beside it.' };
+    this.split = {
+      mode: 'tandem-beside',
+      primaryTabId,
+      secondaryTabId: tandemId,
+      focusedSide: 'primary',
+      ratio: 0.5,
+    };
+    this.activeTabId = primaryTabId;
+    this.applySplitVisibility();
+    this.layoutViews();
+    this.tabs.get(primaryTabId)?.view.webContents.focus();
+    this.emitSnapshot();
+    this.scheduleSave();
+    return { ok: true };
+  }
+
+  private closeSplit(): BrowserCommandResult {
+    if (!this.split) return { ok: false, message: 'Split view is not active.' };
+    const tabId = this.split.focusedSide === 'secondary'
+      ? this.split.secondaryTabId
+      : this.split.primaryTabId;
+    this.split = null;
+    return this.activateTab(tabId);
+  }
+
+  /** Keep address/nav chrome aligned when the user clicks into a split pane. */
+  private handleSplitPaneFocus(tabId: string): void {
+    if (!this.split) return;
+    if (tabId === this.split.primaryTabId) {
+      if (this.split.focusedSide === 'primary' && this.activeTabId === tabId) return;
+      this.split = { ...this.split, focusedSide: 'primary' };
+      this.activeTabId = tabId;
+      this.emitSnapshot();
+      return;
+    }
+    if (tabId === this.split.secondaryTabId) {
+      if (this.split.focusedSide === 'secondary' && this.activeTabId === tabId) return;
+      this.split = { ...this.split, focusedSide: 'secondary' };
+      this.activeTabId = tabId;
+      this.emitSnapshot();
+    }
+  }
+
+  private setSplitRatio(ratio: number): BrowserCommandResult {
+    if (!this.split) return { ok: false, message: 'Split view is not active.' };
+    this.split.ratio = clampSplitRatio(ratio);
+    this.layoutViews();
+    this.emitSnapshot();
+    return { ok: true };
+  }
+
+  private focusSplitSide(side: 'primary' | 'secondary'): BrowserCommandResult {
+    if (!this.split) return { ok: false, message: 'Split view is not active.' };
+    const tabId = side === 'primary' ? this.split.primaryTabId : this.split.secondaryTabId;
+    const tab = this.tabs.get(tabId);
+    if (!tab || tab.view.webContents.isDestroyed()) {
+      this.split = null;
+      this.layoutViews();
+      this.emitSnapshot();
+      return { ok: false, message: 'That split pane is no longer available.' };
+    }
+    this.split.focusedSide = side;
+    this.activeTabId = tabId;
+    this.applySplitVisibility();
+    this.layoutViews();
+    tab.view.webContents.focus();
+    this.emitSnapshot();
+    this.scheduleSave();
+    return { ok: true };
+  }
+
+  private swapSplit(): BrowserCommandResult {
+    if (!this.split) return { ok: false, message: 'Split view is not active.' };
+    const focusedTabId = this.split.focusedSide === 'primary'
+      ? this.split.primaryTabId
+      : this.split.secondaryTabId;
+    const { primaryTabId, secondaryTabId, ratio, mode } = this.split;
+    this.split = {
+      mode,
+      primaryTabId: secondaryTabId,
+      secondaryTabId: primaryTabId,
+      focusedSide: focusedTabId === primaryTabId ? 'secondary' : 'primary',
+      ratio: clampSplitRatio(1 - ratio),
+    };
+    this.activeTabId = focusedTabId;
+    this.applySplitVisibility();
+    this.layoutViews();
+    this.tabs.get(focusedTabId)?.view.webContents.focus();
+    this.emitSnapshot();
+    return { ok: true };
+  }
+
+  private async searchOpenTabs(query: string): Promise<BrowserCommandResult> {
+    const trimmed = query.trim();
+    if (trimmed.length < 2) return { ok: true, tabSearchResults: [] };
+    const normalizedQuery = trimmed.toLowerCase();
+    const results: TabSearchMatch[] = [];
+
+    for (const tabId of this.tabOrder) {
+      if (results.length >= MAX_TAB_SEARCH_RESULTS) break;
+      const tab = this.tabs.get(tabId);
+      if (!tab || tab.view.webContents.isDestroyed()) continue;
+
+      const title = tab.snapshot.title || 'Untitled';
+      const url = tab.snapshot.url || tab.lastExternalUrl || '';
+      const titleIndex = title.toLowerCase().indexOf(normalizedQuery);
+      if (titleIndex >= 0) {
+        results.push({ tabId, title, url, snippet: title, matchKind: 'title' });
+        continue;
+      }
+      const urlIndex = url.toLowerCase().indexOf(normalizedQuery);
+      if (urlIndex >= 0) {
+        results.push({ tabId, title, url, snippet: url, matchKind: 'url' });
+        continue;
+      }
+
+      const currentUrl = tab.view.webContents.getURL();
+      if (!currentUrl.startsWith('http://') && !currentUrl.startsWith('https://')) continue;
+      try {
+        const captured = await tab.view.webContents.executeJavaScript(`(() => {
+          const text = document.body?.innerText ?? '';
+          return text.slice(0, ${MAX_TAB_SEARCH_TEXT + 1});
+        })()`);
+        if (typeof captured !== 'string') continue;
+        const text = captured.replace(/\r\n/g, '\n');
+        const contentIndex = text.toLowerCase().indexOf(normalizedQuery);
+        if (contentIndex < 0) continue;
+        const start = Math.max(0, contentIndex - TAB_SEARCH_SNIPPET_RADIUS);
+        const end = Math.min(text.length, contentIndex + normalizedQuery.length + TAB_SEARCH_SNIPPET_RADIUS);
+        let snippet = text.slice(start, end).replace(/\s+/g, ' ').trim();
+        if (start > 0) snippet = `…${snippet}`;
+        if (end < text.length) snippet = `${snippet}…`;
+        results.push({ tabId, title, url, snippet, matchKind: 'content' });
+      } catch {
+        // Some tabs reject script execution while loading or after a crash.
+      }
+    }
+
+    return { ok: true, tabSearchResults: results };
+  }
+
+  private applySplitVisibility(): void {
+    if (!this.split) return;
+    const { primaryTabId, secondaryTabId } = this.split;
+    for (const [id, candidate] of this.tabs) {
+      candidate.view.setVisible(id === primaryTabId || id === secondaryTabId);
+    }
+  }
+
   private insertTabId(id: string, position: 'preferred' | 'end'): void {
     const tab = this.tabs.get(id);
     if (!tab) return;
@@ -1456,17 +1743,53 @@ export class BrowserEngine {
     if (this.window.isDestroyed()) return;
     const [width = 1, height = 1] = this.window.getContentSize();
     const isHtmlFullscreen = this.htmlFullscreen.isActiveFor(this.activeTabId);
-    const bounds: Rectangle = this.contentVisible ? {
+    const contentBounds = this.computeContentBounds(width, height, isHtmlFullscreen);
+
+    if (this.split && !isHtmlFullscreen) {
+      const { primaryTabId, secondaryTabId, ratio } = this.split;
+      const primaryWidth = Math.max(1, Math.floor((contentBounds.width - SPLIT_GAP) * ratio));
+      const secondaryWidth = Math.max(1, contentBounds.width - SPLIT_GAP - primaryWidth);
+      for (const tab of this.tabs.values()) {
+        const id = tab.snapshot.id;
+        if (id === primaryTabId) {
+          tab.view.setVisible(this.contentVisible);
+          tab.view.setBounds({
+            x: contentBounds.x,
+            y: contentBounds.y,
+            width: primaryWidth,
+            height: contentBounds.height,
+          });
+          tab.view.setBorderRadius(18);
+        } else if (id === secondaryTabId) {
+          tab.view.setVisible(this.contentVisible);
+          tab.view.setBounds({
+            x: contentBounds.x + primaryWidth + SPLIT_GAP,
+            y: contentBounds.y,
+            width: secondaryWidth,
+            height: contentBounds.height,
+          });
+          tab.view.setBorderRadius(18);
+        } else {
+          tab.view.setVisible(false);
+        }
+      }
+    } else {
+      for (const tab of this.tabs.values()) {
+        tab.view.setBounds(contentBounds);
+        tab.view.setBorderRadius(isHtmlFullscreen && tab.snapshot.id === this.activeTabId ? 0 : 18);
+        if (this.split) tab.view.setVisible(tab.snapshot.id === this.activeTabId && this.contentVisible);
+      }
+    }
+    this.layoutAuthenticationWindow();
+  }
+
+  private computeContentBounds(width: number, height: number, isHtmlFullscreen: boolean): Rectangle {
+    return this.contentVisible ? {
       x: isHtmlFullscreen ? 0 : PAGE_MARGIN + this.viewInsets.left,
       y: isHtmlFullscreen ? 0 : this.viewInsets.top,
       width: isHtmlFullscreen ? width : Math.max(1, width - PAGE_MARGIN * 2 - this.viewInsets.left - this.viewInsets.right),
       height: isHtmlFullscreen ? height : Math.max(1, height - this.viewInsets.top - PAGE_MARGIN - this.viewInsets.bottom),
     } : { x: 0, y: 0, width: 0, height: 0 };
-    for (const tab of this.tabs.values()) {
-      tab.view.setBounds(bounds);
-      tab.view.setBorderRadius(isHtmlFullscreen && tab.snapshot.id === this.activeTabId ? 0 : 18);
-    }
-    this.layoutAuthenticationWindow();
   }
 
   private layoutAuthenticationWindow(target?: BrowserWindow | null): void {
@@ -1493,6 +1816,10 @@ export class BrowserEngine {
 
 function clampInset(value: number): number {
   return Number.isFinite(value) ? Math.min(MAX_LAYOUT_INSET, Math.max(0, Math.round(value))) : 0;
+}
+
+function clampSplitRatio(value: number): number {
+  return Number.isFinite(value) ? Math.min(MAX_SPLIT_RATIO, Math.max(MIN_SPLIT_RATIO, value)) : 0.5;
 }
 
 function isCapturedPage(value: unknown): value is { title: string; url: string; text: string } {
@@ -1563,6 +1890,18 @@ export function isAuthenticationPopup(value: string, openerValue: string): boole
     const sameOrigin = target.origin === opener.origin;
     const authSignal = /(?:^|[/?#&_.-])(auth|oauth|login|sign[-_]?in|authorize|consent|callback)(?:$|[/?#&_.=-])/i.test(`${target.hostname}${target.pathname}${target.search}`);
     return (authSignal && (knownHost || sameOrigin)) || (knownHost && opener.hostname === 'claude.ai');
+  } catch {
+    return false;
+  }
+}
+
+/** True for known auth hosts or login/sign-in URL shapes — skip filmstrip capture. */
+export function isCredentialSensitiveUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    if (AUTHENTICATION_HOSTS.has(url.hostname) || url.hostname.endsWith('.anthropic.com')) return true;
+    return /(?:^|[/?#&_.-])(auth|oauth|login|sign[-_]?in|authorize|consent|password|passkey|otp)(?:$|[/?#&_.=-])/i
+      .test(`${url.hostname}${url.pathname}${url.search}`);
   } catch {
     return false;
   }

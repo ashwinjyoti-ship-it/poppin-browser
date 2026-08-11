@@ -3,6 +3,8 @@ import { DatabaseSync } from 'node:sqlite';
 import type {
   BrowserSessionSnapshot,
   ContextPackSnapshot,
+  RecipeSnapshot,
+  RecipeStepSnapshot,
   TabContextSnapshot,
   WorkspaceDocumentSnapshot,
   WorkspaceRecordSnapshot,
@@ -105,6 +107,15 @@ export class WorkspaceStore {
         name TEXT NOT NULL,
         tabs_json TEXT NOT NULL DEFAULT '[]',
         created_at TEXT NOT NULL
+      ) STRICT;
+      CREATE TABLE IF NOT EXISTS recipes (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        start_url TEXT,
+        steps_json TEXT NOT NULL DEFAULT '[]',
+        enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
       ) STRICT;
     `);
   }
@@ -365,6 +376,65 @@ export class WorkspaceStore {
     return result.changes > 0;
   }
 
+  listRecipes(): RecipeSnapshot[] {
+    const rows = this.database.prepare(`
+      SELECT id, name, start_url, steps_json, enabled, created_at, updated_at
+      FROM recipes ORDER BY created_at
+    `).all() as unknown as Array<{
+      id: string; name: string; start_url: string | null; steps_json: string;
+      enabled: number; created_at: string; updated_at: string;
+    }>;
+    return rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      startUrl: row.start_url,
+      steps: parseRecipeSteps(row.steps_json),
+      enabled: Boolean(row.enabled),
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    }));
+  }
+
+  insertRecipe(recipe: RecipeSnapshot): void {
+    this.database.prepare(`
+      INSERT INTO recipes (id, name, start_url, steps_json, enabled, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      recipe.id,
+      recipe.name,
+      recipe.startUrl,
+      JSON.stringify(recipe.steps),
+      Number(recipe.enabled),
+      recipe.createdAt,
+      recipe.updatedAt,
+    );
+  }
+
+  getRecipe(recipeId: string): RecipeSnapshot | null {
+    return this.listRecipes().find((recipe) => recipe.id === recipeId) ?? null;
+  }
+
+  renameRecipe(recipeId: string, name: string): boolean {
+    const updatedAt = new Date().toISOString();
+    const result = this.database.prepare(
+      'UPDATE recipes SET name = ?, updated_at = ? WHERE id = ?'
+    ).run(name, updatedAt, recipeId);
+    return result.changes > 0;
+  }
+
+  setRecipeEnabled(recipeId: string, enabled: boolean): boolean {
+    const updatedAt = new Date().toISOString();
+    const result = this.database.prepare(
+      'UPDATE recipes SET enabled = ?, updated_at = ? WHERE id = ?'
+    ).run(Number(enabled), updatedAt, recipeId);
+    return result.changes > 0;
+  }
+
+  deleteRecipe(recipeId: string): boolean {
+    const result = this.database.prepare('DELETE FROM recipes WHERE id = ?').run(recipeId);
+    return result.changes > 0;
+  }
+
   close(): void {
     this.database.close();
   }
@@ -389,6 +459,27 @@ function parseTabRefs(value: string): { url: string; title: string }[] {
       const candidate = entry as Record<string, unknown>;
       if (typeof candidate.url !== 'string' || typeof candidate.title !== 'string') return [];
       return [{ url: candidate.url, title: candidate.title }];
+    });
+  } catch {
+    return [];
+  }
+}
+
+function parseRecipeSteps(value: string): RecipeStepSnapshot[] {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.flatMap((entry) => {
+      if (!entry || typeof entry !== 'object') return [];
+      const candidate = entry as Record<string, unknown>;
+      if (typeof candidate.action !== 'string' || typeof candidate.target !== 'string' || typeof candidate.detail !== 'string') {
+        return [];
+      }
+      return [{
+        action: candidate.action,
+        target: candidate.target,
+        detail: candidate.detail,
+      }];
     });
   } catch {
     return [];

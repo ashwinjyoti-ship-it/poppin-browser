@@ -35,6 +35,8 @@ export interface BrowserAgentPageController {
   isSemanticSnapshotCurrent(tabId: string, snapshotId: string): boolean;
   inspectAction(tabId: string, action: BrowserAgentAction): Promise<{ credential: boolean; consequential: string | null; takeover?: string | null; target: string }>;
   performAction(tabId: string, action: BrowserAgentAction): Promise<string>;
+  /** Optional quiet filmstrip frame after a visible completed action. */
+  captureActionFrame?(tabId: string): Promise<string | null>;
 }
 
 export interface BrowserAgentWindow {
@@ -599,7 +601,14 @@ export class BrowserAgentEngine {
     if (action.type === 'captureTranscript') this.onCapturedContext?.(tabId, data);
     if (!this.batchRunning && (action.type === 'navigate' || action.type === 'click' || action.type === 'type')) this.latestSnapshotByTab.delete(tabId);
     this.snapshot.currentAction = null;
-    this.append(tabId, label(action), inspectedTarget, 'completed', summarize(data));
+    const frameDataUrl = shouldCaptureFrame(action)
+      ? await this.pages.captureActionFrame?.(tabId) ?? undefined
+      : undefined;
+    const ref = 'ref' in action && typeof action.ref === 'string' ? action.ref : undefined;
+    this.append(tabId, label(action), inspectedTarget, 'completed', summarize(data), {
+      ...(frameDataUrl ? { frameDataUrl } : {}),
+      ...(ref ? { ref } : {}),
+    });
     this.emit();
     return { ok: true, data };
   }
@@ -615,8 +624,18 @@ export class BrowserAgentEngine {
     return this.saveWork;
   }
 
-  private append(tabId: string, action: string, targetValue: string, outcome: BrowserAgentLogEntry['outcome'], detail: string): void {
-    this.snapshot.log = [...this.snapshot.log, { id: randomUUID(), at: new Date().toISOString(), tabId, action, target: targetValue, outcome, detail }].slice(-MAX_LOG_ENTRIES);
+  private append(tabId: string, action: string, targetValue: string, outcome: BrowserAgentLogEntry['outcome'], detail: string, extras?: { frameDataUrl?: string; ref?: string }): void {
+    this.snapshot.log = [...this.snapshot.log, {
+      id: randomUUID(),
+      at: new Date().toISOString(),
+      tabId,
+      action,
+      target: targetValue,
+      outcome,
+      detail,
+      ...(extras?.frameDataUrl ? { frameDataUrl: extras.frameDataUrl } : {}),
+      ...(extras?.ref ? { ref: extras.ref } : {}),
+    }].slice(-MAX_LOG_ENTRIES);
   }
 
   private emit(): void {
@@ -661,4 +680,8 @@ function batchTarget(step: BrowserBatchStep): string {
   if ('ref' in step) return step.ref;
   if ('value' in step) return step.value;
   return 'visible page';
+}
+
+function shouldCaptureFrame(action: BrowserAgentAction): boolean {
+  return action.type === 'navigate' || action.type === 'click' || action.type === 'scroll' || action.type === 'openTab';
 }

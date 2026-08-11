@@ -10,10 +10,13 @@ import {
   WORKSPACE_CHANNELS,
   type BrowserSessionSnapshot,
   type ContextPackSnapshot,
+  type RecipeSnapshot,
+  type RecipeStepSnapshot,
   type WorkspaceCommand,
   type WorkspaceCommandResult,
   type WorkspaceSnapshot,
 } from '../../shared/workspace';
+import { recipeStartUrl, sanitizeRecipeSteps } from '../../shared/recipes';
 import { parseProjectSource, repositoryFolderName } from '../../shared/project-source';
 import { WorkspaceStore } from './workspace-store';
 import { BrowserEngine } from '../browser/browser-engine';
@@ -78,6 +81,7 @@ export class WorkspaceEngine {
       // enabled before the user opts it in; the UI only shows the preview when selected.
       memoryBrief: this.pagesStore ? memoryBrief(this.pagesStore) : null,
       browserSessions: this.store.listBrowserSessions(),
+      recipes: this.store.listRecipes(),
     };
   }
 
@@ -146,6 +150,14 @@ export class WorkspaceEngine {
         return this.renameBrowserSession(command.sessionId, command.name);
       case 'deleteBrowserSession':
         return this.deleteBrowserSession(command.sessionId);
+      case 'saveRecipe':
+        return this.saveRecipe(command.name, command.steps, command.startUrl);
+      case 'renameRecipe':
+        return this.renameRecipe(command.recipeId, command.name);
+      case 'setRecipeEnabled':
+        return this.setRecipeEnabled(command.recipeId, command.enabled);
+      case 'deleteRecipe':
+        return this.deleteRecipe(command.recipeId);
     }
     this.emitSnapshot();
     return { ok: true };
@@ -282,6 +294,56 @@ export class WorkspaceEngine {
 
   private deleteBrowserSession(sessionId: string): WorkspaceCommandResult {
     if (!this.store.deleteBrowserSession(sessionId)) return { ok: false, message: 'That session is no longer available.' };
+    this.emitSnapshot();
+    return { ok: true };
+  }
+
+  private saveRecipe(rawName: string, steps: RecipeStepSnapshot[], startUrl?: string | null): WorkspaceCommandResult {
+    const name = rawName.trim();
+    if (!name) return { ok: false, message: 'Give the recipe a name.' };
+    if (name.length > 80) return { ok: false, message: 'Use a name under 80 characters.' };
+    // Re-sanitize in main so credential-looking steps cannot bypass the renderer.
+    const safeSteps = sanitizeRecipeSteps(steps.map((step) => ({
+      action: step.action,
+      target: step.target,
+      detail: step.detail,
+      outcome: 'completed',
+    })));
+    if (!safeSteps || safeSteps.length < 2) {
+      return { ok: false, message: 'Need at least two safe completed steps to save a recipe.' };
+    }
+    const now = new Date().toISOString();
+    const recipe: RecipeSnapshot = {
+      id: randomUUID(),
+      name,
+      startUrl: startUrl ?? recipeStartUrl(safeSteps),
+      steps: safeSteps,
+      enabled: true,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.store.insertRecipe(recipe);
+    this.emitSnapshot();
+    return { ok: true, message: `Saved recipe "${recipe.name}".` };
+  }
+
+  private renameRecipe(recipeId: string, rawName: string): WorkspaceCommandResult {
+    const name = rawName.trim();
+    if (!name) return { ok: false, message: 'Give the recipe a name.' };
+    if (name.length > 80) return { ok: false, message: 'Use a name under 80 characters.' };
+    if (!this.store.renameRecipe(recipeId, name)) return { ok: false, message: 'That recipe is no longer available.' };
+    this.emitSnapshot();
+    return { ok: true };
+  }
+
+  private setRecipeEnabled(recipeId: string, enabled: boolean): WorkspaceCommandResult {
+    if (!this.store.setRecipeEnabled(recipeId, enabled)) return { ok: false, message: 'That recipe is no longer available.' };
+    this.emitSnapshot();
+    return { ok: true };
+  }
+
+  private deleteRecipe(recipeId: string): WorkspaceCommandResult {
+    if (!this.store.deleteRecipe(recipeId)) return { ok: false, message: 'That recipe is no longer available.' };
     this.emitSnapshot();
     return { ok: true };
   }

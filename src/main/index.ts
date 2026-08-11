@@ -373,6 +373,7 @@ app.whenReady().then(async () => {
       memorySelected: false,
       memoryBrief: null,
       browserSessions: [],
+      recipes: [],
     };
   });
   ipcMain.handle(WORKSPACE_CHANNELS.command, (event, command: WorkspaceCommand) => {
