@@ -1,5 +1,5 @@
-import { BookOpenText, Check, ChevronDown, ChevronLeft, ChevronRight, CircleAlert, CircleSlash2, Database, FileDiff, FileText, Globe2, MessageSquareText, Pencil, Plus, TriangleAlert, X } from 'lucide-react';
-import { type DragEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { BookOpenText, Check, ChevronDown, ChevronRight, CircleAlert, CircleSlash2, Database, FileDiff, FileText, Globe2, MessageSquareText, Pencil, Plus, TriangleAlert, X } from 'lucide-react';
+import { type DragEvent, useMemo, useRef, useState } from 'react';
 
 import type { BrowserFailure, BrowserTabGroup } from '../../shared/browser';
 import type { BrowserTaskSpace } from '../../shared/browser-agent';
@@ -24,23 +24,11 @@ interface TabStripProps {
   tandemReady?: boolean;
   tandemMessage?: string;
   onOpenTandemWorld?: () => void;
-  /** Vertical left rail is the shell default; horizontal remains for tests. */
-  orientation?: 'horizontal' | 'vertical';
-  collapsed?: boolean;
-  onCollapseChange?: (collapsed: boolean) => void;
-  /** When collapsed, hovering the rail temporarily draws tabs out. */
-  drawOutOnHover?: boolean;
-  /** Fires when hover-draw-out covers the page and needs a matching left inset. */
-  onHoverPeekChange?: (peeking: boolean) => void;
-  /** Tab ids currently included in the Ask context package. */
-  contextTabIds?: ReadonlySet<string>;
-  onToggleTabContext?: (tabId: string, selected: boolean) => void;
 }
 
 export interface TabStripTabSnapshot {
   id: string;
   title: string;
-  url?: string;
   kind?: 'browser' | 'page' | 'database' | 'task' | 'tandem';
   /** Picks the task tab's icon: a reply bubble for Work, a diff mark for Code. */
   taskKind?: 'work' | 'code';
@@ -72,15 +60,7 @@ export function TabStrip({
   tandemReady,
   tandemMessage,
   onOpenTandemWorld,
-  orientation = 'horizontal',
-  collapsed = false,
-  onCollapseChange,
-  drawOutOnHover = true,
-  onHoverPeekChange,
-  contextTabIds,
-  onToggleTabContext,
 }: TabStripProps) {
-  const vertical = orientation === 'vertical';
   const groupsById = useMemo(() => new Map(groups.map((group) => [group.id, group])), [groups]);
   const tabCountByGroup = useMemo(() => {
     const counts = new Map<string, number>();
@@ -89,9 +69,7 @@ export function TabStrip({
   }, [tabs]);
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
   const [groupName, setGroupName] = useState('');
-  const [hoverPeek, setHoverPeek] = useState(false);
   const cancelRenameRef = useRef(false);
-  const leaveTimerRef = useRef<number | null>(null);
   const renderedGroups = new Set<string>();
   // The task's Agent Tabs (context/exploration browsing tabs while watching)
   // and its reply/review tab are a distinct, agent-owned zone: they dock to
@@ -100,51 +78,7 @@ export function TabStrip({
   const agentOwnedTabs = tabs.filter((tab) => tab.taskSpaceId || tab.kind === 'task');
   const showAgentCluster = Boolean(agentTaskSpace) || agentOwnedTabs.length > 0;
   const hasTandemWorldTab = ordinaryTabs.some((tab) => tab.kind === 'tandem');
-  const effectiveHoverPeek = collapsed ? hoverPeek : false;
 
-  useEffect(() => () => {
-    if (leaveTimerRef.current !== null) window.clearTimeout(leaveTimerRef.current);
-  }, []);
-
-  const cancelHoverLeave = () => {
-    if (leaveTimerRef.current !== null) {
-      window.clearTimeout(leaveTimerRef.current);
-      leaveTimerRef.current = null;
-    }
-  };
-
-  const scheduleHoverLeave = () => {
-    cancelHoverLeave();
-    leaveTimerRef.current = window.setTimeout(() => setHoverPeek(false), 160);
-  };
-
-  const peeking = Boolean(vertical && collapsed && drawOutOnHover && effectiveHoverPeek);
-
-  useEffect(() => {
-    onHoverPeekChange?.(peeking);
-    return () => onHoverPeekChange?.(false);
-  }, [onHoverPeekChange, peeking]);
-
-  if (vertical && collapsed && !peeking) {
-    return (
-      <aside
-        className="side-rail side-rail-left tab-rail-collapsed"
-        aria-label="Tabs collapsed"
-        onMouseEnter={() => {
-          if (!drawOutOnHover) return;
-          cancelHoverLeave();
-          setHoverPeek(true);
-        }}
-        onMouseLeave={() => {
-          if (drawOutOnHover) scheduleHoverLeave();
-        }}
-      >
-        <button type="button" className="pane-toggle" onClick={() => onCollapseChange?.(false)} aria-label="Open tabs">
-          <ChevronRight size={17} />
-        </button>
-      </aside>
-    );
-  }
   const startRename = (group: BrowserTabGroup) => {
     cancelRenameRef.current = false;
     setEditingGroupId(group.id);
@@ -175,17 +109,9 @@ export function TabStrip({
     const accessibleName = taskStatus
       ? `${tabTitle}, ${taskStatus}`
       : tab.pinned ? `${tabTitle}, pinned` : group ? `${tabTitle}, ${group.name} group` : undefined;
-    const canMarkContext = Boolean(
-      onToggleTabContext
-      && (!tab.kind || tab.kind === 'browser')
-      && !isAgentOwned
-      && tab.url
-      && (tab.url.startsWith('http://') || tab.url.startsWith('https://')),
-    );
-    const contextSelected = Boolean(contextTabIds?.has(tab.id));
     return (
       <div
-        className={`tab ${isActive ? 'tab-active' : ''} ${tab.pinned ? 'tab-pinned' : ''}${isAgentOwned ? ' tab-agent' : ''}${contextSelected ? ' tab-in-context' : ''}${groupClasses}`}
+        className={`tab ${isActive ? 'tab-active' : ''} ${tab.pinned ? 'tab-pinned' : ''}${isAgentOwned ? ' tab-agent' : ''}${groupClasses}`}
         key={tab.id}
         role="tab"
         aria-label={accessibleName}
@@ -205,20 +131,10 @@ export function TabStrip({
           }
         }}
       >
-        {canMarkContext ? (
-          <label className="tab-context-mark" title={contextSelected ? 'Remove from Ask context' : 'Add to Ask context'} onClick={(event) => event.stopPropagation()}>
-            <input
-              type="checkbox"
-              checked={contextSelected}
-              aria-label={contextSelected ? `Remove ${tabTitle} from context` : `Add ${tabTitle} to context`}
-              onChange={(event) => onToggleTabContext?.(tab.id, event.target.checked)}
-            />
-          </label>
-        ) : null}
         <span className="tab-icon" aria-hidden="true">
           <TabFavicon key={`${tab.failure ? 'failed' : 'ready'}:${tab.faviconUrls?.join('|') ?? tab.kind}:${tab.taskStatus ?? ''}`} tab={tab} />
         </span>
-        {tab.pinned && !vertical ? null : <span className="tab-title">{tab.title || 'Untitled'}</span>}
+        {tab.pinned ? null : <span className="tab-title">{tab.title || 'Untitled'}</span>}
         {tab.isLoading ? <span className="tab-loading" aria-label="Loading" /> : null}
         {tab.kind !== 'task' && tab.kind !== 'tandem' && (tab.pinned || tab.taskSpaceId) ? null : (
           <button
@@ -241,119 +157,82 @@ export function TabStrip({
     );
   };
 
-  const ordinaryStrip = (
-    <div
-      className={vertical ? 'tab-strip tab-strip-vertical' : 'tab-strip'}
-      role="tablist"
-      aria-label="Browser tabs"
-      onDragOver={(event) => event.preventDefault()}
-      onDrop={(event) => dropTab(event, null, onReorder)}
-    >
-      {onOpenTandemWorld && !hasTandemWorldTab ? (
-        <button
-          type="button"
-          className="tab tab-tandem-world"
-          aria-label="Open Tandem World"
-          title={tandemReady ? 'Tandem World' : tandemMessage ?? 'Connect Tandem to use Tandem World'}
-          disabled={!tandemReady}
-          onClick={onOpenTandemWorld}
-        >
-          <span className="tab-icon" aria-hidden="true"><BookOpenText size={15} /></span>
-          <span className="tab-title">Tandem</span>
-        </button>
-      ) : null}
-      {ordinaryTabs.flatMap((tab) => {
-        const group = tab.groupId ? groupsById.get(tab.groupId) : undefined;
-        const showGroup = Boolean(group && !renderedGroups.has(group.id));
-        if (group) renderedGroups.add(group.id);
-        return [
-          showGroup && group ? (
-            <TabGroupChip
-              key={`group-${group.id}`}
-              group={group}
-              count={tabCountByGroup.get(group.id) ?? 0}
-              editing={editingGroupId === group.id}
-              draftName={groupName}
-              onDraftNameChange={setGroupName}
-              onFinishRename={finishRename}
-              onCancelRename={cancelRename}
-              onStartRename={() => startRename(group)}
-              onToggle={() => onToggleGroup(group.id)}
-              onShowMenu={() => onShowGroupMenu(group.id)}
-            />
-          ) : null,
-          renderTab(tab, group),
-        ];
-      })}
-      <button className="new-tab-button" type="button" aria-label="New tab" onClick={onCreate}>
-        <Plus size={18} />
-      </button>
-    </div>
-  );
-
-  const agentStrip = showAgentCluster ? (
-    <div className={vertical ? 'tab-strip-agent tab-strip-agent-vertical' : 'tab-strip-agent'} role="tablist" aria-label="Agent Tabs and reply">
-      {agentTaskSpace ? (
-        <button
-          type="button"
-          className={`agent-tabs-entry ${watchingAgentTabs ? 'agent-tabs-entry-active' : ''} agent-tabs-entry-${agentTaskSpace.owner === 'user' ? 'user' : 'agent'}`}
-          aria-label={`Agent Tabs · ${agentTaskSpace.name}. ${agentTaskSpace.owner === 'user' ? 'You own these tabs.' : 'Agent owns these tabs.'} Return to live view.`}
-          title={`Agent Tabs · ${agentTaskSpace.name}`}
-          onClick={onWatchAgentTabs}
-        >
-          <span className="agent-tabs-entry-label">Agent Tabs · {agentTaskSpace.name}</span>
-          {watchingAgentTabs ? (
-            <span className="agent-tabs-entry-subtitle" aria-hidden="true">
-              {agentTaskSpace.owner === 'user' ? 'You own · Watching' : 'Agent owns · Watching'}
-            </span>
-          ) : (
-            <span className="agent-tabs-entry-subtitle" aria-hidden="true">
-              {agentTaskSpace.owner === 'user' ? 'You own' : 'Agent owns'}
-            </span>
-          )}
-          <span className="agent-tabs-entry-count" aria-hidden="true">{agentTaskSpace.tabIds.length}</span>
-        </button>
-      ) : null}
-      {agentOwnedTabs.map((tab) => renderTab(tab))}
-    </div>
-  ) : null;
-
-  if (vertical) {
-    return (
-      <aside
-        className={`tab-rail side-pane ${peeking ? 'tab-rail-hover-peek' : ''}`}
-        aria-label="Tabs"
-        onMouseEnter={() => {
-          if (!peeking) return;
-          cancelHoverLeave();
-          setHoverPeek(true);
-        }}
-        onMouseLeave={() => {
-          if (peeking) scheduleHoverLeave();
-        }}
-      >
-        <div className="tab-rail-heading">
-          <span>Tabs</span>
-          {peeking ? (
-            <button type="button" className="pane-toggle" onClick={() => onCollapseChange?.(false)} aria-label="Keep tabs open">
-              <ChevronRight size={17} />
-            </button>
-          ) : (
-            <button type="button" className="pane-toggle" onClick={() => onCollapseChange?.(true)} aria-label="Collapse tabs">
-              <ChevronLeft size={17} />
-            </button>
-          )}
-        </div>
-        {ordinaryStrip}
-        {agentStrip}
-      </aside>
-    );
-  }
-
   return (
     <div className="tab-row">
-      {ordinaryStrip}
-      {agentStrip}
+      <div
+        className="tab-strip"
+        role="tablist"
+        aria-label="Browser tabs"
+        onDragOver={(event) => event.preventDefault()}
+        onDrop={(event) => dropTab(event, null, onReorder)}
+      >
+        {onOpenTandemWorld && !hasTandemWorldTab ? (
+          <button
+            type="button"
+            className="tab tab-tandem-world"
+            aria-label="Open Tandem World"
+            title={tandemReady ? 'Tandem World' : tandemMessage ?? 'Connect Tandem to use Tandem World'}
+            disabled={!tandemReady}
+            onClick={onOpenTandemWorld}
+          >
+            <span className="tab-icon" aria-hidden="true"><BookOpenText size={15} /></span>
+            <span className="tab-title">Tandem</span>
+          </button>
+        ) : null}
+        {ordinaryTabs.flatMap((tab) => {
+          const group = tab.groupId ? groupsById.get(tab.groupId) : undefined;
+          const showGroup = Boolean(group && !renderedGroups.has(group.id));
+          if (group) renderedGroups.add(group.id);
+          return [
+            showGroup && group ? (
+              <TabGroupChip
+                key={`group-${group.id}`}
+                group={group}
+                count={tabCountByGroup.get(group.id) ?? 0}
+                editing={editingGroupId === group.id}
+                draftName={groupName}
+                onDraftNameChange={setGroupName}
+                onFinishRename={finishRename}
+                onCancelRename={cancelRename}
+                onStartRename={() => startRename(group)}
+                onToggle={() => onToggleGroup(group.id)}
+                onShowMenu={() => onShowGroupMenu(group.id)}
+              />
+            ) : null,
+            renderTab(tab, group),
+          ];
+        })}
+        {/* Keep + beside the last ordinary tab; do not dock it at the viewport edge. */}
+        <button className="new-tab-button" type="button" aria-label="New tab" onClick={onCreate}>
+          <Plus size={18} />
+        </button>
+      </div>
+      {showAgentCluster ? (
+        <div className="tab-strip-agent" role="tablist" aria-label="Agent Tabs and reply">
+          {agentTaskSpace ? (
+            <button
+              type="button"
+              className={`agent-tabs-entry ${watchingAgentTabs ? 'agent-tabs-entry-active' : ''} agent-tabs-entry-${agentTaskSpace.owner === 'user' ? 'user' : 'agent'}`}
+              aria-label={`Agent Tabs · ${agentTaskSpace.name}. ${agentTaskSpace.owner === 'user' ? 'You own these tabs.' : 'Agent owns these tabs.'} Return to live view.`}
+              title={`Agent Tabs · ${agentTaskSpace.name}`}
+              onClick={onWatchAgentTabs}
+            >
+              <span className="agent-tabs-entry-label">Agent Tabs · {agentTaskSpace.name}</span>
+              {watchingAgentTabs ? (
+                <span className="agent-tabs-entry-subtitle" aria-hidden="true">
+                  {agentTaskSpace.owner === 'user' ? 'You own · Watching' : 'Agent owns · Watching'}
+                </span>
+              ) : (
+                <span className="agent-tabs-entry-subtitle" aria-hidden="true">
+                  {agentTaskSpace.owner === 'user' ? 'You own' : 'Agent owns'}
+                </span>
+              )}
+              <span className="agent-tabs-entry-count" aria-hidden="true">{agentTaskSpace.tabIds.length}</span>
+            </button>
+          ) : null}
+          {agentOwnedTabs.map((tab) => renderTab(tab))}
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -8,14 +8,13 @@ interface StorageWriter {
   setItem: (key: string, value: string) => void;
 }
 
-/** Left rail hosts vertical tabs — narrower than the old workspace pane. */
-export const DEFAULT_LEFT_PANE_WIDTH = 200;
-export const MIN_LEFT_PANE_WIDTH = 160;
-export const MAX_LEFT_PANE_WIDTH = 320;
+export const DEFAULT_LEFT_PANE_WIDTH = 286;
+export const MIN_LEFT_PANE_WIDTH = 240;
+export const MAX_LEFT_PANE_WIDTH = 480;
 
 const MIN_BROWSER_WIDTH = 320;
 const FIXED_HORIZONTAL_SPACE = 52;
-const PANE_WIDTH_STORAGE_KEY = 'poppin:tab-rail-width:v1';
+const PANE_WIDTH_STORAGE_KEY = 'poppin:pane-width:v2';
 
 export function normalizeLeftPaneWidth(width: number, viewportWidth: number): number {
   const { minimum, maximum } = getLeftPaneWidthRange(viewportWidth);

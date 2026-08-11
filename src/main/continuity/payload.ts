@@ -226,8 +226,6 @@ function isBrowserSettings(value: unknown): value is BrowserSettings {
     && typeof settings.newTabPosition === 'string'
     && typeof settings.warnBeforeClosingMultipleTabs === 'boolean'
     && typeof settings.searchEngine === 'string'
-    && typeof settings.tabsStartCollapsed === 'boolean'
-    && typeof settings.drawOutTabsOnHover === 'boolean'
     && Object.keys(DEFAULT_BROWSER_SETTINGS).every((key) => key in settings);
 }
 

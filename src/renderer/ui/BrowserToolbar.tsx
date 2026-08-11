@@ -181,14 +181,6 @@ export function BrowserSettingsPanel({ settings, canReopenClosedTab, onClose, on
           <input type="checkbox" checked={settings.warnBeforeClosingMultipleTabs} onChange={(event) => onUpdate({ warnBeforeClosingMultipleTabs: event.target.checked })} />
           Warn before closing multiple tabs
         </label>
-        <label className="settings-toggle">
-          <input type="checkbox" checked={settings.tabsStartCollapsed} onChange={(event) => onUpdate({ tabsStartCollapsed: event.target.checked })} />
-          Start with the tabs rail collapsed
-        </label>
-        <label className="settings-toggle">
-          <input type="checkbox" checked={settings.drawOutTabsOnHover} onChange={(event) => onUpdate({ drawOutTabsOnHover: event.target.checked })} />
-          Draw out tabs on hover when collapsed
-        </label>
 
         <button type="button" className="settings-secondary" disabled={!canReopenClosedTab} onClick={onReopenClosedTab}>
           <RotateCcw size={14} /> Reopen closed tab

@@ -1,5 +1,5 @@
 import { ExternalLink, Columns2, X } from 'lucide-react';
-import { type CSSProperties, type FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { type CSSProperties, type FormEvent, useEffect, useRef, useState } from 'react';
 
 import { DEFAULT_BROWSER_SETTINGS, type BrowserCommand, type BrowserCommandResult, type BrowserSnapshot } from '../../shared/browser';
 import type { WorkspaceCommand, WorkspaceCommandResult, WorkspaceSnapshot } from '../../shared/workspace';
@@ -12,6 +12,7 @@ import { Brand } from './Brand';
 import { BrowserToolbar } from './BrowserToolbar';
 import { TabStrip } from './TabStrip';
 import { DownloadsPopover } from './DownloadsPopover';
+import { WorkspacePane } from './WorkspacePane';
 import { TaskTabView } from './TaskTabView';
 import { AgentDock } from './AgentDock';
 import { CommandBar } from './CommandBar';
@@ -64,11 +65,8 @@ export function App() {
   const [addressIssue, setAddressIssue] = useState<AddressIssue | null>(null);
   const [isEditingAddress, setIsEditingAddress] = useState(false);
   const [workspaceSnapshot, setWorkspaceSnapshot] = useState<WorkspaceSnapshot>(EMPTY_WORKSPACE);
-  // Tabs live in a collapsible left rail. There is no permanent workspace pane.
-  // Default collapsed so the page stays the hero; Settings can change this.
-  const [tabsCollapsed, setTabsCollapsed] = useState(true);
-  const [tabsHoverPeek, setTabsHoverPeek] = useState(false);
-  const [tabsCollapseSeeded, setTabsCollapseSeeded] = useState(false);
+  // A fresh browser opens for browsing first. The workspace pane expands on demand.
+  const [workspaceCollapsed, setWorkspaceCollapsed] = useState(true);
   const [taskTabActive, setTaskTabActive] = useState(false);
   const [taskSnapshot, setTaskSnapshot] = useState<TaskSnapshot>(EMPTY_TASK);
   const [browserAgentSnapshot, setBrowserAgentSnapshot] = useState<BrowserAgentSnapshot>(EMPTY_BROWSER_AGENT);
@@ -91,11 +89,7 @@ export function App() {
   const activeTab = activeNativeTab || taskTabActive ? null : browserActiveTab;
   const browserTabs = snapshot.tabs.filter((tab) => !tab.taskSpaceId || (browserAgentSnapshot.watching && tab.taskSpaceId === browserAgentSnapshot.taskSpace?.id));
   const visibleTabs = [
-    ...browserTabs.map((tab) => ({
-      ...tab,
-      url: tab.url,
-      kind: tab.surface === 'tandem-world' ? 'tandem' as const : 'browser' as const,
-    })),
+    ...browserTabs.map((tab) => ({ ...tab, kind: tab.surface === 'tandem-world' ? 'tandem' as const : 'browser' as const })),
     ...(taskSnapshot.task ? [{
       id: TASK_TAB_ID,
       title: taskSnapshot.task.kind === 'code' ? 'Review' : 'Reply',
@@ -106,10 +100,6 @@ export function App() {
     }] : []),
     ...pagesSnapshot.tabs.map((tab) => ({ id: tab.id, title: tab.title, kind: tab.kind })),
   ];
-  const contextTabIds = useMemo(
-    () => new Set(workspaceSnapshot.tabContexts.map((item) => item.tabId)),
-    [workspaceSnapshot.tabContexts],
-  );
   const activeTabId = taskTabActive ? TASK_TAB_ID : (activeNativeTab?.id ?? snapshot.activeTabId);
   const address = isEditingAddress ? addressDraft : activeTab?.url ?? (activeNativeTab ? `${activeNativeTab.kind}://${activeNativeTab.pageId}` : '');
   const addressError = visibleAddressIssue(addressIssue, activeTab);
@@ -127,7 +117,6 @@ export function App() {
   const agentDockHeight = dockPresentation === 'card'
     ? AGENT_DOCK_CARD_HEIGHT
     : dockPresentation === 'pill' ? AGENT_DOCK_PILL_HEIGHT : 0;
-  const tabsRailNarrow = tabsCollapsed && !tabsHoverPeek;
   const paneStyle = {
     '--chrome-height': `${chromeHeight}px`,
     '--titlebar-left-inset': `${getTitlebarLeftInset(chromeLayout.density, snapshot.isFullScreen)}px`,
@@ -144,11 +133,6 @@ export function App() {
   if (attentionKey !== seenAttentionKey) {
     setSeenAttentionKey(attentionKey);
     if (attentionKey) setTaskTabActive(true);
-  }
-
-  if (!tabsCollapseSeeded && snapshot.activeTabId) {
-    setTabsCollapseSeeded(true);
-    setTabsCollapsed(snapshot.settings.tabsStartCollapsed);
   }
 
   useEffect(() => {
@@ -253,17 +237,14 @@ export function App() {
   }, [tabSearchOpen]);
 
   useEffect(() => {
-    // WebContentsView sits above HTML, so hover-draw-out must widen the left
-    // inset or the expanded rail is covered by the live page.
-    const tabsOccupyPage = !tabsCollapsed || tabsHoverPeek;
     void window.poppinBrowser.command({
       type: 'setLayout',
       topInset: chromeHeight,
-      leftInset: tabsOccupyPage ? leftPaneWidth + 14 : 46,
+      leftInset: workspaceCollapsed ? 46 : leftPaneWidth + 14,
       rightInset: 24,
       bottomInset: commandCollapsed ? 0 : 94 + commandOverlayHeight + agentDockHeight,
     });
-  }, [agentDockHeight, chromeHeight, commandCollapsed, commandOverlayHeight, leftPaneWidth, tabsCollapsed, tabsHoverPeek]);
+  }, [agentDockHeight, chromeHeight, commandCollapsed, commandOverlayHeight, leftPaneWidth, workspaceCollapsed]);
 
   const resizeLeftPane = (requestedWidth: number) => {
     setPreferredLeftPaneWidth(clampResizedLeftPaneWidth(requestedWidth, viewport.width));
@@ -319,7 +300,7 @@ export function App() {
       const result = await window.poppinTandem.command(command);
       if (result.ok && command.type === 'openWorld') {
         setTaskTabActive(false);
-        setTabsCollapsed(true);
+        setWorkspaceCollapsed(true);
         void window.poppinSettings.command({ type: 'close' });
         void window.poppinPages.command({ type: 'deactivateTabs' });
       }
@@ -425,112 +406,68 @@ export function App() {
           />
         </div>
         <TabSearchBar open={tabSearchOpen} onOpenChange={setTabSearchOpen} onCommand={sendCommand} />
+        <TabStrip
+          tabs={visibleTabs}
+          groups={snapshot.groups}
+          activeTabId={activeTabId}
+          onActivate={(tabId) => {
+            if (tabId === TASK_TAB_ID) {
+              setTaskTabActive(true);
+              return;
+            }
+            setTaskTabActive(false);
+            const nativeTab = pagesSnapshot.tabs.find((candidate) => candidate.id === tabId);
+            if (nativeTab) {
+              if (browserAgentSnapshot.watching) void sendBrowserAgentCommand({ type: 'leaveWatch' });
+              void sendPagesCommand({ type: 'activateTab', tabId });
+              return;
+            }
+            const tab = snapshot.tabs.find((candidate) => candidate.id === tabId);
+            if (tab?.surface === 'tandem-world') setWorkspaceCollapsed(true);
+            if (browserAgentSnapshot.watching && !tab?.taskSpaceId) void sendBrowserAgentCommand({ type: 'leaveWatch' });
+            void sendPagesCommand({ type: 'deactivateTabs' });
+            void sendCommand({ type: 'activate', tabId });
+          }}
+          onClose={(tabId) => {
+            if (tabId === TASK_TAB_ID) { setTaskTabActive(false); return; }
+            if (pagesSnapshot.tabs.some((tab) => tab.id === tabId)) void sendPagesCommand({ type: 'closeTab', tabId });
+            else if (snapshot.tabs.find((tab) => tab.id === tabId)?.surface === 'tandem-world') void sendTandemCommand({ type: 'closeWorld' });
+            else void sendCommand({ type: 'close', tabId });
+          }}
+          onCreate={() => { void sendPagesCommand({ type: 'deactivateTabs' }); void sendCommand({ type: 'create' }); }}
+          onReorder={(tabId, beforeTabId) => { if (pagesSnapshot.tabs.some((tab) => tab.id === tabId)) void sendPagesCommand({ type: 'reorderTab', tabId, beforeTabId: pagesSnapshot.tabs.some((tab) => tab.id === beforeTabId) ? beforeTabId : null }); else void sendCommand({ type: 'reorder', tabId, beforeTabId: snapshot.tabs.some((tab) => tab.id === beforeTabId) ? beforeTabId : null }); }}
+          onShowTabMenu={(tabId) => void sendCommand({ type: 'showTabMenu', tabId })}
+          onToggleGroup={(groupId) => void sendCommand({ type: 'toggleGroup', groupId })}
+          onRenameGroup={(groupId, name) => void sendCommand({ type: 'renameGroup', groupId, name })}
+          onShowGroupMenu={(groupId) => void sendCommand({ type: 'showGroupMenu', groupId })}
+          agentTaskSpace={browserAgentSnapshot.taskSpace}
+          watchingAgentTabs={browserAgentSnapshot.watching}
+          onWatchAgentTabs={() => { void sendBrowserAgentCommand({ type: 'watch' }); }}
+          tandemReady={tandemSnapshot.connection.state === 'ready'}
+          tandemMessage={tandemSnapshot.connection.message}
+          onOpenTandemWorld={() => {
+            void sendTandemCommand({ type: 'openWorld' });
+          }}
+        />
       </header>
-      <TabStrip
-        orientation="vertical"
-        collapsed={tabsCollapsed}
-        onCollapseChange={setTabsCollapsed}
-        drawOutOnHover={snapshot.settings.drawOutTabsOnHover}
-        onHoverPeekChange={setTabsHoverPeek}
-        contextTabIds={contextTabIds}
-        onToggleTabContext={(tabId, selected) => { void sendWorkspaceCommand({ type: 'setTabSelected', tabId, selected }); }}
-        tabs={visibleTabs}
-        groups={snapshot.groups}
-        activeTabId={activeTabId}
-        onActivate={(tabId) => {
-          if (tabId === TASK_TAB_ID) {
-            setTaskTabActive(true);
-            return;
-          }
-          setTaskTabActive(false);
-          const nativeTab = pagesSnapshot.tabs.find((candidate) => candidate.id === tabId);
-          if (nativeTab) {
-            if (browserAgentSnapshot.watching) void sendBrowserAgentCommand({ type: 'leaveWatch' });
-            void sendPagesCommand({ type: 'activateTab', tabId });
-            return;
-          }
-          const tab = snapshot.tabs.find((candidate) => candidate.id === tabId);
-          if (tab?.surface === 'tandem-world') setTabsCollapsed(true);
-          if (browserAgentSnapshot.watching && !tab?.taskSpaceId) void sendBrowserAgentCommand({ type: 'leaveWatch' });
-          void sendPagesCommand({ type: 'deactivateTabs' });
-          void sendCommand({ type: 'activate', tabId });
-        }}
-        onClose={(tabId) => {
-          if (tabId === TASK_TAB_ID) { setTaskTabActive(false); return; }
-          if (pagesSnapshot.tabs.some((tab) => tab.id === tabId)) void sendPagesCommand({ type: 'closeTab', tabId });
-          else if (snapshot.tabs.find((tab) => tab.id === tabId)?.surface === 'tandem-world') void sendTandemCommand({ type: 'closeWorld' });
-          else void sendCommand({ type: 'close', tabId });
-        }}
-        onCreate={() => { void sendPagesCommand({ type: 'deactivateTabs' }); void sendCommand({ type: 'create' }); }}
-        onReorder={(tabId, beforeTabId) => { if (pagesSnapshot.tabs.some((tab) => tab.id === tabId)) void sendPagesCommand({ type: 'reorderTab', tabId, beforeTabId: pagesSnapshot.tabs.some((tab) => tab.id === beforeTabId) ? beforeTabId : null }); else void sendCommand({ type: 'reorder', tabId, beforeTabId: snapshot.tabs.some((tab) => tab.id === beforeTabId) ? beforeTabId : null }); }}
-        onShowTabMenu={(tabId) => void sendCommand({ type: 'showTabMenu', tabId })}
-        onToggleGroup={(groupId) => void sendCommand({ type: 'toggleGroup', groupId })}
-        onRenameGroup={(groupId, name) => void sendCommand({ type: 'renameGroup', groupId, name })}
-        onShowGroupMenu={(groupId) => void sendCommand({ type: 'showGroupMenu', groupId })}
-        agentTaskSpace={browserAgentSnapshot.taskSpace}
-        watchingAgentTabs={browserAgentSnapshot.watching}
-        onWatchAgentTabs={() => { void sendBrowserAgentCommand({ type: 'watch' }); }}
-        tandemReady={tandemSnapshot.connection.state === 'ready'}
-        tandemMessage={tandemSnapshot.connection.message}
-        onOpenTandemWorld={() => {
-          void sendTandemCommand({ type: 'openWorld' });
-        }}
-      />
-      {!tabsRailNarrow ? (
-        <PaneResizer
-          side="left"
-          width={leftPaneWidth}
-          {...getLeftPaneWidthRange(viewport.width)}
-          onResize={resizeLeftPane}
-        />
-      ) : null}
-      {taskTabActive ? (
-        <div className={`task-stage ${tabsRailNarrow ? 'tabs-collapsed' : ''}`}>
-          <TaskTabView
-            taskSnapshot={taskSnapshot}
-            workspace={workspaceSnapshot}
-            browserAgentSnapshot={browserAgentSnapshot}
-            onTaskCommand={sendTaskCommand}
-            onBrowserAgentCommand={sendBrowserAgentCommand}
-            onWorkspaceCommand={sendWorkspaceCommandResult}
-          />
-        </div>
-      ) : activeNativeTab ? (
-        <div className={`native-stage ${tabsRailNarrow ? 'tabs-collapsed' : ''}`}>
-          {activeNativeTab.kind === 'database'
-            ? <NativeDatabaseView pageId={activeNativeTab.pageId} revision={pagesRevision} onCommand={sendPagesCommand} />
-            : <NativePageView pageId={activeNativeTab.pageId} revision={pagesRevision} onCommand={sendPagesCommand} taskSnapshot={taskSnapshot} onTaskCommand={sendTaskCommand} onTaskStarted={() => setTaskTabActive(true)} />}
-        </div>
-      ) : <div className={`browser-stage ${tabsRailNarrow ? 'tabs-collapsed' : ''}`} aria-hidden="true" />}
-      {showAgentDock ? (
-        <AgentDock
-          taskSnapshot={taskSnapshot}
-          browserAgentSnapshot={browserAgentSnapshot}
-          onTaskCommand={sendTaskCommand}
-          onBrowserAgentCommand={sendBrowserAgentCommand}
-          onOpenTaskTab={() => setTaskTabActive(true)}
-        />
-      ) : null}
-      <CommandBar
-        snapshot={taskSnapshot}
-        workspace={workspaceSnapshot}
+      <WorkspacePane
+        collapsed={workspaceCollapsed}
+        snapshot={workspaceSnapshot}
         tabs={snapshot.tabs.filter((tab) => !tab.taskSpaceId)}
         activeTab={activeTab}
-        tandem={tandemSnapshot}
-        collapsed={commandCollapsed}
-        onCollapseChange={setCommandCollapsed}
-        onCommand={sendTaskCommand}
-        onWorkspaceCommand={sendWorkspaceCommand}
+        onCollapseChange={setWorkspaceCollapsed}
+        onCreate={(name) => sendWorkspaceCommand({ type: 'createWorkspace', name })}
+        onCommand={sendWorkspaceCommand}
         onPagesCommand={sendPagesCommand}
-        onTandemCommand={sendTandemCommand}
         onRefreshTab={(tabId) => { void sendWorkspaceCommand({ type: 'refreshTabContext', tabId }); }}
-        onOpenSettings={() => { void window.poppinSettings.command({ type: 'open' }); }}
-        onCreateWorkspace={(name) => sendWorkspaceCommand({ type: 'createWorkspace', name })}
         onCaptureVisualSelection={async (tabId) => {
           const message = await sendWorkspaceCommand({ type: 'captureVisualSelection', tabId });
           return { ok: message === null, ...(message ? { message } : {}) };
         }}
         onClearVisualSelection={() => { void sendWorkspaceCommand({ type: 'clearVisualSelection' }); }}
+        tandem={tandemSnapshot}
+        onTandemCommand={sendTandemCommand}
+        onOpenSettings={() => { void window.poppinSettings.command({ type: 'open' }); }}
         onRunRecipe={(prompt) => {
           setTaskTabActive(true);
           const connection = taskSnapshot.connection;
@@ -544,8 +481,43 @@ export function App() {
           }
           void sendTaskCommand({ type: 'startTask', prompt, model, reasoningEffort: effort, kind: 'work', useBrowser: true });
         }}
-        onOverlayHeightChange={setCommandOverlayHeight}
       />
+      {!workspaceCollapsed ? (
+        <PaneResizer
+          side="left"
+          width={leftPaneWidth}
+          {...getLeftPaneWidthRange(viewport.width)}
+          onResize={resizeLeftPane}
+        />
+      ) : null}
+      {taskTabActive ? (
+        <div className={`task-stage ${workspaceCollapsed ? 'workspace-collapsed' : ''}`}>
+          <TaskTabView
+            taskSnapshot={taskSnapshot}
+            workspace={workspaceSnapshot}
+            browserAgentSnapshot={browserAgentSnapshot}
+            onTaskCommand={sendTaskCommand}
+            onBrowserAgentCommand={sendBrowserAgentCommand}
+            onWorkspaceCommand={sendWorkspaceCommandResult}
+          />
+        </div>
+      ) : activeNativeTab ? (
+        <div className={`native-stage ${workspaceCollapsed ? 'workspace-collapsed' : ''}`}>
+          {activeNativeTab.kind === 'database'
+            ? <NativeDatabaseView pageId={activeNativeTab.pageId} revision={pagesRevision} onCommand={sendPagesCommand} />
+            : <NativePageView pageId={activeNativeTab.pageId} revision={pagesRevision} onCommand={sendPagesCommand} taskSnapshot={taskSnapshot} onTaskCommand={sendTaskCommand} onTaskStarted={() => setTaskTabActive(true)} />}
+        </div>
+      ) : <div className={`browser-stage ${workspaceCollapsed ? 'workspace-collapsed' : ''}`} aria-hidden="true" />}
+      {showAgentDock ? (
+        <AgentDock
+          taskSnapshot={taskSnapshot}
+          browserAgentSnapshot={browserAgentSnapshot}
+          onTaskCommand={sendTaskCommand}
+          onBrowserAgentCommand={sendBrowserAgentCommand}
+          onOpenTaskTab={() => setTaskTabActive(true)}
+        />
+      ) : null}
+      <CommandBar snapshot={taskSnapshot} workspace={workspaceSnapshot} collapsed={commandCollapsed} onCollapseChange={setCommandCollapsed} onCommand={sendTaskCommand} onOverlayHeightChange={setCommandOverlayHeight} />
     </main>
   );
 }
