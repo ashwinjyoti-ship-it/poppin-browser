@@ -2136,7 +2136,7 @@ const CAPTURE_TRANSCRIPT_SCRIPT = `(async () => {
 const VISUAL_SELECTION_SCRIPT = `new Promise((resolve) => {
   const marker = document.createElement('div');
   marker.setAttribute('data-poppin-selector', 'true');
-  Object.assign(marker.style, { position: 'fixed', zIndex: '2147483647', pointerEvents: 'none', border: '2px solid #e8820b', borderRadius: '4px', background: 'rgba(232,130,11,.08)', boxShadow: '0 0 0 9999px rgba(24,18,12,.14)' });
+  Object.assign(marker.style, { position: 'fixed', zIndex: '2147483647', pointerEvents: 'none', border: '2px solid #b8843f', borderRadius: '4px', background: 'rgba(184,132,63,.08)', boxShadow: '0 0 0 9999px rgba(24,18,12,.14)' });
   document.documentElement.appendChild(marker);
   const move = (event) => {
     const target = event.target;
