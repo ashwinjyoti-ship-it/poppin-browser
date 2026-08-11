@@ -110,6 +110,28 @@ export const EMPTY_TANDEM_SNAPSHOT: TandemSnapshot = {
 export const TANDEM_HOST_PARAM = 'host';
 export const TANDEM_HOST_VALUE = 'poppin';
 
+/**
+ * Tandem reads `?host=poppin` (and mirrors it into sessionStorage) to apply the
+ * Poppin amber theme. SPA navigations often drop the query, and restored tabs
+ * can reopen without it — re-stamp the token on every Poppin-owned Tandem URL.
+ */
+export function ensureTandemHostParam(url: string): string {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return url;
+    parsed.searchParams.set(TANDEM_HOST_PARAM, TANDEM_HOST_VALUE);
+    return parsed.toString();
+  } catch {
+    return url;
+  }
+}
+
+/** Re-applies Tandem's host-poppin theme after a load that lost `?host=poppin`. */
+export const TANDEM_HOST_THEME_SCRIPT = `(() => {
+  try { sessionStorage.setItem('udm.host', ${JSON.stringify(TANDEM_HOST_VALUE)}); } catch {}
+  document.documentElement.classList.add(${JSON.stringify(`host-${TANDEM_HOST_VALUE}`)});
+})()`;
+
 /** Tandem uses a browser router, so a page deep link is `/page/{id}`. */
 export function tandemWorldUrl(baseUrl: string, pageId?: string): string {
   const url = new URL(pageId ? `/page/${encodeURIComponent(pageId)}` : '/', baseUrl);
