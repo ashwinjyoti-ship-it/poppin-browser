@@ -56,15 +56,26 @@ function setup() {
 describe('agent registry', () => {
   it('defaults to Codex and lists every selectable harness', () => {
     expect(DEFAULT_AGENT_HARNESS_ID).toBe('codex-app-server');
-    expect(AGENT_HARNESSES.map((descriptor) => descriptor.id)).toEqual(['codex-app-server', 'codex-acp']);
+    expect(AGENT_HARNESSES.map((descriptor) => descriptor.id)).toEqual([
+      'codex-app-server',
+      'codex-acp',
+      'claude-code',
+      'cursor-acp',
+    ]);
     expect(describeAgent('codex-acp').transport).toBe('acp');
+    expect(describeAgent('claude-code').transport).toBe('acp');
+    expect(describeAgent('cursor-acp').transport).toBe('acp');
     expect(isAgentHarnessId('codex-acp')).toBe(true);
-    expect(isAgentHarnessId('claude-code')).toBe(false);
+    expect(isAgentHarnessId('claude-code')).toBe(true);
+    expect(isAgentHarnessId('cursor-acp')).toBe(true);
+    expect(isAgentHarnessId('gemini-cli')).toBe(false);
   });
 
   it('builds the transport that matches the selected harness', () => {
     expect(createAgentAdapter('codex-app-server').descriptor.transport).toBe('codex-app-server');
     expect(createAgentAdapter('codex-acp').descriptor.transport).toBe('acp');
+    expect(createAgentAdapter('claude-code').descriptor.id).toBe('claude-code');
+    expect(createAgentAdapter('cursor-acp').descriptor.id).toBe('cursor-acp');
   });
 });
 

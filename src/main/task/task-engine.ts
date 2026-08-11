@@ -43,6 +43,7 @@ import type {
 } from '../agent/agent-adapter';
 import { AgentNotInstalledError, AgentSignedOutError } from '../agent/agent-errors';
 import { AGENT_HARNESSES, createAgentAdapter, DEFAULT_AGENT_HARNESS_ID, describeAgent, isAgentHarnessId } from '../agent/agent-registry';
+import { CapabilityBridge } from '../mcp/capability-bridge';
 import { GitEngine } from '../project/git-engine';
 import { WorkspaceStore } from '../workspace/workspace-store';
 import { TaskStore } from './task-store';
@@ -121,10 +122,15 @@ export class TaskEngine {
   private saveTimer: NodeJS.Timeout | null = null;
   private readonly notificationWork = new Set<Promise<void>>();
   private pendingExternalAction: PendingExternalAction | null = null;
-  private pendingBrowserToolRequest: { requestId: AgentRequestId; command: Extract<BrowserAgentCommand, { type: 'act' | 'batch' }> } | null = null;
+  private pendingBrowserToolRequest: {
+    requestId: AgentRequestId | null;
+    command: Extract<BrowserAgentCommand, { type: 'act' | 'batch' }>;
+    resolveMcp?: (result: { ok: boolean; text: string }) => void;
+  } | null = null;
   private browserToolsAvailableInCurrentThread = false;
   private agentCapabilities: AgentHarnessCapabilities = { clientTools: true, resumeSession: true };
   private readonly agentMessages = new Map<string, string>();
+  private readonly capabilityBridge = new CapabilityBridge();
 
   constructor(
     private readonly window: BrowserWindow,
@@ -176,10 +182,14 @@ export class TaskEngine {
     const pending = this.pendingBrowserToolRequest;
     this.pendingBrowserToolRequest = null;
     this.recordBrowserRunActions(pending.command, result);
-    this.respondToBrowserTool(pending.requestId, result);
+    if (pending.requestId !== null) this.respondToBrowserTool(pending.requestId, result);
+    pending.resolveMcp?.({
+      ok: result.ok,
+      text: result.ok ? result.data ?? result.message ?? 'Browser action completed.' : result.message ?? 'Browser action failed.',
+    });
     if (this.task) {
       this.upsertProgress({
-        id: `browser-tool-${String(pending.requestId)}`,
+        id: `browser-tool-${String(pending.requestId ?? 'mcp')}`,
         kind: 'status',
         title: result.ok ? 'Browser action completed' : 'Browser action not performed',
         detail: result.data ?? result.message ?? (result.ok ? 'Completed in the approved tab.' : 'Rejected by the user.'),
@@ -245,6 +255,7 @@ export class TaskEngine {
     await this.adapter?.close();
     this.adapter = null;
     this.browserToolsAvailableInCurrentThread = false;
+    await this.capabilityBridge.close();
     await Promise.allSettled([...this.notificationWork]);
     if (this.task) this.store.save(this.task);
   }
@@ -270,6 +281,16 @@ export class TaskEngine {
       ...(this.options.locateCodex ? { locateCodex: this.options.locateCodex } : {}),
       ...(this.options.createServer ? { createServer: this.options.createServer } : {}),
       workspaceRoot: () => this.workspaceStore.getProject()?.repositoryPath ?? this.workDirectory(),
+      mcpBridgeAvailable: () => this.capabilityBridge.isAvailable(),
+      resolveMcpServers: async (tools) => {
+        if (!tools.length) {
+          this.capabilityBridge.clearTools();
+          return [];
+        }
+        await this.capabilityBridge.bind(tools, (name, args) => this.executeCapabilityToolViaMcp(name, args));
+        const server = this.capabilityBridge.toAcpMcpServer();
+        return server ? [server] : [];
+      },
     });
     adapter.on('event', (event) => this.queueAgentEvent(event));
     adapter.on('request', (request) => this.handleAgentRequest(request));
@@ -599,8 +620,12 @@ export class TaskEngine {
     if (!task || !['Running', 'Needs Approval'].includes(task.state)) return { ok: false, message: 'There is no running task to cancel.' };
     if (task.pendingApproval) this.adapter?.respondApproval(task.pendingApproval.requestId, 'cancel');
     if (this.pendingBrowserToolRequest !== null) {
-      this.respondToBrowserTool(this.pendingBrowserToolRequest.requestId, { ok: false, message: 'The task was cancelled before the browser action was approved.' });
+      const pending = this.pendingBrowserToolRequest;
       this.pendingBrowserToolRequest = null;
+      if (pending.requestId !== null) {
+        this.respondToBrowserTool(pending.requestId, { ok: false, message: 'The task was cancelled before the browser action was approved.' });
+      }
+      pending.resolveMcp?.({ ok: false, text: 'The task was cancelled before the browser action was approved.' });
     }
     if (task.threadId && task.turnId) await this.adapter?.cancel(task.threadId, task.turnId);
     task.state = 'Cancelled';
@@ -862,52 +887,25 @@ export class TaskEngine {
   }
 
   private async handleCapabilityToolCall(request: Extract<AgentRequestEvent, { type: 'toolCall' }>): Promise<void> {
-    const tool = request.tool;
-    if (tool === DATABASE_QUERY_TOOL_NAME) {
-      const argumentsValue = parseDynamicToolArguments(request.arguments);
-      if (!this.options.querySelectedDatabase || !argumentsValue) {
-        this.respondToBrowserTool(request.requestId, { ok: false, message: 'Database query is not available.' });
-        return;
-      }
-      const databaseId = stringValue(argumentsValue.databaseId);
-      const limitValue = argumentsValue.limit;
-      const limit = typeof limitValue === 'number' && Number.isFinite(limitValue) ? limitValue : 50;
-      if (!databaseId) {
-        this.respondToBrowserTool(request.requestId, { ok: false, message: 'databaseId is required.' });
-        return;
-      }
-      try {
-        this.respondToBrowserTool(request.requestId, { ok: true, data: this.options.querySelectedDatabase(databaseId, limit) });
-      } catch (error) {
-        this.respondToBrowserTool(request.requestId, { ok: false, message: error instanceof Error ? error.message : 'Database query failed.' });
-      }
+    const result = await this.runCapabilityTool(request.tool, request.arguments, {
+      onBrowserNeedsApproval: (command) => {
+        this.pendingBrowserToolRequest = { requestId: request.requestId, command };
+        this.upsertProgress({
+          id: `browser-tool-${String(request.requestId)}`,
+          kind: 'status',
+          title: 'Critical browser action needs approval',
+          detail: this.browserApprovalDetail(),
+          status: 'paused',
+        });
+        this.touchAndSchedule();
+      },
+    });
+    if (result.kind === 'waitingApproval') return;
+    if (result.kind === 'rejected') {
+      this.adapter?.rejectRequest(request.requestId, result.message);
       return;
     }
-    if (tool === PAGE_COMMENT_APPLY_TOOL_NAME) {
-      const argumentsValue = parseDynamicToolArguments(request.arguments);
-      if (!this.options.applyPageComment || !argumentsValue) {
-        this.respondToBrowserTool(request.requestId, { ok: false, message: 'Page comment resolution is not available.' });
-        return;
-      }
-      const commentId = stringValue(argumentsValue.commentId);
-      const replacement = typeof argumentsValue.replacement === 'string' ? argumentsValue.replacement : null;
-      if (!commentId || replacement === null) {
-        this.respondToBrowserTool(request.requestId, { ok: false, message: 'commentId and replacement are required.' });
-        return;
-      }
-      try {
-        this.respondToBrowserTool(request.requestId, { ok: true, data: this.options.applyPageComment(commentId, replacement) });
-      } catch (error) {
-        this.respondToBrowserTool(request.requestId, { ok: false, message: error instanceof Error ? error.message : 'Page instruction could not be applied.' });
-      }
-      return;
-    }
-    if (tool === TANDEM_TOOL_NAME) {
-      if (!this.options.executeTandemCapability) {
-        this.respondToBrowserTool(request.requestId, { ok: false, message: 'Tandem is not connected in Poppin.' });
-        return;
-      }
-      const result = await this.options.executeTandemCapability(request.arguments);
+    if (request.tool === TANDEM_TOOL_NAME) {
       this.adapter?.respondTool(request.requestId, result);
       this.upsertProgress({
         id: `tandem-${String(request.requestId)}`,
@@ -919,44 +917,127 @@ export class TaskEngine {
       this.touchAndSchedule();
       return;
     }
+    this.adapter?.respondTool(request.requestId, result);
+  }
+
+  private async executeCapabilityToolViaMcp(name: string, args: unknown): Promise<{ ok: boolean; text: string }> {
+    const result = await this.runCapabilityTool(name, args, {
+      onBrowserNeedsApproval: (command) => {
+        // Parking happens inside runCapabilityTool via waitingApproval + resolveMcp.
+        void command;
+      },
+      waitForBrowserApproval: true,
+    });
+    if (result.kind === 'rejected') return { ok: false, text: result.message };
+    if (result.kind === 'waitingApproval') return { ok: false, text: 'Browser action is waiting for approval.' };
+    return result;
+  }
+
+  private browserApprovalDetail(): string {
+    const browserSnapshot = this.options.getBrowserAgentSnapshot?.();
+    if (browserSnapshot?.pendingApproval) {
+      return `${browserSnapshot.pendingApproval.target}\n${browserSnapshot.pendingApproval.consequence}`;
+    }
+    return 'Approve the critical browser action to continue.';
+  }
+
+  private async runCapabilityTool(
+    tool: string,
+    rawArguments: unknown,
+    options: {
+      onBrowserNeedsApproval: (command: Extract<BrowserAgentCommand, { type: 'act' | 'batch' }>) => void;
+      waitForBrowserApproval?: boolean;
+    },
+  ): Promise<
+    | { kind: 'result'; ok: boolean; text: string }
+    | { kind: 'waitingApproval' }
+    | { kind: 'rejected'; message: string }
+  > {
+    if (tool === DATABASE_QUERY_TOOL_NAME) {
+      const argumentsValue = parseDynamicToolArguments(rawArguments);
+      if (!this.options.querySelectedDatabase || !argumentsValue) {
+        return { kind: 'result', ok: false, text: 'Database query is not available.' };
+      }
+      const databaseId = stringValue(argumentsValue.databaseId);
+      const limitValue = argumentsValue.limit;
+      const limit = typeof limitValue === 'number' && Number.isFinite(limitValue) ? limitValue : 50;
+      if (!databaseId) return { kind: 'result', ok: false, text: 'databaseId is required.' };
+      try {
+        return { kind: 'result', ok: true, text: this.options.querySelectedDatabase(databaseId, limit) };
+      } catch (error) {
+        return { kind: 'result', ok: false, text: error instanceof Error ? error.message : 'Database query failed.' };
+      }
+    }
+    if (tool === PAGE_COMMENT_APPLY_TOOL_NAME) {
+      const argumentsValue = parseDynamicToolArguments(rawArguments);
+      if (!this.options.applyPageComment || !argumentsValue) {
+        return { kind: 'result', ok: false, text: 'Page comment resolution is not available.' };
+      }
+      const commentId = stringValue(argumentsValue.commentId);
+      const replacement = typeof argumentsValue.replacement === 'string' ? argumentsValue.replacement : null;
+      if (!commentId || replacement === null) {
+        return { kind: 'result', ok: false, text: 'commentId and replacement are required.' };
+      }
+      try {
+        return { kind: 'result', ok: true, text: this.options.applyPageComment(commentId, replacement) };
+      } catch (error) {
+        return { kind: 'result', ok: false, text: error instanceof Error ? error.message : 'Page instruction could not be applied.' };
+      }
+    }
+    if (tool === TANDEM_TOOL_NAME) {
+      if (!this.options.executeTandemCapability) {
+        return { kind: 'result', ok: false, text: 'Tandem is not connected in Poppin.' };
+      }
+      const tandem = await this.options.executeTandemCapability(rawArguments);
+      return { kind: 'result', ok: tandem.ok, text: tandem.text };
+    }
     if (tool !== BROWSER_TOOL_NAME && tool !== BROWSER_BATCH_TOOL_NAME) {
-      this.adapter?.rejectRequest(request.requestId, 'Poppin supports only its task-scoped browser tools.');
-      return;
+      return { kind: 'rejected', message: 'Poppin supports only its task-scoped browser tools.' };
     }
     if (this.pendingBrowserToolRequest !== null) {
-      this.respondToBrowserTool(request.requestId, { ok: false, message: 'Resolve the current browser approval before another action.' });
-      return;
+      return { kind: 'result', ok: false, text: 'Resolve the current browser approval before another action.' };
     }
     if (!this.options.executeBrowserAgentCommand) {
-      this.respondToBrowserTool(request.requestId, { ok: false, message: 'Controlled browser use is not available.' });
-      return;
+      return { kind: 'result', ok: false, text: 'Controlled browser use is not available.' };
     }
     const command = tool === BROWSER_BATCH_TOOL_NAME
-      ? parseBrowserBatchArguments(request.arguments)
+      ? parseBrowserBatchArguments(rawArguments)
       : (() => {
-          const parsed = parseBrowserToolArguments(request.arguments);
+          const parsed = parseBrowserToolArguments(rawArguments);
           return parsed ? { type: 'act', taskSpaceId: parsed.taskSpaceId, tabId: parsed.tabId, action: parsed.action } as const : null;
         })();
     if (!command) {
-      this.respondToBrowserTool(request.requestId, { ok: false, message: 'The browser action arguments were invalid.' });
-      return;
+      return { kind: 'result', ok: false, text: 'The browser action arguments were invalid.' };
     }
     const result = await this.options.executeBrowserAgentCommand(command);
     this.recordBrowserRunActions(command, result);
     const browserSnapshot = this.options.getBrowserAgentSnapshot?.();
     if (!result.ok && browserSnapshot?.state === 'needs-approval' && browserSnapshot.pendingApproval) {
-      this.pendingBrowserToolRequest = { requestId: request.requestId, command };
-      this.upsertProgress({
-        id: `browser-tool-${String(request.requestId)}`,
-        kind: 'status',
-        title: 'Critical browser action needs approval',
-        detail: `${browserSnapshot.pendingApproval.target}\n${browserSnapshot.pendingApproval.consequence}`,
-        status: 'paused',
-      });
-      this.touchAndSchedule();
-      return;
+      if (options.waitForBrowserApproval) {
+        return await new Promise((resolve) => {
+          this.pendingBrowserToolRequest = {
+            requestId: null,
+            command,
+            resolveMcp: (value) => resolve({ kind: 'result', ok: value.ok, text: value.text }),
+          };
+          this.upsertProgress({
+            id: 'browser-tool-mcp',
+            kind: 'status',
+            title: 'Critical browser action needs approval',
+            detail: this.browserApprovalDetail(),
+            status: 'paused',
+          });
+          this.touchAndSchedule();
+        });
+      }
+      options.onBrowserNeedsApproval(command);
+      return { kind: 'waitingApproval' };
     }
-    this.respondToBrowserTool(request.requestId, result);
+    return {
+      kind: 'result',
+      ok: result.ok,
+      text: result.ok ? result.data ?? result.message ?? 'Browser action completed.' : result.message ?? 'Browser action failed.',
+    };
   }
 
   private respondToBrowserTool(requestId: AgentRequestId, result: BrowserAgentCommandResult): void {

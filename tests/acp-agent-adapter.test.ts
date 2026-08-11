@@ -59,7 +59,11 @@ class FakeAcpConnection extends EventEmitter {
   }
 }
 
-function setup(options: { workspaceRoot?: () => string | null } = {}) {
+function setup(options: {
+  workspaceRoot?: () => string | null;
+  mcpBridgeAvailable?: () => boolean;
+  resolveMcpServers?: (tools: import('../src/main/agent/agent-adapter').AgentToolSpec[]) => Promise<import('../src/main/acp/acp-protocol').AcpMcpServerStdio[]>;
+} = {}) {
   const connection = new FakeAcpConnection();
   const adapter = new AcpAgentAdapter({
     locate: async () => ({ executable: '/fake/codex-acp', args: [] }),
@@ -91,10 +95,37 @@ describe('AcpAgentAdapter', () => {
     // ACP has no standard model list, so Poppin must not pretend to offer one.
     expect(info.controls).toEqual({ model: false, reasoning: false });
     expect(info.models).toHaveLength(1);
-    // Browser/Tandem capability tools are not exposed over ACP yet, and the
-    // adapter says so instead of letting the router promise them.
+    // Without an MCP bridge, Poppin must not promise Browser/Tandem tools.
     expect(info.capabilities.clientTools).toBe(false);
     expect(info.capabilities.resumeSession).toBe(true);
+  });
+
+  it('advertises clientTools and provisions mcpServers when the MCP bridge is available', async () => {
+    const { adapter, connection } = setup({
+      mcpBridgeAvailable: () => true,
+      resolveMcpServers: async () => [{
+        name: 'poppin',
+        command: 'node',
+        args: ['/tmp/poppin-mcp-server.mjs'],
+        env: [
+          { name: 'POPPIN_CAPABILITY_SOCKET', value: '/tmp/poppin.sock' },
+          { name: 'POPPIN_CAPABILITY_TOKEN', value: 'token' },
+        ],
+      }],
+    });
+    const info = await adapter.connect();
+    expect(info.capabilities.clientTools).toBe(true);
+
+    await adapter.createSession({
+      cwd: '/work',
+      model: 'agent-default',
+      instructions: 'BE CAREFUL',
+      tools: [{ name: 'tandem', description: 'Tandem', inputSchema: { type: 'object' } }],
+    });
+    expect(connection.requests.find((entry) => entry.method === ACP_METHODS.sessionNew)?.params).toMatchObject({
+      cwd: '/work',
+      mcpServers: [{ name: 'poppin', command: 'node' }],
+    });
   });
 
   it('creates a session and sends instructions with the first prompt', async () => {

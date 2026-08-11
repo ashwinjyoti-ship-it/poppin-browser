@@ -8,7 +8,7 @@ changes. Everything harness-specific lives below `AgentAdapter`.
 
 ## What a new harness actually costs
 
-To add Claude Code, Gemini CLI, OpenCode, or any other ACP agent:
+To add Claude Code, Cursor Agent, Gemini CLI, OpenCode, or any other ACP agent:
 
 1. **Descriptor** — one entry in `src/main/agent/agent-registry.ts`:
 
@@ -22,18 +22,26 @@ To add Claude Code, Gemini CLI, OpenCode, or any other ACP agent:
    };
    ```
 
-   Add `'claude-code'` to `AgentHarnessId` in `src/shared/agent.ts` and push the
+   Add the id to `AgentHarnessId` in `src/shared/agent.ts` and push the
    descriptor into `AGENT_HARNESSES`.
 
 2. **Locator** — a function returning `{ executable, args }` for that agent's
-   ACP entry point, in the shape of `src/main/acp/acp-locator.ts`.
+   ACP entry point, in `src/main/acp/acp-locator.ts` (wired through
+   `locateAcpHarness`).
 
-3. **Wire it up** — in `createAgentAdapter`, return
-   `new AcpAgentAdapter({ descriptor, locate, workspaceRoot })`.
+3. **Wire it up** — `createAgentAdapter` already returns `AcpAgentAdapter` for
+   every `transport: 'acp'` harness, including MCP bridge hooks.
 
-That is the whole integration. No new protocol code, no second orchestration
-path, no changes to `TaskEngine`, `BrowserAgentEngine`, the capability model, or
-the Tandem adapter.
+Installed binary names Poppin looks for today:
+
+| Harness | Binary / command |
+|---|---|
+| Codex ACP | `codex-acp` (`@agentclientprotocol/codex-acp`) |
+| Claude Code | `claude-agent-acp` (`@agentclientprotocol/claude-agent-acp`) |
+| Cursor Agent | `agent acp` (Cursor Agent CLI) |
+
+Overrides: `POPPIN_ACP_AGENT_COMMAND`, `POPPIN_CLAUDE_ACP_COMMAND`,
+`POPPIN_CURSOR_ACP_COMMAND` (plus matching `*_ARGS`).
 
 ## What the adapter negotiates for you
 
@@ -52,19 +60,22 @@ the Tandem adapter.
 - Stop reasons (`end_turn`, `cancelled`, `refusal`, `max_tokens`,
   `max_turn_requests`) map onto Poppin's task outcomes.
 
-## What is not portable yet, and why
+## Capability tools over ACP (MCP bridge)
 
 ACP has no client-defined tool mechanism. Poppin's Browser Use, Tandem and
 native-page capabilities are exposed to Codex through the app server's dynamic
-tools; the standards-compatible route for ACP agents is an **MCP server** listed
-in `session/new`'s `mcpServers`.
+tools; the standards-compatible route for ACP agents is Poppin's **MCP stdio
+server** listed in `session/new`'s `mcpServers`:
 
-Until that MCP bridge exists, `AcpAgentAdapter` reports
-`capabilities.clientTools: false`, and Poppin refuses to start a browser-required
-task on an ACP harness with an explicit message rather than starting a task the
-agent cannot complete. This is the "truthful environment" rule: the agent must
-know what it can actually read and control before planning.
+1. Electron main starts `CapabilityBridge` (Unix socket + session token).
+2. `scripts/poppin-mcp-server.mjs` is registered as the `poppin` MCP server.
+3. The MCP process forwards `tools/list` / `tools/call` to the bridge.
+4. TaskEngine executes the same Work capability tools Codex receives.
 
-Adding the bridge is a single new component (a Poppin-owned MCP stdio server
-proxying to the existing capability layer) and flips one flag — it does not
-change any harness-specific code.
+When the MCP entry is resolvable, `AcpAgentAdapter` reports
+`capabilities.clientTools: true`. When it is not, Poppin refuses
+browser-required tasks on that harness rather than starting a task the agent
+cannot complete.
+
+Overrides for the MCP launch: `POPPIN_MCP_SERVER_COMMAND`,
+`POPPIN_MCP_SERVER_ARGS`, `POPPIN_MCP_SERVER_SCRIPT`, `POPPIN_NODE_PATH`.

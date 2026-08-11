@@ -13,6 +13,7 @@ import {
   textBlock,
   type AcpAgentCapabilities,
   type AcpInitializeResponse,
+  type AcpMcpServerStdio,
   type AcpNewSessionResponse,
   type AcpPermissionOption,
   type AcpPlanEntry,
@@ -38,6 +39,7 @@ import type {
   AgentSession,
   AgentSessionRequest,
   AgentToolResult,
+  AgentToolSpec,
   AgentTurn,
 } from './agent-adapter';
 
@@ -47,6 +49,22 @@ export const CODEX_ACP_DESCRIPTOR: AgentHarnessDescriptor = {
   transport: 'acp',
   availability: 'preview',
   summary: 'Codex over the Agent Client Protocol. The portable path for any ACP-compatible harness.',
+};
+
+export const CLAUDE_CODE_DESCRIPTOR: AgentHarnessDescriptor = {
+  id: 'claude-code',
+  name: 'Claude Code',
+  transport: 'acp',
+  availability: 'preview',
+  summary: 'Claude Code over ACP (`claude-agent-acp`). Browser and Tandem reach it through Poppin MCP.',
+};
+
+export const CURSOR_ACP_DESCRIPTOR: AgentHarnessDescriptor = {
+  id: 'cursor-acp',
+  name: 'Cursor Agent',
+  transport: 'acp',
+  availability: 'preview',
+  summary: 'Cursor Agent over ACP (`agent acp`). Browser and Tandem reach it through Poppin MCP.',
 };
 
 /**
@@ -62,6 +80,13 @@ export interface AcpAgentAdapterOptions {
   createConnection?: (launch: AcpLaunch) => AcpConnection;
   /** Absolute path the agent may read and write through `fs/*`. */
   workspaceRoot?: () => string | null;
+  /** True when Poppin can launch its MCP capability bridge for this process. */
+  mcpBridgeAvailable?: () => boolean;
+  /**
+   * Builds `session/new` mcpServers for the given Poppin capability tools.
+   * Returns [] when tools cannot be provisioned; Poppin then keeps clientTools honest.
+   */
+  resolveMcpServers?: (tools: AgentToolSpec[]) => Promise<AcpMcpServerStdio[]>;
 }
 
 /**
@@ -97,7 +122,7 @@ export class AcpAgentAdapter extends EventEmitter<AgentAdapterEvents> implements
     const launch = await (this.options.locate ?? locateCodexAcp)();
     if (!launch) {
       throw new AgentNotInstalledError(
-        `${this.descriptor.name} is not installed. Install the ACP adapter (for Codex: npm i -g @agentclientprotocol/codex-acp) or set POPPIN_ACP_AGENT_COMMAND, then reconnect.`,
+        `${this.descriptor.name} is not installed. Install its ACP adapter (Codex: @agentclientprotocol/codex-acp, Claude: @agentclientprotocol/claude-agent-acp, Cursor: \`agent\` CLI) or set the matching POPPIN_*_ACP_COMMAND, then reconnect.`,
       );
     }
     const connection = this.options.createConnection?.(launch) ?? new AcpConnection(launch);
@@ -138,10 +163,8 @@ export class AcpAgentAdapter extends EventEmitter<AgentAdapterEvents> implements
       }],
       controls: { model: false, reasoning: false },
       capabilities: {
-        // Poppin capability tools reach ACP agents through MCP, which is not yet
-        // provisioned. Reporting this honestly stops the capability router from
-        // promising a browser the agent cannot actually drive.
-        clientTools: false,
+        // Capability tools reach ACP agents only through Poppin's MCP bridge.
+        clientTools: this.options.mcpBridgeAvailable?.() === true,
         resumeSession: this.agentCapabilities.loadSession === true,
       },
       detail: `ACP protocol v${this.protocolVersion}`,
@@ -150,9 +173,10 @@ export class AcpAgentAdapter extends EventEmitter<AgentAdapterEvents> implements
 
   async createSession(request: AgentSessionRequest): Promise<AgentSession> {
     const connection = this.requireConnection();
+    const mcpServers = await this.mcpServersFor(request.tools);
     const response = await connection.request<AcpNewSessionResponse>(
       ACP_METHODS.sessionNew,
-      { cwd: request.cwd, mcpServers: [] },
+      { cwd: request.cwd, mcpServers },
       60_000,
     ).catch((error: unknown) => {
       throw translateSessionError(error);
@@ -169,14 +193,15 @@ export class AcpAgentAdapter extends EventEmitter<AgentAdapterEvents> implements
   async resumeSession(sessionId: string, request: AgentResumeRequest): Promise<AgentResumeResult> {
     const connection = this.requireConnection();
     this.sessionCwd = request.cwd;
+    const mcpServers = await this.mcpServersFor(request.requiresTools || request.tools.length > 0 ? request.tools : []);
     if (this.agentCapabilities.loadSession === true) {
-      await connection.request(ACP_METHODS.sessionLoad, { sessionId, cwd: request.cwd, mcpServers: [] }, 60_000)
+      await connection.request(ACP_METHODS.sessionLoad, { sessionId, cwd: request.cwd, mcpServers }, 60_000)
         .catch((error: unknown) => {
           throw translateSessionError(error);
         });
       this.activeSessionId = sessionId;
       this.activeTurnId = '';
-      return { session: { id: sessionId }, toolsAttached: false };
+      return { session: { id: sessionId }, toolsAttached: mcpServers.length > 0 };
     }
     const session = await this.createSession(request);
     this.pendingHistoryPreamble = [
@@ -185,7 +210,7 @@ export class AcpAgentAdapter extends EventEmitter<AgentAdapterEvents> implements
         ? `EARLIER CONVERSATION\n${request.fallbackHistory.map((item) => `${item.role === 'user' ? 'User' : 'Assistant'}: ${item.text}`).join('\n\n')}`
         : '',
     ].filter(Boolean).join('\n\n');
-    return { session, toolsAttached: false };
+    return { session, toolsAttached: mcpServers.length > 0 };
   }
 
   async prompt(request: AgentPromptRequest): Promise<AgentTurn> {
@@ -250,11 +275,19 @@ export class AcpAgentAdapter extends EventEmitter<AgentAdapterEvents> implements
   }
 
   respondTool(requestId: AgentRequestId, result: AgentToolResult): void {
+    // Poppin capability tools are served through the MCP bridge, not ACP client
+    // requests. Nothing should call this path on an ACP harness.
+    void result;
     this.connection?.respondError(
       requestId,
       ACP_ERROR.methodNotFound,
-      result.text || 'Poppin capability tools are not exposed over ACP yet.',
+      'Poppin capability tools are exposed to ACP agents through MCP, not ACP client tool requests.',
     );
+  }
+
+  private async mcpServersFor(tools: AgentToolSpec[]): Promise<AcpMcpServerStdio[]> {
+    if (!tools.length || !this.options.resolveMcpServers) return [];
+    return this.options.resolveMcpServers(tools);
   }
 
   rejectRequest(requestId: AgentRequestId, message: string): void {
