@@ -94,6 +94,9 @@ xattr -dr com.apple.quarantine "/Applications/Poppin Browser.app"
 |---|---|
 | Codex agent (default) | Codex installed at `/Applications/ChatGPT.app/Contents/Resources/codex`, `/opt/homebrew/bin/codex` or `/usr/local/bin/codex`. Override with `POPPIN_CODEX_PATH`. |
 | Codex over ACP (preview) | `codex-acp` on your PATH (`npm i -g @agentclientprotocol/codex-acp`), or set `POPPIN_ACP_AGENT_COMMAND` (and optionally `POPPIN_ACP_AGENT_ARGS`). |
+| Claude Code over ACP (preview) | `claude-agent-acp` (`npm i -g @agentclientprotocol/claude-agent-acp`), or `POPPIN_CLAUDE_ACP_COMMAND`. |
+| Cursor Agent over ACP (preview) | Cursor `agent` CLI with `agent acp`, or `POPPIN_CURSOR_ACP_COMMAND`. |
+| Poppin MCP bridge (ACP tools) | Bundled `poppin-mcp-server.mjs` + system `node`. Override with `POPPIN_MCP_SERVER_SCRIPT` / `POPPIN_NODE_PATH`. |
 | Tandem World and the Tandem capability | Your Tandem address plus an API key from Tandem → Settings → API keys. Paste both into Poppin Settings → Tandem integration. The key is sealed in the macOS Keychain. |
 | GitHub delivery | `gh` CLI, authenticated. |
 

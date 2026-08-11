@@ -6,7 +6,7 @@
  * project, files, terminal, approvals). Nothing in this file may assume Codex.
  */
 
-export type AgentHarnessId = 'codex-app-server' | 'codex-acp';
+export type AgentHarnessId = 'codex-app-server' | 'codex-acp' | 'claude-code' | 'cursor-acp';
 
 /** How Poppin talks to the harness process. */
 export type AgentTransport = 'codex-app-server' | 'acp';

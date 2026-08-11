@@ -145,11 +145,10 @@ Switching harness switches the session, not the task.
 
 ### Known gaps, stated plainly
 
-- **Poppin capability tools over ACP.** ACP has no client-defined tool
-  mechanism, so Browser Use and Tandem are not yet reachable by an ACP agent.
-  The route is an MCP stdio server listed in `session/new`. Until it exists the
-  ACP adapter reports `clientTools: false` and Poppin refuses browser-required
-  tasks on that harness instead of starting one it cannot serve.
+- **Poppin capability tools over ACP.** Served through `CapabilityBridge` +
+  `scripts/poppin-mcp-server.mjs` listed in `session/new` mcpServers. ACP
+  harnesses (Codex ACP, Claude Code, Cursor Agent) report `clientTools: true`
+  when that MCP entry resolves.
 - **`SOURCE_TAB_STATE_NOT_TRANSFERRED`.** The reason code exists and is part of
   the shared vocabulary, but Poppin does not yet detect the mismatch: context
   tabs are still URL-seeded clones (`createTaskSpaceTabs`). Real detection needs

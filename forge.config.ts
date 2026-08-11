@@ -13,6 +13,9 @@ const config: ForgeConfig = {
     asar: true,
     icon: './src/renderer/assets/poppin-app-icon',
     protocols: [{ name: 'Poppin Browser', schemes: ['http', 'https'] }],
+    // MCP stdio entry is spawned by ACP agents outside Electron; keep it as a
+    // real file under resources rather than inside the asar.
+    extraResource: ['./scripts/poppin-mcp-server.mjs'],
     // Fuses mutate Electron's executable before Packager reaches its signing
     // phase. Sign the complete bundle afterwards so transferable development
     // builds do not retain Electron's now-stale embedded signature.
