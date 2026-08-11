@@ -2,6 +2,7 @@ import { ArrowLeft, ArrowRight, BookOpenText, LockKeyhole, RefreshCw, RotateCcw,
 import { type FormEvent, type ReactNode, type RefObject, useState } from 'react';
 
 import type { BrowserSettings, BrowserTabSnapshot } from '../../shared/browser';
+import type { ContinuityCommand, ContinuitySnapshot } from '../../shared/continuity';
 import type { TandemSnapshot } from '../../shared/tandem';
 import type { TandemSettingsCommand } from '../../shared/settings-overlay';
 
@@ -128,9 +129,11 @@ interface BrowserSettingsPanelProps {
   onUpdate: (settings: Partial<BrowserSettings>) => void;
   tandem?: TandemSnapshot;
   onTandemCommand?: (command: TandemSettingsCommand) => Promise<string | null>;
+  continuity?: ContinuitySnapshot;
+  onContinuityCommand?: (command: ContinuityCommand) => Promise<string | null>;
 }
 
-export function BrowserSettingsPanel({ settings, canReopenClosedTab, onClose, onReopenClosedTab, onUpdate, tandem, onTandemCommand }: BrowserSettingsPanelProps) {
+export function BrowserSettingsPanel({ settings, canReopenClosedTab, onClose, onReopenClosedTab, onUpdate, tandem, onTandemCommand, continuity, onContinuityCommand }: BrowserSettingsPanelProps) {
   return (
     <aside className="browser-settings-panel" aria-label="Poppin settings">
       <div className="settings-heading">
@@ -191,8 +194,78 @@ export function BrowserSettingsPanel({ settings, canReopenClosedTab, onClose, on
           <RotateCcw size={14} /> Reopen closed tab
         </button>
       </section>
+      {continuity && onContinuityCommand ? <ContinuitySettings snapshot={continuity} onCommand={onContinuityCommand} /> : null}
       {tandem && onTandemCommand ? <TandemSettings snapshot={tandem} onCommand={onTandemCommand} /> : null}
     </aside>
+  );
+}
+
+
+function ContinuitySettings({ snapshot, onCommand }: { snapshot: ContinuitySnapshot; onCommand: (command: ContinuityCommand) => Promise<string | null> }) {
+  const [profileName, setProfileName] = useState('');
+  const [renameName, setRenameName] = useState(snapshot.activeProfile?.name ?? '');
+  const [passphrase, setPassphrase] = useState('');
+  const [message, setMessage] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const run = async (command: ContinuityCommand) => {
+    setBusy(true);
+    const error = await onCommand(command);
+    setBusy(false);
+    setMessage(error ?? '');
+    return error;
+  };
+
+  return (
+    <section className="settings-section continuity-settings" aria-labelledby="continuity-settings-heading">
+      <div className="settings-section-heading">
+        <h3 id="continuity-settings-heading">Profile and continuity</h3>
+        <span className={`integration-status${snapshot.continuityReady ? ' integration-status-ready' : ''}`}>
+          {snapshot.activeProfile ? snapshot.activeProfile.name : 'No profile'}
+        </span>
+      </div>
+      <p>Create a local profile to export or import tabs, workspace selections, recipes, and settings between Macs. Website logins stay on each Mac.</p>
+
+      {!snapshot.activeProfile ? (
+        <>
+          <label htmlFor="continuity-profile-name">Profile name</label>
+          <input id="continuity-profile-name" value={profileName} onChange={(event) => setProfileName(event.target.value)} placeholder="Work" autoComplete="off" />
+          <button type="button" className="settings-secondary" disabled={busy || !profileName.trim()} onClick={() => { void run({ type: 'createProfile', name: profileName }); }}>
+            Create profile
+          </button>
+        </>
+      ) : (
+        <>
+          <label htmlFor="continuity-rename">Active profile</label>
+          <input id="continuity-rename" value={renameName} onChange={(event) => setRenameName(event.target.value)} autoComplete="off" />
+          <button type="button" className="settings-secondary" disabled={busy || !renameName.trim() || renameName.trim() === snapshot.activeProfile.name} onClick={() => { void run({ type: 'renameProfile', profileId: snapshot.activeProfile!.id, name: renameName }); }}>
+            Rename profile
+          </button>
+          {snapshot.profiles.length > 1 ? (
+            <label>
+              Switch profile
+              <select
+                value={snapshot.activeProfile.id}
+                disabled={busy}
+                onChange={(event) => { void run({ type: 'switchProfile', profileId: event.target.value }); }}
+              >
+                {snapshot.profiles.map((profile) => (
+                  <option key={profile.id} value={profile.id}>{profile.name}</option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+          <label htmlFor="continuity-passphrase">Continuity passphrase</label>
+          <input id="continuity-passphrase" type="password" value={passphrase} onChange={(event) => setPassphrase(event.target.value)} placeholder="At least 8 characters" autoComplete="new-password" />
+          <small>Used only to seal or open a .poppin-continuity file. Not an online account.</small>
+          <div className="tandem-actions">
+            <button type="button" className="settings-secondary" disabled={busy || passphrase.trim().length < 8} onClick={() => { void run({ type: 'exportContinuity', passphrase }); }}>Export continuity</button>
+            <button type="button" className="settings-secondary" disabled={busy || passphrase.trim().length < 8} onClick={() => { void run({ type: 'importContinuity', passphrase }); }}>Import continuity</button>
+          </div>
+        </>
+      )}
+      {message ? <span className="form-error" role="alert">{message}</span> : null}
+    </section>
   );
 }
 
