@@ -260,7 +260,7 @@ Included in a continuity package (versioned JSON inside the sealed file):
 
 | Source | Fields |
 | --- | --- |
-| `browser-state.json` | Ordinary tabs: `url`, `pinned`, `groupId` (new ids on import). Groups: `name`, `color`, `collapsed`. `activeTabId` remapped after import. All `BrowserSettings` (`linkOpening`, `focusNewTabs`, `startup`, `newTabPosition`, `warnBeforeClosingMultipleTabs`, `searchEngine`, `tabsStartCollapsed`, `drawOutTabsOnHover`). |
+| `browser-state.json` | Ordinary tabs: `url`, `pinned`, `groupId` (new ids on import). Groups: `name`, `color`, `collapsed`. `activeTabId` remapped after import. All `BrowserSettings` (`linkOpening`, `focusNewTabs`, `startup`, `newTabPosition`, `warnBeforeClosingMultipleTabs`, `searchEngine`). |
 | Workspace SQLite | `workspace.name`. Context packs (`name`, `tabRefs` url/title, `documentIds`, `tandemPageIds`, `includeMemory`). Named browser sessions (`name`, tabs url/title/pinned). Recipes (`name`, `startUrl`, sanitized `steps`, `enabled`). Tab-context selection refs by url/title (not ephemeral tab ids). Tandem context page ids/titles only (not connection secrets). `memorySelected` boolean only. |
 
 Excluded from every package (permanent credential / machine / live-work boundary):
