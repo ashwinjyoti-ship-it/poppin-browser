@@ -1,8 +1,9 @@
 import { EventEmitter } from 'node:events';
 import { readFile, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-import type { AgentHarnessDescriptor } from '../../shared/agent';
+import type { AgentHarnessDescriptor, AgentModelOption } from '../../shared/agent';
 import { AcpConnection, isRecord, type AcpLaunch } from '../acp/acp-connection';
 import { locateCodexAcp } from '../acp/acp-locator';
 import {
@@ -21,9 +22,11 @@ import {
   type AcpReadTextFileRequest,
   type AcpRequestPermissionRequest,
   type AcpSessionNotification,
+  type AcpSetConfigOptionResponse,
   type AcpToolCall,
   type AcpWriteTextFileRequest,
 } from '../acp/acp-protocol';
+import { discoverControlsFromSession } from '../acp/acp-session-config';
 import { AgentNotInstalledError, AgentSignedOutError } from './agent-errors';
 import type {
   AgentAdapter,
@@ -68,8 +71,8 @@ export const CURSOR_ACP_DESCRIPTOR: AgentHarnessDescriptor = {
 };
 
 /**
- * The model entry Poppin shows when a harness does not expose model selection.
- * ACP has no standard model list, so Poppin must not invent one.
+ * Fallback model entry when an ACP agent does not publish configOptions/models.
+ * Prefer real session configOptions when the agent provides them.
  */
 const AGENT_DEFAULT_MODEL_ID = 'agent-default';
 const AGENT_DEFAULT_EFFORT = 'agent-default';
@@ -111,6 +114,10 @@ export class AcpAgentAdapter extends EventEmitter<AgentAdapterEvents> implements
   private readonly permissionOptions = new Map<string, AcpPermissionOption[]>();
   private readonly toolActivityDetail = new Map<string, string>();
   private pendingHistoryPreamble = '';
+  private modelConfigId: string | null = null;
+  private thoughtConfigId: string | null = null;
+  private discoveredModels: AgentModelOption[] = [];
+  private discoveredControls = { model: false, reasoning: false };
 
   constructor(private readonly options: AcpAgentAdapterOptions = {}) {
     super();
@@ -147,21 +154,37 @@ export class AcpAgentAdapter extends EventEmitter<AgentAdapterEvents> implements
     });
     this.protocolVersion = typeof response.protocolVersion === 'number' ? response.protocolVersion : ACP_PROTOCOL_VERSION;
     this.agentCapabilities = response.agentCapabilities ?? {};
-    this.agentLabel = response.agentInfo?.name ?? null;
+    this.agentLabel = response.agentInfo?.title ?? response.agentInfo?.name ?? null;
+
+    const authMethods = Array.isArray(response.authMethods) ? response.authMethods : [];
+    if (authMethods.length > 0) {
+      const methodId = authMethods[0]?.id;
+      if (!methodId) {
+        throw new AgentSignedOutError(`${this.descriptor.name} requires sign-in, but offered no auth method.`);
+      }
+      try {
+        await connection.request(ACP_METHODS.authenticate, { methodId }, 60_000);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : `Sign in to ${this.descriptor.name} failed.`;
+        throw new AgentSignedOutError(`${message} Sign in to the agent (for Cursor: \`agent login\`), then reconnect.`);
+      }
+    }
+
+    await this.discoverSessionControls(connection);
 
     return {
       accountLabel: this.agentLabel ? `${this.agentLabel} over ACP` : `${this.descriptor.name} over ACP`,
-      // ACP does not standardise model listing. Poppin exposes one neutral entry
-      // and tells the UI that model/reasoning selectors do not apply.
-      models: [{
-        id: AGENT_DEFAULT_MODEL_ID,
-        name: `${this.agentLabel ?? this.descriptor.name} default`,
-        description: 'The model configured inside the selected ACP agent.',
-        reasoningEfforts: [AGENT_DEFAULT_EFFORT],
-        defaultReasoningEffort: AGENT_DEFAULT_EFFORT,
-        isDefault: true,
-      }],
-      controls: { model: false, reasoning: false },
+      models: this.discoveredModels.length > 0
+        ? this.discoveredModels
+        : [{
+            id: AGENT_DEFAULT_MODEL_ID,
+            name: `${this.agentLabel ?? this.descriptor.name} default`,
+            description: 'The model configured inside the selected ACP agent.',
+            reasoningEfforts: [AGENT_DEFAULT_EFFORT],
+            defaultReasoningEffort: AGENT_DEFAULT_EFFORT,
+            isDefault: true,
+          }],
+      controls: this.discoveredControls,
       capabilities: {
         // Capability tools reach ACP agents only through Poppin's MCP bridge.
         clientTools: this.options.mcpBridgeAvailable?.() === true,
@@ -179,14 +202,16 @@ export class AcpAgentAdapter extends EventEmitter<AgentAdapterEvents> implements
       { cwd: request.cwd, mcpServers },
       60_000,
     ).catch((error: unknown) => {
-      throw translateSessionError(error);
+      throw translateSessionError(error, this.descriptor.name);
     });
     this.activeSessionId = response.sessionId;
     this.activeTurnId = '';
     this.sessionCwd = request.cwd;
+    this.rememberDiscoveredControls(response);
     // ACP has no developer-instructions field: instructions travel with the first
     // prompt as a text content block.
     this.pendingHistoryPreamble = request.instructions;
+    await this.applyModelConfig(response.sessionId, request.model);
     return { id: response.sessionId };
   }
 
@@ -197,7 +222,7 @@ export class AcpAgentAdapter extends EventEmitter<AgentAdapterEvents> implements
     if (this.agentCapabilities.loadSession === true) {
       await connection.request(ACP_METHODS.sessionLoad, { sessionId, cwd: request.cwd, mcpServers }, 60_000)
         .catch((error: unknown) => {
-          throw translateSessionError(error);
+          throw translateSessionError(error, this.descriptor.name);
         });
       this.activeSessionId = sessionId;
       this.activeTurnId = '';
@@ -222,6 +247,9 @@ export class AcpAgentAdapter extends EventEmitter<AgentAdapterEvents> implements
     const preamble = this.pendingHistoryPreamble;
     this.pendingHistoryPreamble = '';
     const blocks = [...(preamble ? [textBlock(preamble)] : []), textBlock(request.prompt)];
+
+    await this.applyModelConfig(request.sessionId, request.model);
+    await this.applyThoughtConfig(request.sessionId, request.reasoningEffort);
 
     // `session/prompt` resolves only when the whole turn ends, so Poppin tracks
     // it in the background and reports the stop reason as a turn result.
@@ -300,10 +328,69 @@ export class AcpAgentAdapter extends EventEmitter<AgentAdapterEvents> implements
     this.activeSessionId = '';
     this.activeTurnId = '';
     this.sessionCwd = '';
+    this.modelConfigId = null;
+    this.thoughtConfigId = null;
+    this.discoveredModels = [];
+    this.discoveredControls = { model: false, reasoning: false };
     this.permissionOptions.clear();
     this.toolActivityDetail.clear();
     this.pendingHistoryPreamble = '';
     await connection?.close();
+  }
+
+  private async discoverSessionControls(connection: AcpConnection): Promise<void> {
+    // Probe a throwaway session so the command bar can list real models before
+    // the user starts a task. Agents that cannot create a session yet still
+    // connect with the neutral default model entry.
+    try {
+      const probeCwd = this.options.workspaceRoot?.() ?? tmpdir();
+      const response = await connection.request<AcpNewSessionResponse>(
+        ACP_METHODS.sessionNew,
+        { cwd: probeCwd, mcpServers: [] },
+        60_000,
+      );
+      this.rememberDiscoveredControls(response);
+    } catch {
+      this.discoveredModels = [];
+      this.discoveredControls = { model: false, reasoning: false };
+      this.modelConfigId = null;
+      this.thoughtConfigId = null;
+    }
+  }
+
+  private rememberDiscoveredControls(response: AcpNewSessionResponse): void {
+    const discovered = discoverControlsFromSession(response);
+    if (discovered.models.length === 0) return;
+    this.discoveredModels = discovered.models;
+    this.discoveredControls = discovered.controls;
+    this.modelConfigId = discovered.modelConfigId;
+    this.thoughtConfigId = discovered.thoughtConfigId;
+  }
+
+  private async applyModelConfig(sessionId: string, modelId: string): Promise<void> {
+    if (!this.modelConfigId || !modelId || modelId === AGENT_DEFAULT_MODEL_ID) return;
+    await this.setConfigOption(sessionId, this.modelConfigId, modelId);
+  }
+
+  private async applyThoughtConfig(sessionId: string, effort: string): Promise<void> {
+    if (!this.thoughtConfigId || !effort || effort === AGENT_DEFAULT_EFFORT) return;
+    await this.setConfigOption(sessionId, this.thoughtConfigId, effort);
+  }
+
+  private async setConfigOption(sessionId: string, configId: string, value: string): Promise<void> {
+    const connection = this.requireConnection();
+    try {
+      const response = await connection.request<AcpSetConfigOptionResponse>(
+        ACP_METHODS.sessionSetConfigOption,
+        { sessionId, configId, value },
+        30_000,
+      );
+      if (Array.isArray(response?.configOptions)) {
+        this.rememberDiscoveredControls({ sessionId, configOptions: response.configOptions });
+      }
+    } catch {
+      // Some agents accept the session default only; do not fail the turn for that.
+    }
   }
 
   private requireConnection(): AcpConnection {
@@ -538,8 +625,14 @@ function stopReasonMessage(stopReason: AcpPromptResponse['stopReason']): string 
   }
 }
 
-function translateSessionError(error: unknown): Error {
-  const message = error instanceof Error ? error.message : 'The ACP agent rejected the session.';
+function translateSessionError(error: unknown, harnessName = 'The ACP agent'): Error {
+  const message = error instanceof Error ? error.message : `${harnessName} rejected the session.`;
   if (/auth/i.test(message)) return new AgentSignedOutError(`${message} Sign in to the agent, then reconnect.`);
+  if (/Missing optional dependency|codex-darwin|reinstall Codex/i.test(message)) {
+    return new Error(`${harnessName} could not start Codex. Reinstall with \`npm install -g @openai/codex@latest\`, then reconnect.`);
+  }
+  if (/spawn Unknown system error|ENOENT|not found/i.test(message)) {
+    return new Error(`${harnessName} could not start its underlying CLI. Confirm the agent is installed and on PATH, then reconnect.`);
+  }
   return error instanceof Error ? error : new Error(message);
 }

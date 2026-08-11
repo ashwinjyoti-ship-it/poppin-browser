@@ -6,7 +6,7 @@ import path from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { CapabilityBridge } from '../src/main/mcp/capability-bridge';
+import { CapabilityBridge, resolveNodeExecutable } from '../src/main/mcp/capability-bridge';
 
 const MCP_SCRIPT = path.join(process.cwd(), 'scripts', 'poppin-mcp-server.mjs');
 
@@ -21,6 +21,11 @@ describe('CapabilityBridge + poppin-mcp-server', () => {
     const bridge = new CapabilityBridge();
     bridges.push(bridge);
     expect(bridge.isAvailable()).toBe(true);
+  });
+
+  it('resolves an absolute Node executable for packaged MCP launches', () => {
+    const node = resolveNodeExecutable();
+    expect(node).toMatch(/node$/);
   });
 
   it('lists and executes tools through the MCP stdio process', async () => {

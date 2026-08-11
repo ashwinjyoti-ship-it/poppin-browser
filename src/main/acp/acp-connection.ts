@@ -69,7 +69,11 @@ export class AcpConnection extends EventEmitter<AcpConnectionEvents> {
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
       ...(this.launch.cwd ? { cwd: this.launch.cwd } : {}),
-      env: { ...process.env, ...this.launch.env },
+      env: {
+        ...process.env,
+        PATH: enrichPath(process.env.PATH),
+        ...this.launch.env,
+      },
     });
     this.child = child;
     createInterface({ input: child.stdout }).on('line', (line) => this.handleLine(line));
@@ -191,4 +195,16 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
 function errorMessage(value: unknown): string {
   if (isRecord(value) && typeof value.message === 'string') return value.message;
   return 'The ACP agent returned an unknown protocol error.';
+}
+
+/** Ensure Homebrew / user-local bins are visible to ACP children spawned from a GUI app. */
+function enrichPath(existing: string | undefined): string {
+  const extras = [
+    '/opt/homebrew/bin',
+    '/usr/local/bin',
+    `${process.env.HOME ?? ''}/.local/bin`,
+    `${process.env.HOME ?? ''}/.cursor/bin`,
+  ].filter(Boolean);
+  const parts = [...extras, ...(existing ? existing.split(':') : [])];
+  return [...new Set(parts.filter(Boolean))].join(':');
 }

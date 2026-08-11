@@ -287,9 +287,19 @@ export class TaskEngine {
           this.capabilityBridge.clearTools();
           return [];
         }
+        if (!this.capabilityBridge.isAvailable()) {
+          throw new Error(
+            'Poppin could not launch its MCP capability bridge. Install Node.js (or set POPPIN_NODE_PATH) so ACP agents can use Browser and Tandem tools.',
+          );
+        }
         await this.capabilityBridge.bind(tools, (name, args) => this.executeCapabilityToolViaMcp(name, args));
         const server = this.capabilityBridge.toAcpMcpServer();
-        return server ? [server] : [];
+        if (!server) {
+          throw new Error(
+            'Poppin built capability tools but could not register the MCP stdio server for the ACP agent.',
+          );
+        }
+        return [server];
       },
     });
     adapter.on('event', (event) => this.queueAgentEvent(event));

@@ -1,13 +1,15 @@
-import { ArrowLeft, ArrowRight, BookOpenText, LockKeyhole, RefreshCw, RotateCcw, Search, Settings2, Unplug, X } from 'lucide-react';
-import { type FormEvent, type ReactNode, type RefObject, useState } from 'react';
+import { ArrowLeft, ArrowRight, BookOpenText, ChevronDown, LockKeyhole, RefreshCw, RotateCcw, Search, Settings2, Unplug, X } from 'lucide-react';
+import { type FormEvent, type ReactNode, type RefObject, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { BrowserSettings, BrowserTabSnapshot } from '../../shared/browser';
 import type { ContinuityCommand, ContinuitySnapshot } from '../../shared/continuity';
 import type { TandemSnapshot } from '../../shared/tandem';
 import type { TandemSettingsCommand } from '../../shared/settings-overlay';
+import { previousHistoryEntries, suggestSessionUrls } from './url-recall';
 
 interface BrowserToolbarProps {
   activeTab: BrowserTabSnapshot | null;
+  tabs?: BrowserTabSnapshot[];
   address: string;
   addressError: string;
   settingsOpen: boolean;
@@ -18,10 +20,13 @@ interface BrowserToolbarProps {
   onBack: () => void;
   onForward: () => void;
   onReload: () => void;
+  onGoToHistoryIndex?: (index: number) => void;
+  onSelectSuggestion?: (url: string) => void;
   onOpenTabSearch?: () => void;
   onOpenTandemBeside?: () => void;
   onSettingsOpenChange: (open: boolean) => void;
   onSubmit: (event: FormEvent) => void;
+  onOverlayOpenChange?: (open: boolean) => void;
   /**
    * Downloads control (icon + popover) rendered next to the Settings button.
    * Provided by the App so `BrowserToolbar` stays stateless.
@@ -31,6 +36,7 @@ interface BrowserToolbarProps {
 
 export function BrowserToolbar({
   activeTab,
+  tabs = [],
   address,
   addressError,
   settingsOpen,
@@ -41,18 +47,74 @@ export function BrowserToolbar({
   onBack,
   onForward,
   onReload,
+  onGoToHistoryIndex,
+  onSelectSuggestion,
   onOpenTabSearch,
   onOpenTandemBeside,
   onSettingsOpenChange,
   onSubmit,
+  onOverlayOpenChange,
   downloadsSlot,
 }: BrowserToolbarProps) {
+  const [backMenuOpen, setBackMenuOpen] = useState(false);
+  const [suggestionsOpen, setSuggestionsOpen] = useState(false);
+  const backMenuRef = useRef<HTMLDivElement>(null);
+  const previousEntries = useMemo(() => previousHistoryEntries(activeTab), [activeTab]);
+  const suggestions = useMemo(
+    () => (suggestionsOpen ? suggestSessionUrls(address, activeTab, tabs) : []),
+    [activeTab, address, suggestionsOpen, tabs],
+  );
+
+  useEffect(() => {
+    onOverlayOpenChange?.(backMenuOpen || (suggestionsOpen && suggestions.length > 0));
+  }, [backMenuOpen, onOverlayOpenChange, suggestions.length, suggestionsOpen]);
+
+  useEffect(() => {
+    if (!backMenuOpen) return;
+    const onPointerDown = (event: MouseEvent) => {
+      if (!backMenuRef.current?.contains(event.target as Node)) setBackMenuOpen(false);
+    };
+    window.addEventListener('mousedown', onPointerDown);
+    return () => window.removeEventListener('mousedown', onPointerDown);
+  }, [backMenuOpen]);
+
   return (
     <div className="toolbar-controls">
       <div className="navigation-buttons">
-        <button type="button" aria-label="Go back" disabled={!activeTab?.canGoBack} onClick={onBack}>
-          <ArrowLeft size={20} strokeWidth={1.8} />
-        </button>
+        <div className="back-control" ref={backMenuRef}>
+          <button type="button" aria-label="Go back" disabled={!activeTab?.canGoBack} onClick={onBack}>
+            <ArrowLeft size={20} strokeWidth={1.8} />
+          </button>
+          <button
+            type="button"
+            className="back-history-toggle"
+            aria-label="Show previous sites"
+            aria-expanded={backMenuOpen}
+            disabled={previousEntries.length === 0}
+            onClick={() => setBackMenuOpen((open) => !open)}
+          >
+            <ChevronDown size={12} strokeWidth={2} />
+          </button>
+          {backMenuOpen && previousEntries.length > 0 ? (
+            <ul className="back-history-menu" role="listbox" aria-label="Previous sites in this tab">
+              {previousEntries.map((entry) => (
+                <li key={`${entry.index}-${entry.url}`}>
+                  <button
+                    type="button"
+                    role="option"
+                    onClick={() => {
+                      setBackMenuOpen(false);
+                      onGoToHistoryIndex?.(entry.index);
+                    }}
+                  >
+                    <strong>{entry.title || entry.url}</strong>
+                    <span>{entry.url}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
         <button type="button" aria-label="Go forward" disabled={!activeTab?.canGoForward} onClick={onForward}>
           <ArrowRight size={20} strokeWidth={1.8} />
         </button>
@@ -61,18 +123,38 @@ export function BrowserToolbar({
         </button>
       </div>
 
-      <form className={`address-form ${addressError ? 'address-form-error' : ''}`} onSubmit={onSubmit}>
+      <form
+        className={`address-form ${addressError ? 'address-form-error' : ''}`}
+        onSubmit={(event) => {
+          setSuggestionsOpen(false);
+          onSubmit(event);
+        }}
+      >
         <span className="address-leading" aria-hidden="true">
           {address.startsWith('https://') ? <LockKeyhole size={15} /> : <Search size={16} />}
         </span>
         <input
           ref={addressInputRef}
           value={address}
-          onChange={(event) => onAddressChange(event.target.value)}
-          onFocus={onAddressFocus}
-          onBlur={onAddressBlur}
+          onChange={(event) => {
+            onAddressChange(event.target.value);
+            setSuggestionsOpen(true);
+          }}
+          onFocus={() => {
+            onAddressFocus();
+            setSuggestionsOpen(true);
+          }}
+          onBlur={() => {
+            // Delay so suggestion clicks register before the list unmounts.
+            window.setTimeout(() => {
+              setSuggestionsOpen(false);
+              onAddressBlur();
+            }, 120);
+          }}
           aria-label="Address and search"
           aria-invalid={Boolean(addressError)}
+          aria-autocomplete="list"
+          aria-expanded={suggestionsOpen && suggestions.length > 0}
           placeholder="Search or enter address"
           autoCapitalize="off"
           autoCorrect="off"
@@ -80,6 +162,26 @@ export function BrowserToolbar({
         />
         {activeTab?.isLoading ? <span className="address-progress" /> : null}
         {addressError ? <span className="address-error" role="alert">{addressError}</span> : null}
+        {suggestionsOpen && suggestions.length > 0 ? (
+          <ul className="address-suggestions" role="listbox" aria-label="Visited URLs">
+            {suggestions.map((suggestion) => (
+              <li key={`${suggestion.source}-${suggestion.url}`}>
+                <button
+                  type="button"
+                  role="option"
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => {
+                    setSuggestionsOpen(false);
+                    onSelectSuggestion?.(suggestion.url);
+                  }}
+                >
+                  <strong>{suggestion.title}</strong>
+                  <span>{suggestion.url}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : null}
       </form>
 
       <div className="toolbar-actions">

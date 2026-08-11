@@ -38,6 +38,9 @@ export function CommandBar({ snapshot, workspace, collapsed, onCollapseChange, o
   const agents = snapshot.connection.availableAgents ?? (snapshot.connection.agent ? [snapshot.connection.agent] : []);
   const selectedAgentId = snapshot.connection.agent?.id ?? agents[0]?.id ?? '';
   const controls = snapshot.connection.controls ?? { model: true, reasoning: true };
+  const canSend = canContinue
+    ? Boolean(prompt.trim() && !sending && !isBlocking && snapshot.connection.state === 'ready')
+    : Boolean(prompt.trim() && selectedModelId && selectedEffort && !sending && !isBlocking && snapshot.connection.state === 'ready');
 
   useLayoutEffect(() => {
     if (!preflight && !browserQuestion) {
@@ -144,14 +147,14 @@ export function CommandBar({ snapshot, workspace, collapsed, onCollapseChange, o
             const next = snapshot.connection.models.find((candidate) => candidate.id === event.target.value);
             setModelId(event.target.value);
             setEffort(next?.defaultReasoningEffort ?? '');
-          }} disabled={snapshot.connection.state !== 'ready' || isBlocking || canContinue}>
+          }} disabled={snapshot.connection.state !== 'ready' || isBlocking || canContinue || snapshot.connection.models.length === 0}>
             {snapshot.connection.models.length === 0 ? <option value="">Unavailable</option> : null}
             {snapshot.connection.models.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.name}</option>)}
           </select>
         </label>
       ) : null}
       {controls.reasoning ? (
-        <label className="command-select">
+        <label className="command-select command-reasoning">
           <span>Reasoning</span>
           <select value={selectedEffort} onChange={(event) => setEffort(event.target.value)} disabled={!model || isBlocking || canContinue}>
             {(model?.reasoningEfforts ?? []).map((value) => <option key={value} value={value}>{titleCase(value)}</option>)}
@@ -167,11 +170,29 @@ export function CommandBar({ snapshot, workspace, collapsed, onCollapseChange, o
           disabled={snapshot.connection.state !== 'ready' || isBlocking}
         />
         {error ? <span className="command-error">{error}</span> : null}
+        {canContinue ? (
+          <button
+            type="button"
+            className="command-new-task"
+            onClick={() => {
+              void onCommand({ type: 'finishTask' }).then((result) => {
+                if (!result.ok) setError(result.message ?? 'Poppin could not start a new task.');
+                else {
+                  setModelId('');
+                  setEffort('');
+                  setError('');
+                }
+              });
+            }}
+          >
+            New task
+          </button>
+        ) : null}
       </label>
       {snapshot.task?.state === 'Running' ? (
         <button className="command-stop" type="button" onClick={() => { void onCommand({ type: 'cancelTask' }); }} aria-label="Cancel Codex task"><Square size={15} /></button>
       ) : (
-        <button className="command-send" type="submit" disabled={!prompt.trim() || !selectedModelId || !selectedEffort || sending || isBlocking} aria-label={canContinue ? 'Send follow-up to Codex' : 'Send to Codex'}><Send size={17} /></button>
+        <button className="command-send" type="submit" disabled={!canSend} aria-label={canContinue ? 'Send follow-up to Codex' : 'Send to Codex'}><Send size={17} /></button>
       )}
       <button className="command-collapse" type="button" onClick={() => onCollapseChange(true)} aria-label="Collapse Codex command bar"><ChevronDown size={15} /></button>
       {browserQuestion ? (

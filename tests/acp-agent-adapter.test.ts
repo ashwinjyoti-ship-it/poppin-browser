@@ -34,6 +34,8 @@ class FakeAcpConnection extends EventEmitter {
     agentInfo: { name: 'codex-acp', version: '1.1.14' },
   };
 
+  sessionNewResponse: unknown = { sessionId: 'acp-session-1' };
+
   start() { this.started = true; }
   get connected() { return this.started && !this.closed; }
   get stderrTail() { return ''; }
@@ -41,8 +43,12 @@ class FakeAcpConnection extends EventEmitter {
   async request(method: string, params: unknown): Promise<unknown> {
     this.requests.push({ method, params });
     if (method === ACP_METHODS.initialize) return this.initializeResponse;
-    if (method === ACP_METHODS.sessionNew) return { sessionId: 'acp-session-1' };
+    if (method === ACP_METHODS.authenticate) return {};
+    if (method === ACP_METHODS.sessionNew) return this.sessionNewResponse;
     if (method === ACP_METHODS.sessionLoad) return {};
+    if (method === ACP_METHODS.sessionSetConfigOption) {
+      return { configOptions: (this.sessionNewResponse as { configOptions?: unknown }).configOptions ?? [] };
+    }
     if (method === ACP_METHODS.sessionPrompt) {
       return new Promise((resolve) => this.promptResolvers.push(resolve));
     }
@@ -92,12 +98,53 @@ describe('AcpAgentAdapter', () => {
       clientCapabilities: { fs: { readTextFile: true, writeTextFile: true }, terminal: false },
       clientInfo: { name: 'poppin-browser' },
     });
-    // ACP has no standard model list, so Poppin must not pretend to offer one.
+    // Without session configOptions, Poppin keeps a neutral default and hides selectors.
     expect(info.controls).toEqual({ model: false, reasoning: false });
     expect(info.models).toHaveLength(1);
     // Without an MCP bridge, Poppin must not promise Browser/Tandem tools.
     expect(info.capabilities.clientTools).toBe(false);
     expect(info.capabilities.resumeSession).toBe(true);
+  });
+
+  it('authenticates when required and surfaces ACP model configOptions', async () => {
+    const { adapter, connection } = setup();
+    connection.initializeResponse = {
+      protocolVersion: ACP_PROTOCOL_VERSION,
+      agentCapabilities: { loadSession: true },
+      agentInfo: { name: 'cursor-agent', title: 'Cursor Agent' },
+      authMethods: [{ id: 'cursor_login', name: 'Cursor Login' }],
+    };
+    connection.sessionNewResponse = {
+      sessionId: 'probe-session',
+      configOptions: [{
+        id: 'model',
+        name: 'Model',
+        category: 'model',
+        type: 'select',
+        currentValue: 'default[]',
+        options: [
+          { value: 'default[]', name: 'Auto' },
+          { value: 'grok-4.5[effort=high,fast=true]', name: 'grok-4.5' },
+          { value: 'composer-2.5[fast=true]', name: 'composer-2.5' },
+        ],
+      }],
+    };
+
+    const info = await adapter.connect();
+    expect(connection.requests.some((entry) => entry.method === ACP_METHODS.authenticate)).toBe(true);
+    expect(info.controls).toEqual({ model: true, reasoning: false });
+    expect(info.models.map((model) => model.name)).toEqual(['Auto', 'grok-4.5', 'composer-2.5']);
+
+    await adapter.createSession({
+      cwd: '/work',
+      model: 'grok-4.5[effort=high,fast=true]',
+      instructions: '',
+      tools: [],
+    });
+    expect(connection.requests.some((entry) => (
+      entry.method === ACP_METHODS.sessionSetConfigOption
+      && (entry.params as { value?: string }).value === 'grok-4.5[effort=high,fast=true]'
+    ))).toBe(true);
   });
 
   it('advertises clientTools and provisions mcpServers when the MCP bridge is available', async () => {
@@ -122,9 +169,10 @@ describe('AcpAgentAdapter', () => {
       instructions: 'BE CAREFUL',
       tools: [{ name: 'tandem', description: 'Tandem', inputSchema: { type: 'object' } }],
     });
-    expect(connection.requests.find((entry) => entry.method === ACP_METHODS.sessionNew)?.params).toMatchObject({
+    const taskSession = connection.requests.filter((entry) => entry.method === ACP_METHODS.sessionNew).at(-1);
+    expect(taskSession?.params).toMatchObject({
       cwd: '/work',
-      mcpServers: [{ name: 'poppin', command: 'node' }],
+      mcpServers: [{ name: 'poppin', command: expect.any(String) }],
     });
   });
 
@@ -133,7 +181,7 @@ describe('AcpAgentAdapter', () => {
     await adapter.connect();
     const session = await adapter.createSession({ cwd: '/work', model: 'agent-default', instructions: 'BE CAREFUL', tools: [] });
     expect(session.id).toBe('acp-session-1');
-    expect(connection.requests.find((entry) => entry.method === ACP_METHODS.sessionNew)?.params)
+    expect(connection.requests.filter((entry) => entry.method === ACP_METHODS.sessionNew).at(-1)?.params)
       .toEqual({ cwd: '/work', mcpServers: [] });
 
     await adapter.prompt({ sessionId: session.id, prompt: 'Research prices', cwd: '/work', model: 'agent-default', reasoningEffort: 'agent-default' });

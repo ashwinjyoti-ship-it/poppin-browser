@@ -715,6 +715,8 @@ export class BrowserEngine {
         return this.goBack(command.tabId);
       case 'forward':
         return this.goForward(command.tabId);
+      case 'goToHistoryIndex':
+        return this.goToHistoryIndex(command.tabId, command.index);
       case 'reload':
         return this.reload(command.tabId);
       case 'duplicate':
@@ -872,6 +874,8 @@ export class BrowserEngine {
       isLoading: false,
       canGoBack: false,
       canGoForward: false,
+      historyIndex: 0,
+      history: [],
       failure: null,
     };
     const record: BrowserTabRecord = {
@@ -1747,8 +1751,26 @@ export class BrowserEngine {
 
   private syncNavigationState(tab: BrowserTabRecord): void {
     if (tab.view.webContents.isDestroyed()) return;
-    tab.snapshot.canGoBack = tab.view.webContents.navigationHistory.canGoBack();
-    tab.snapshot.canGoForward = tab.view.webContents.navigationHistory.canGoForward();
+    const navigation = tab.view.webContents.navigationHistory;
+    tab.snapshot.canGoBack = navigation.canGoBack();
+    tab.snapshot.canGoForward = navigation.canGoForward();
+    tab.snapshot.historyIndex = navigation.getActiveIndex();
+    tab.snapshot.history = navigation.getAllEntries().map((entry, index) => ({
+      index,
+      url: entry.url,
+      title: entry.title || entry.url,
+    }));
+  }
+
+  private goToHistoryIndex(tabId: string, index: number): BrowserCommandResult {
+    const tab = this.tabs.get(tabId);
+    if (!tab || tab.view.webContents.isDestroyed()) return { ok: false, message: 'That tab is no longer open.' };
+    const navigation = tab.view.webContents.navigationHistory;
+    if (index < 0 || index >= navigation.length()) return { ok: false, message: 'That history entry is not available.' };
+    navigation.goToIndex(index);
+    this.syncNavigationState(tab);
+    this.emitSnapshot();
+    return { ok: true };
   }
 
   private emitSnapshot(): void {

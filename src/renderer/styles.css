@@ -353,7 +353,69 @@ textarea:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
 .google-sign-in-close { display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 7px; color: #8e8377; background: transparent; }
 .google-sign-in-close:hover { background: var(--surface-muted); }
 
-.navigation-buttons { display: flex; gap: 3px; }
+.navigation-buttons { display: flex; gap: 3px; align-items: center; }
+.back-control { position: relative; display: inline-flex; align-items: center; gap: 0; }
+.back-history-toggle {
+  width: 18px !important;
+  min-width: 18px;
+  height: 34px !important;
+  padding: 0 !important;
+  border-radius: 8px !important;
+}
+.back-history-menu,
+.address-suggestions {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 6px);
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 280px;
+  max-width: min(520px, calc(100vw - 48px));
+  max-height: 260px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 8px;
+  list-style: none;
+  border: 1px solid #e3d3bf;
+  border-radius: 14px;
+  background: rgba(255, 252, 246, .99);
+  box-shadow: 0 18px 36px rgba(65, 44, 20, .16);
+}
+.address-suggestions { left: 0; right: 0; width: auto; min-width: 0; }
+.back-history-menu button,
+.address-suggestions button {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 10px;
+  color: #40352a;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.back-history-menu button:hover,
+.address-suggestions button:hover { background: var(--amber-soft); }
+.back-history-menu strong,
+.address-suggestions strong {
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.back-history-menu span,
+.address-suggestions span {
+  overflow: hidden;
+  color: #8a7b6a;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .navigation-buttons button,
 .new-tab-button {
@@ -937,7 +999,8 @@ body.pane-is-resizing * { cursor: col-resize !important; user-select: none !impo
   bottom: 12px;
   height: 78px;
   display: grid;
-  grid-template-columns: 42px 94px minmax(140px, 190px) 112px minmax(220px, 1fr) 46px 28px;
+  /* Default: agent only (ACP without model/reasoning selectors). */
+  grid-template-columns: 42px 94px minmax(220px, 1fr) 46px 28px;
   align-items: center;
   gap: 10px;
   padding: 10px 12px;
@@ -946,6 +1009,12 @@ body.pane-is-resizing * { cursor: col-resize !important; user-select: none !impo
   background: rgba(255, 253, 249, .97);
   box-shadow: 0 14px 42px rgba(65, 44, 20, .11), inset 0 1px rgba(255, 255, 255, .9);
   -webkit-app-region: no-drag;
+}
+.command-bar:has(.command-model):not(:has(.command-reasoning)) {
+  grid-template-columns: 42px 94px minmax(140px, 190px) minmax(220px, 1fr) 46px 28px;
+}
+.command-bar:has(.command-model):has(.command-reasoning) {
+  grid-template-columns: 42px 94px minmax(140px, 190px) 112px minmax(220px, 1fr) 46px 28px;
 }
 
 .command-activity { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 13px; background: var(--surface-muted); }
@@ -976,6 +1045,21 @@ body.pane-is-resizing * { cursor: col-resize !important; user-select: none !impo
 .command-prompt input:focus { border-color: #dc9a4f; box-shadow: 0 0 0 3px rgba(232, 130, 11, .1); }
 .command-prompt input:disabled { color: #92887d; background: var(--surface-muted); }
 .command-error { position: absolute; left: 9px; bottom: 49px; padding: 6px 9px; border: 1px solid #ead4ce; border-radius: 8px; color: #9a453b; background: #fff9f7; box-shadow: 0 7px 20px rgba(75,39,32,.1); font-size: 10px; }
+.command-new-task {
+  position: absolute;
+  right: 10px;
+  bottom: 50px;
+  padding: 4px 8px;
+  border: 1px solid #e2d3c1;
+  border-radius: 8px;
+  color: #8d500d;
+  background: rgba(255, 253, 249, .98);
+  box-shadow: 0 6px 16px rgba(65, 44, 20, .08);
+  font-size: 10px;
+  font-weight: 650;
+  cursor: pointer;
+}
+.command-new-task:hover { background: var(--amber-soft); }
 .command-send, .command-stop { display: grid; place-items: center; width: 44px; height: 44px; padding: 0; border: 0; border-radius: 13px; color: white; background: var(--amber-strong); box-shadow: 0 8px 18px rgba(206,122,26,.2); }
 .command-send:disabled { color: #aaa096; background: #eee7de; box-shadow: none; }
 .command-stop { color: #a14d42; background: #fff0ed; box-shadow: none; }
@@ -1131,7 +1215,9 @@ body.pane-is-resizing * { cursor: col-resize !important; user-select: none !impo
   .toolbar-controls { grid-template-columns: 108px minmax(260px, 1fr) 132px; }
   .tab-row { margin-left: 16px; }
   .tab { min-width: 158px; }
-  .command-bar { grid-template-columns: 38px 80px 140px 98px minmax(180px, 1fr) 42px 25px; gap: 7px; }
+  .command-bar { grid-template-columns: 38px 80px minmax(180px, 1fr) 42px 25px; gap: 7px; }
+  .command-bar:has(.command-model):not(:has(.command-reasoning)) { grid-template-columns: 38px 80px 140px minmax(180px, 1fr) 42px 25px; }
+  .command-bar:has(.command-model):has(.command-reasoning) { grid-template-columns: 38px 80px 140px 98px minmax(180px, 1fr) 42px 25px; }
 }
 
 @media (max-width: 720px) {

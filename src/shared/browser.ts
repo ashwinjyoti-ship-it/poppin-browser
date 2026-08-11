@@ -11,6 +11,13 @@ export interface BrowserFailure {
   url: string;
 }
 
+/** One entry from a tab's in-session navigation history. */
+export interface BrowserHistoryEntry {
+  index: number;
+  url: string;
+  title: string;
+}
+
 export interface BrowserTabSnapshot {
   id: string;
   url: string;
@@ -24,6 +31,10 @@ export interface BrowserTabSnapshot {
   isLoading: boolean;
   canGoBack: boolean;
   canGoForward: boolean;
+  /** Current index into `history` for this tab's session. */
+  historyIndex: number;
+  /** Back/forward stack for this tab (session only; not cross-profile). */
+  history: BrowserHistoryEntry[];
   failure: BrowserFailure | null;
 }
 
@@ -100,6 +111,7 @@ export type BrowserCommand =
   | { type: 'navigate'; tabId: string; input: string }
   | { type: 'back'; tabId: string }
   | { type: 'forward'; tabId: string }
+  | { type: 'goToHistoryIndex'; tabId: string; index: number }
   | { type: 'reload'; tabId: string }
   | { type: 'duplicate'; tabId: string }
   | { type: 'reopenClosedTab' }

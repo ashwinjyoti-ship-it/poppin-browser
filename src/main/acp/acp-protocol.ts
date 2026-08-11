@@ -19,6 +19,7 @@ export const ACP_METHODS = {
   sessionPrompt: 'session/prompt',
   sessionCancel: 'session/cancel',
   sessionSetMode: 'session/set_mode',
+  sessionSetConfigOption: 'session/set_config_option',
   sessionUpdate: 'session/update',
   sessionRequestPermission: 'session/request_permission',
   fsReadTextFile: 'fs/read_text_file',
@@ -107,9 +108,45 @@ export interface AcpSessionModeState {
   availableModes: AcpSessionMode[];
 }
 
+export type AcpConfigOptionCategory = 'mode' | 'model' | 'model_config' | 'thought_level' | (string & {});
+
+export interface AcpConfigOptionValue {
+  value: string;
+  name: string;
+  description?: string | null;
+}
+
+/** Select-style session config option returned by `session/new` / `set_config_option`. */
+export interface AcpSelectConfigOption {
+  id: string;
+  name: string;
+  description?: string | null;
+  category?: AcpConfigOptionCategory | null;
+  type?: 'select' | 'boolean' | string;
+  currentValue?: string | boolean | null;
+  options?: AcpConfigOptionValue[];
+}
+
+export type AcpConfigOption = AcpSelectConfigOption;
+
+/**
+ * Cursor and some agents also publish a legacy `models` object on session
+ * responses. Prefer `configOptions` with `category: "model"` when both exist.
+ */
+export interface AcpLegacyModelsState {
+  currentModelId?: string;
+  availableModels?: Array<{ modelId: string; name: string; description?: string | null }>;
+}
+
 export interface AcpNewSessionResponse {
   sessionId: string;
   modes?: AcpSessionModeState | null;
+  configOptions?: AcpConfigOption[] | null;
+  models?: AcpLegacyModelsState | null;
+}
+
+export interface AcpSetConfigOptionResponse {
+  configOptions: AcpConfigOption[];
 }
 
 export interface AcpTextContentBlock {

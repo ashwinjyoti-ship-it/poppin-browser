@@ -13,6 +13,8 @@ const GOOGLE_TAB: BrowserTabSnapshot = {
   isLoading: false,
   canGoBack: false,
   canGoForward: false,
+  historyIndex: 0,
+  history: [],
   failure: null,
 };
 

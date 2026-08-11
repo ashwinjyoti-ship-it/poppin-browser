@@ -25,6 +25,8 @@ const TAB: BrowserTabSnapshot = {
   isLoading: false,
   canGoBack: false,
   canGoForward: true,
+  historyIndex: 0,
+  history: [],
   failure: null,
 };
 
