@@ -2,44 +2,23 @@ import { type FormEvent, useLayoutEffect, useRef, useState } from 'react';
 import { ChevronDown, ChevronUp, Send, Square } from 'lucide-react';
 
 import type { AgentHarnessId } from '../../shared/agent';
-import type { BrowserTabSnapshot } from '../../shared/browser';
-import type { PagesCommand } from '../../shared/pages';
 import type { TaskCommand, TaskCommandResult, TaskSnapshot } from '../../shared/task';
-import type { TandemCommand, TandemSnapshot } from '../../shared/tandem';
-import type { WorkspaceCommand, WorkspaceSnapshot } from '../../shared/workspace';
+import type { WorkspaceSnapshot } from '../../shared/workspace';
 import { inferTaskRequirements, type TaskRequirements } from '../../shared/task-requirements';
 import { Brand } from './Brand';
-import { ContextPopover } from './ContextPopover';
-import { contextItemCount } from './context-item-count';
 
 interface CommandBarProps {
   snapshot: TaskSnapshot;
   workspace: WorkspaceSnapshot;
-  tabs: BrowserTabSnapshot[];
-  activeTab?: BrowserTabSnapshot | null;
-  tandem: TandemSnapshot;
   collapsed: boolean;
   onCollapseChange: (collapsed: boolean) => void;
   onCommand: (command: TaskCommand) => Promise<TaskCommandResult>;
-  onWorkspaceCommand: (command: WorkspaceCommand) => Promise<string | null>;
-  onPagesCommand: (command: PagesCommand) => Promise<string | null>;
-  onTandemCommand: (command: TandemCommand) => Promise<string | null>;
-  onRefreshTab: (tabId: string) => void;
-  onOpenSettings?: () => void;
-  onCreateWorkspace: (name: string) => Promise<string | null>;
-  onCaptureVisualSelection?: (tabId: string) => Promise<import('../../shared/workspace').WorkspaceCommandResult>;
-  onClearVisualSelection?: () => void;
-  onRunRecipe?: (prompt: string) => void;
   onOverlayHeightChange?: (height: number) => void;
 }
 
 const PREFLIGHT_MIN_HEIGHT = 160;
 
-export function CommandBar({
-  snapshot, workspace, tabs, activeTab, tandem, collapsed, onCollapseChange, onCommand, onWorkspaceCommand,
-  onPagesCommand, onTandemCommand, onRefreshTab, onOpenSettings, onCreateWorkspace,
-  onCaptureVisualSelection, onClearVisualSelection, onRunRecipe, onOverlayHeightChange,
-}: CommandBarProps) {
+export function CommandBar({ snapshot, workspace, collapsed, onCollapseChange, onCommand, onOverlayHeightChange }: CommandBarProps) {
   const [prompt, setPrompt] = useState('');
   const [modelId, setModelId] = useState('');
   const [effort, setEffort] = useState('');
@@ -47,7 +26,6 @@ export function CommandBar({
   const [sending, setSending] = useState(false);
   const [preflight, setPreflight] = useState<TaskRequirements | null>(null);
   const [browserQuestion, setBrowserQuestion] = useState<{ text: string; kind: 'work' | 'code' } | null>(null);
-  const [contextOpen, setContextOpen] = useState(false);
   const preflightRef = useRef<HTMLElement>(null);
   const canContinue = Boolean(snapshot.task && !snapshot.task.pendingApproval && ['Needs Approval', 'Completed', 'Failed', 'Cancelled'].includes(snapshot.task.state));
   const defaultModel = snapshot.connection.models.find((candidate) => candidate.isDefault) ?? snapshot.connection.models[0] ?? null;
@@ -122,7 +100,7 @@ export function CommandBar({
       return;
     }
     const requirements = inferTaskRequirements(prompt, Boolean(workspace.project), {
-      selectedContextCount: contextItemCount(workspace, tandem),
+      selectedContextCount: selectedContextCount(workspace),
     });
     const needsPreflight = requirements.kind === 'code';
     if (needsPreflight && !preflight) {
@@ -137,23 +115,6 @@ export function CommandBar({
       <div className={`command-activity ${snapshot.task?.state === 'Running' ? 'command-activity-running' : ''}`} aria-hidden="true">
         <Brand compact />
       </div>
-      <ContextPopover
-        open={contextOpen}
-        onOpenChange={setContextOpen}
-        workspace={workspace}
-        tabs={tabs}
-        activeTab={activeTab}
-        tandem={tandem}
-        onWorkspaceCommand={onWorkspaceCommand}
-        onPagesCommand={onPagesCommand}
-        onTandemCommand={onTandemCommand}
-        onRefreshTab={onRefreshTab}
-        onOpenSettings={onOpenSettings}
-        onCreateWorkspace={onCreateWorkspace}
-        onCaptureVisualSelection={onCaptureVisualSelection}
-        onClearVisualSelection={onClearVisualSelection}
-        onRunRecipe={onRunRecipe}
-      />
       <label className="command-select">
         <span>Agent</span>
         <select
@@ -225,7 +186,7 @@ export function CommandBar({
       ) : null}
       {preflight && !browserQuestion ? (
         <section ref={preflightRef} className="task-preflight" aria-label="Task preflight">
-          <div><strong>{preflight.kind === 'code' ? 'Code task' : 'Work task'}</strong><span>{contextItemCount(workspace, tandem)} selected context item(s)</span></div>
+          <div><strong>{preflight.kind === 'code' ? 'Code task' : 'Work task'}</strong><span>{selectedContextCount(workspace)} selected context item(s)</span></div>
           <ul>
             <li>{preflight.browserUse ? 'Uses task-owned Agent Tabs visibly. Only critical actions pause for approval.' : 'Uses only the frozen selected context.'}</li>
             {preflight.plan.capabilities.length ? <li>Capabilities: {preflight.plan.capabilities.join(', ')}.</li> : null}
@@ -241,6 +202,10 @@ export function CommandBar({
       ) : null}
     </form>
   );
+}
+
+function selectedContextCount(workspace: WorkspaceSnapshot): number {
+  return workspace.tabContexts.length + workspace.documents.filter((item) => item.selected).length;
 }
 
 function titleCase(value: string): string {

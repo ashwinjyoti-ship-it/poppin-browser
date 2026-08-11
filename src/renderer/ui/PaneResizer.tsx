@@ -13,7 +13,7 @@ interface PaneResizerProps {
 export function PaneResizer({ side, width, minimum, maximum, onResize }: PaneResizerProps) {
   const drag = useRef<{ pointerId: number; startX: number; startWidth: number } | null>(null);
   const [isDragging, setIsDragging] = useState(false);
-  const label = side === 'left' ? 'Resize tabs pane' : 'Resize context and task pane';
+  const label = side === 'left' ? 'Resize workspace pane' : 'Resize context and task pane';
 
   useEffect(() => () => {
     document.body.classList.remove('pane-is-resizing');

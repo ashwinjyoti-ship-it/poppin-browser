@@ -15,26 +15,26 @@ describe('resizable left pane layout', () => {
 
   it('shrinks the pane to preserve the central browser on a narrow window', () => {
     const width = normalizeLeftPaneWidth(DEFAULT_LEFT_PANE_WIDTH, 500);
-    expect(width).toBeGreaterThanOrEqual(160);
+    expect(width).toBeGreaterThanOrEqual(240);
     expect(width).toBeLessThanOrEqual(DEFAULT_LEFT_PANE_WIDTH);
   });
 
   it('clamps a dragged pane against its own limits and the browser minimum', () => {
-    expect(clampResizedLeftPaneWidth(100, 1440)).toBe(160);
-    expect(clampResizedLeftPaneWidth(900, 1000)).toBe(320);
-    expect(clampResizedLeftPaneWidth(900, 600)).toBe(228);
+    expect(clampResizedLeftPaneWidth(100, 1440)).toBe(240);
+    expect(clampResizedLeftPaneWidth(900, 1000)).toBe(480);
+    expect(clampResizedLeftPaneWidth(900, 600)).toBe(240);
   });
 
   it('loads only a finite width and falls back safely for corrupt storage', () => {
     expect(loadLeftPaneWidth({ getItem: () => '{bad json' })).toBe(DEFAULT_LEFT_PANE_WIDTH);
-    expect(loadLeftPaneWidth({ getItem: () => JSON.stringify(280) })).toBe(280);
+    expect(loadLeftPaneWidth({ getItem: () => JSON.stringify(320) })).toBe(320);
     expect(loadLeftPaneWidth({ getItem: () => JSON.stringify('wide') })).toBe(DEFAULT_LEFT_PANE_WIDTH);
   });
 
   it('persists the preferred width without making storage mandatory', () => {
     const setItem = vi.fn();
-    saveLeftPaneWidth({ setItem }, 220);
-    expect(setItem).toHaveBeenCalledWith('poppin:tab-rail-width:v1', '220');
+    saveLeftPaneWidth({ setItem }, 330);
+    expect(setItem).toHaveBeenCalledWith('poppin:pane-width:v2', '330');
     expect(() => saveLeftPaneWidth({ setItem: () => { throw new Error('blocked'); } }, DEFAULT_LEFT_PANE_WIDTH)).not.toThrow();
   });
 });
