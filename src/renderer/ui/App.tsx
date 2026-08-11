@@ -67,6 +67,7 @@ export function App() {
   // Tabs live in a collapsible left rail. There is no permanent workspace pane.
   // Default collapsed so the page stays the hero; Settings can change this.
   const [tabsCollapsed, setTabsCollapsed] = useState(true);
+  const [tabsHoverPeek, setTabsHoverPeek] = useState(false);
   const [tabsCollapseSeeded, setTabsCollapseSeeded] = useState(false);
   const [taskTabActive, setTaskTabActive] = useState(false);
   const [taskSnapshot, setTaskSnapshot] = useState<TaskSnapshot>(EMPTY_TASK);
@@ -126,6 +127,7 @@ export function App() {
   const agentDockHeight = dockPresentation === 'card'
     ? AGENT_DOCK_CARD_HEIGHT
     : dockPresentation === 'pill' ? AGENT_DOCK_PILL_HEIGHT : 0;
+  const tabsRailNarrow = tabsCollapsed && !tabsHoverPeek;
   const paneStyle = {
     '--chrome-height': `${chromeHeight}px`,
     '--titlebar-left-inset': `${getTitlebarLeftInset(chromeLayout.density, snapshot.isFullScreen)}px`,
@@ -251,14 +253,17 @@ export function App() {
   }, [tabSearchOpen]);
 
   useEffect(() => {
+    // WebContentsView sits above HTML, so hover-draw-out must widen the left
+    // inset or the expanded rail is covered by the live page.
+    const tabsOccupyPage = !tabsCollapsed || tabsHoverPeek;
     void window.poppinBrowser.command({
       type: 'setLayout',
       topInset: chromeHeight,
-      leftInset: tabsCollapsed ? 46 : leftPaneWidth + 14,
+      leftInset: tabsOccupyPage ? leftPaneWidth + 14 : 46,
       rightInset: 24,
       bottomInset: commandCollapsed ? 0 : 94 + commandOverlayHeight + agentDockHeight,
     });
-  }, [agentDockHeight, chromeHeight, commandCollapsed, commandOverlayHeight, leftPaneWidth, tabsCollapsed]);
+  }, [agentDockHeight, chromeHeight, commandCollapsed, commandOverlayHeight, leftPaneWidth, tabsCollapsed, tabsHoverPeek]);
 
   const resizeLeftPane = (requestedWidth: number) => {
     setPreferredLeftPaneWidth(clampResizedLeftPaneWidth(requestedWidth, viewport.width));
@@ -426,6 +431,7 @@ export function App() {
         collapsed={tabsCollapsed}
         onCollapseChange={setTabsCollapsed}
         drawOutOnHover={snapshot.settings.drawOutTabsOnHover}
+        onHoverPeekChange={setTabsHoverPeek}
         contextTabIds={contextTabIds}
         onToggleTabContext={(tabId, selected) => { void sendWorkspaceCommand({ type: 'setTabSelected', tabId, selected }); }}
         tabs={visibleTabs}
@@ -470,7 +476,7 @@ export function App() {
           void sendTandemCommand({ type: 'openWorld' });
         }}
       />
-      {!tabsCollapsed ? (
+      {!tabsRailNarrow ? (
         <PaneResizer
           side="left"
           width={leftPaneWidth}
@@ -479,7 +485,7 @@ export function App() {
         />
       ) : null}
       {taskTabActive ? (
-        <div className={`task-stage ${tabsCollapsed ? 'tabs-collapsed' : ''}`}>
+        <div className={`task-stage ${tabsRailNarrow ? 'tabs-collapsed' : ''}`}>
           <TaskTabView
             taskSnapshot={taskSnapshot}
             workspace={workspaceSnapshot}
@@ -490,12 +496,12 @@ export function App() {
           />
         </div>
       ) : activeNativeTab ? (
-        <div className={`native-stage ${tabsCollapsed ? 'tabs-collapsed' : ''}`}>
+        <div className={`native-stage ${tabsRailNarrow ? 'tabs-collapsed' : ''}`}>
           {activeNativeTab.kind === 'database'
             ? <NativeDatabaseView pageId={activeNativeTab.pageId} revision={pagesRevision} onCommand={sendPagesCommand} />
             : <NativePageView pageId={activeNativeTab.pageId} revision={pagesRevision} onCommand={sendPagesCommand} taskSnapshot={taskSnapshot} onTaskCommand={sendTaskCommand} onTaskStarted={() => setTaskTabActive(true)} />}
         </div>
-      ) : <div className={`browser-stage ${tabsCollapsed ? 'tabs-collapsed' : ''}`} aria-hidden="true" />}
+      ) : <div className={`browser-stage ${tabsRailNarrow ? 'tabs-collapsed' : ''}`} aria-hidden="true" />}
       {showAgentDock ? (
         <AgentDock
           taskSnapshot={taskSnapshot}
