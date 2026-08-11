@@ -142,10 +142,22 @@ async function createWindow(): Promise<void> {
     },
   );
   workspaceEngine = new WorkspaceEngine(
-    mainWindow, workspaceStore, browserEngine, git, pagesStore ?? undefined,
-    () => pagesEngine?.refresh(),
-    () => tandemEngine?.getSelectedContext() ?? [],
+    mainWindow, workspaceStore, browserEngine, git,
+    {
+      ...(pagesStore ? { pagesStore } : {}),
+      onPagesChanged: () => pagesEngine?.refresh(),
+      getTandemContexts: () => tandemEngine?.getSelectedContext() ?? [],
+      // applyContextPack reselects Tandem pages through the existing engine
+      // rather than duplicating credential-bearing HTTP calls.
+      setTandemPageSelected: async (pageId, selected) => {
+        const result = await tandemEngine?.execute({ type: 'setPageSelected', pageId, selected });
+        return result ?? { ok: false, message: 'Tandem is not connected.' };
+      },
+    },
   );
+  browserEngine.setSaveSessionHandler(() => {
+    void workspaceEngine?.execute({ type: 'saveBrowserSession' });
+  });
   if (!pagesStore) throw new Error('Pages storage is not ready.');
   pagesEngine = new PagesEngine(mainWindow, pagesStore, () => workspaceEngine?.refreshPageContexts());
   browserAgentEngine = new BrowserAgentEngine(mainWindow, browserEngine, (tabId, content) => {
@@ -224,6 +236,34 @@ async function createWindow(): Promise<void> {
       const comment = pagesStore.applyComment(commentId, replacement);
       pagesEngine?.refresh();
       return `Applied the anchored replacement and resolved comment ${comment.id}.`;
+    },
+    // Save-to-Memory appends the task result onto Poppin's OS-encrypted
+    // Memory page — the same protected page that /openMemory ensures exists.
+    saveResultToMemory: ({ title, markdown }) => {
+      if (!pagesStore) throw new Error('Pages storage is not ready.');
+      const tab = pagesStore.openMemory();
+      const heading = `## ${title}\n\n_Saved ${new Date().toISOString()}_\n\n`;
+      pagesStore.addBlock({ pageId: tab.pageId, type: 'paragraph', content: { text: `${heading}${markdown}` } });
+      pagesEngine?.refresh();
+      return { pageId: tab.pageId };
+    },
+    // Add-to-Tandem uses the connected Tandem provider so agents and this
+    // action share one API path; humans only see Tandem World for review.
+    addResultToTandem: async ({ mode, pageId, title, markdown }) => {
+      const provider = tandemEngine?.getProvider();
+      if (!provider) throw new Error('Tandem is not connected. Connect Tandem in Settings first.');
+      const workspaceId = tandemEngine?.getActiveWorkspaceId();
+      if (mode === 'append') {
+        if (!pageId) throw new Error('Choose a Tandem page to append to.');
+        await provider.appendMarkdown(pageId, `\n\n## ${title}\n\n${markdown}\n`);
+        tandemEngine?.openWorldForPage(pageId);
+        return { pageId, opened: true };
+      }
+      if (!workspaceId) throw new Error('Pick an active Tandem workspace before adding a page.');
+      const page = await provider.createPage(workspaceId, title, null, 'page');
+      await provider.writeMarkdown(page.id, `# ${title}\n\n${markdown}\n`);
+      tandemEngine?.openWorldForPage(page.id);
+      return { pageId: page.id, opened: true };
     },
   });
   browserEngine.restore(persisted);
@@ -323,7 +363,17 @@ app.whenReady().then(async () => {
   });
   ipcMain.handle(WORKSPACE_CHANNELS.getSnapshot, (event) => {
     if (!isTrustedShellSender(event.sender)) throw new Error('Untrusted workspace snapshot request.');
-    return workspaceEngine?.getSnapshot() ?? { workspace: null, documents: [], tabContexts: [], project: null, visualSelection: null };
+    return workspaceEngine?.getSnapshot() ?? {
+      workspace: null,
+      documents: [],
+      tabContexts: [],
+      project: null,
+      visualSelection: null,
+      contextPacks: [],
+      memorySelected: false,
+      memoryBrief: null,
+      browserSessions: [],
+    };
   });
   ipcMain.handle(WORKSPACE_CHANNELS.command, (event, command: WorkspaceCommand) => {
     if (!isTrustedShellSender(event.sender)) throw new Error('Untrusted workspace command.');

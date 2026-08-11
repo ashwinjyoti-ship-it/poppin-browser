@@ -187,8 +187,8 @@ Only do this when the user explicitly asks for deployment/release work.
 
 6. Verify both packaged app bundles and DMGs before publication.
 7. Push the branch, create a ready PR, verify it is mergeable with no failed/pending required checks, and merge only when the user explicitly requested merge.
-8. After merge, atomically replace the stable `Poppin-Browser-arm64.dmg` and `Poppin-Browser-x64.dmg` outputs; keep one installer per architecture and do not accumulate versioned duplicates.
-9. Run `hdiutil verify` and record the SHA-256 for both stable installers.
+8. After merge, atomically replace the stable local installers with `npm run update:dmg:all` (or `npm run update:dmg` for the host arch). That overwrites `DMG/Poppin-Browser-arm64.dmg` and `DMG/Poppin-Browser-x64.dmg` only — keep one installer per architecture and do not accumulate versioned duplicates.
+9. Confirm the script's `hdiutil verify` + SHA-256 output for both stable installers.
 
 ## How to work on a change
 

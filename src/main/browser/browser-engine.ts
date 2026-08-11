@@ -88,6 +88,13 @@ export class BrowserEngine {
   /** The single reusable Tandem World surface, if it is open. */
   private tandemWorldTabId: string | null = null;
 
+  /** Optional workspace hook so tab menus can save a session via a dialog-free flow. */
+  private saveSessionRequested: (() => void) | null = null;
+
+  setSaveSessionHandler(handler: (() => void) | null): void {
+    this.saveSessionRequested = handler;
+  }
+
   constructor(
     private readonly window: BrowserWindow,
     private readonly browserSession: Session,
@@ -546,6 +553,59 @@ export class BrowserEngine {
       case 'closeTab':
         throw new Error('Agent Tab lifecycle actions must be handled by the task-space controller.');
     }
+  }
+
+  /**
+   * Returns the ordinary user-facing tabs that survive a session save: the
+   * dedicated Tandem World surface and every task-owned Agent Tab are omitted
+   * so re-applying a session never revives ephemeral automation surfaces.
+   */
+  listSaveableTabs(): { id: string; url: string; title: string; pinned: boolean }[] {
+    return this.tabOrder.flatMap((id) => {
+      const tab = this.tabs.get(id);
+      if (!tab || tab.snapshot.taskSpaceId || tab.snapshot.surface) return [];
+      const url = tab.lastExternalUrl;
+      if (!/^https?:\/\//i.test(url)) return [];
+      return [{
+        id: tab.snapshot.id,
+        url,
+        title: tab.snapshot.title || tab.snapshot.url || url,
+        pinned: tab.snapshot.pinned,
+      }];
+    });
+  }
+
+  /**
+   * Re-opens a saved session. `replace` closes every non-pinned, user-owned
+   * tab first; `merge` keeps existing tabs and just adds the session's on top.
+   * Task-owned Agent Tabs and Tandem World are never touched.
+   */
+  openSessionTabs(
+    tabs: { url: string; pinned: boolean }[],
+    mode: 'replace' | 'merge',
+  ): { openedCount: number } {
+    const savedTabs = tabs.filter((tab) => /^https?:\/\//i.test(tab.url));
+    if (mode === 'replace') {
+      const removableIds = this.tabOrder.filter((id) => {
+        const tab = this.tabs.get(id);
+        return tab && !tab.snapshot.taskSpaceId && !tab.snapshot.surface && !tab.snapshot.pinned;
+      });
+      for (const id of removableIds) this.closeTab(id, false);
+    }
+    let openedCount = 0;
+    for (const [index, tab] of savedTabs.entries()) {
+      const id = randomUUID();
+      this.createTab(tab.url, id, false, {
+        id,
+        url: tab.url,
+        pinned: tab.pinned,
+        groupId: null,
+      }, index === 0);
+      openedCount += 1;
+    }
+    this.emitSnapshot();
+    this.scheduleSave();
+    return { openedCount };
   }
 
   async captureTabContext(tabId: string): Promise<CapturedTabContext | null> {
@@ -1231,6 +1291,7 @@ export class BrowserEngine {
       checked: tab.snapshot.groupId === group.id,
       click: () => this.moveToGroup(tabId, group.id),
     }));
+    const savedSessionEligible = Boolean(this.saveSessionRequested) && this.listSaveableTabs().length > 0;
     const template: MenuItemConstructorOptions[] = [
       { label: 'Reload', click: () => this.reload(tabId) },
       { label: 'Duplicate', click: () => this.duplicateTab(tabId) },
@@ -1239,6 +1300,8 @@ export class BrowserEngine {
       { label: 'Add to New Group', enabled: !tab.snapshot.pinned, click: () => this.createGroup(tabId) },
       ...(groups.length ? [{ label: 'Move to Group', enabled: !tab.snapshot.pinned, submenu: groups } as MenuItemConstructorOptions] : []),
       ...(tab.snapshot.groupId ? [{ label: 'Remove from Group', click: () => this.moveToGroup(tabId, null) } as MenuItemConstructorOptions] : []),
+      { type: 'separator' },
+      { label: 'Save session…', enabled: savedSessionEligible, click: () => this.saveSessionRequested?.() },
       { type: 'separator' },
       { label: 'Close Tab', click: () => this.closeTab(tabId) },
       { label: 'Close Other Tabs', enabled: this.tabs.size > 1, click: () => this.closeOtherTabs(tabId) },

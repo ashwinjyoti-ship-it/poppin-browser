@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { Check, Copy, Plus, RotateCcw, X } from 'lucide-react';
+import { BookOpenText, Check, Copy, ExternalLink, FileSignature, GitCompare, Plus, RotateCcw, Save, Sparkles, X } from 'lucide-react';
 
-import type { TaskCommand, TaskCommandResult, TaskSnapshot } from '../../shared/task';
+import type { TaskCommand, TaskCommandResult, TaskSnapshot, TaskTurnSnapshot } from '../../shared/task';
 import type { WorkspaceSnapshot } from '../../shared/workspace';
 import type { BrowserAgentCommand, BrowserAgentCommandResult, BrowserAgentSnapshot } from '../../shared/browser-agent';
+import { extractProvenanceClaims } from '../../shared/provenance';
 import { TandemMarkdown } from './TandemMarkdown';
 
 interface TaskTabViewProps {
@@ -139,11 +140,24 @@ function BrowserUseView({ snapshot, onCommand }: { snapshot?: BrowserAgentSnapsh
   const canControl = snapshot?.state === 'running' || snapshot?.state === 'needs-approval';
   const canCleanUp = snapshot?.state === 'completed' || snapshot?.state === 'stopped';
   const taskSpace = snapshot?.taskSpace;
+  const ownership = taskSpace?.owner === 'user' ? 'user' : 'agent';
+  const ownershipLabel = ownership === 'agent' ? 'Agent owns these tabs' : 'You own these tabs';
   return (
     <section className="browser-use-card" aria-label="Controlled browser use">
-      <div className="browser-use-heading"><div><span className="eyebrow">Agent Tabs</span><h3>{snapshot?.currentAction ?? snapshot?.taskSpace?.name ?? titleCase(snapshot?.state ?? 'idle')}</h3></div><span className={`task-state browser-state-${snapshot?.state ?? 'idle'}`}>{snapshot?.taskSpace?.status ?? snapshot?.state ?? 'idle'}</span></div>
+      <div className="browser-use-heading">
+        <div>
+          <span className="eyebrow">Agent Tabs</span>
+          <h3>{snapshot?.currentAction ?? snapshot?.taskSpace?.name ?? titleCase(snapshot?.state ?? 'idle')}</h3>
+        </div>
+        <div className="browser-use-heading-badges">
+          {taskSpace ? (
+            <span className={`ownership-pill ownership-pill-${ownership}`} aria-label={ownershipLabel}>{ownershipLabel}</span>
+          ) : null}
+          <span className={`task-state browser-state-${snapshot?.state ?? 'idle'}`}>{snapshot?.taskSpace?.status ?? snapshot?.state ?? 'idle'}</span>
+        </div>
+      </div>
       {!taskSpace ? <p className="context-note">This task is using frozen context only. Eligible browser-use tasks create Agent Tabs automatically.</p> : null}
-      {taskSpace ? <p className="context-note">{taskSpace.contextTabIds.length} context · {taskSpace.explorationTabIds.length} exploration · {snapshot?.watching ? 'Live browser view' : 'Working in background'} · {taskSpace.owner === 'agent' ? 'Agent controlling' : 'User controlling'}</p> : null}
+      {taskSpace ? <p className="context-note">{taskSpace.contextTabIds.length} context · {taskSpace.explorationTabIds.length} exploration · {snapshot?.watching ? 'Live browser view' : 'Working in background'}</p> : null}
       {taskSpace ? <div className="browser-controls"><button type="button" onClick={() => { void onCommand({ type: 'watch' }); }}>{snapshot?.watching ? 'Watching live' : 'Return to live view'}</button>{canControl ? <button type="button" onClick={() => { void onCommand({ type: 'pause' }); }}>Pause</button> : null}{canControl ? <button type="button" onClick={() => { void onCommand({ type: 'takeOver' }); }}>Take over</button> : null}{snapshot?.state === 'paused' ? <button type="button" onClick={() => { void onCommand({ type: 'resume' }); }}>Resume agent</button> : null}{!canCleanUp ? <button type="button" onClick={() => { void onCommand({ type: 'setKeepTabs', keep: !taskSpace.kept }); }}>{taskSpace.kept ? 'Close tabs after task' : 'Keep tabs after task'}</button> : null}{!canCleanUp ? <button type="button" onClick={() => { void onCommand({ type: 'stop' }); }}>Stop</button> : null}</div> : null}
       {canCleanUp ? <div className="browser-controls browser-cleanup-controls"><button type="button" className="primary-button" onClick={() => { void onCommand({ type: 'closeTaskTabs' }); }}>Close task tabs</button>{taskSpace && !taskSpace.kept ? <button type="button" onClick={() => { void onCommand({ type: 'keepTabs' }); }}>Keep tabs</button> : null}</div> : null}
       {snapshot?.log.length ? <ol className="browser-action-log">{snapshot.log.slice(-12).map((entry) => <li key={entry.id}><span>{entry.action}</span><small>{entry.outcome} · {entry.detail}</small></li>)}</ol> : null}
@@ -155,12 +169,14 @@ function WorkThread({ task, onCommand }: { task: NonNullable<TaskSnapshot['task'
   const [revision, setRevision] = useState('');
   const [message, setMessage] = useState('');
   const canReview = task.state === 'Needs Approval' && !task.pendingApproval;
-  const turns = task.turns?.length ? task.turns : [{
+  const turns: TaskTurnSnapshot[] = task.turns?.length ? task.turns : [{
     id: task.turnId || 'current-turn', prompt: task.prompt, result: task.result,
     status: task.state === 'Completed' ? 'completed' as const : task.state === 'Failed' ? 'failed' as const : task.state === 'Cancelled' ? 'cancelled' as const : 'running' as const,
     sources: task.browserRun.sources, createdAt: task.createdAt, completedAt: task.state === 'Running' ? null : task.updatedAt,
   }];
   const hasResult = turns.some((turn) => turn.result.trim());
+  const lastCompletedTurn = [...turns].reverse().find((turn) => turn.status === 'completed' && turn.result.trim()) ?? null;
+  const canReplyAction = Boolean(lastCompletedTurn) && !task.pendingApproval && ['Completed', 'Needs Approval', 'Failed', 'Cancelled'].includes(task.state);
   const threadText = turns.map((turn, index) => `Turn ${index + 1}\nYou\n${turn.prompt}\n\nAgent\n${turn.result}`).join('\n\n---\n\n');
   return (
     <div className="reply-view task-thread" aria-label="Task conversation">
@@ -175,6 +191,7 @@ function WorkThread({ task, onCommand }: { task: NonNullable<TaskSnapshot['task'
         <article className={`task-turn task-turn-${turn.status}`} key={turn.id}>
           <header className="task-turn-request"><span>You · Turn {index + 1}</span><p>{turn.prompt}</p></header>
           {turn.result ? <TandemMarkdown markdown={turn.result} title={taskHeadline(turn.prompt)} className="reply-body task-turn-reply" /> : null}
+          {turn.result ? <ClaimsList turn={turn} /> : null}
           {turn.sources.length ? (
             <section className="reply-sources">
               <h3>Sources</h3>
@@ -184,6 +201,9 @@ function WorkThread({ task, onCommand }: { task: NonNullable<TaskSnapshot['task'
           {turn.status === 'running' ? <div className="task-turn-thinking" role="status"><span className="agent-dock-dot" aria-hidden="true" /> Agent thinking…</div> : null}
         </article>
       ))}
+      {canReplyAction && lastCompletedTurn ? (
+        <NextActionChips task={task} onCommand={onCommand} onMessage={setMessage} />
+      ) : null}
       {canReview ? (
         <div className="review-actions">
           <button type="button" className="primary-button" onClick={() => { void onCommand({ type: 'approveResult' }).then((result) => setMessage(result.message ?? 'Approved.')); }}><Check size={14} /> Approve</button>
@@ -192,6 +212,90 @@ function WorkThread({ task, onCommand }: { task: NonNullable<TaskSnapshot['task'
         </div>
       ) : null}
       {message ? <p className="review-message">{message}</p> : null}
+    </div>
+  );
+}
+
+function ClaimsList({ turn }: { turn: TaskTurnSnapshot }) {
+  const claims = extractProvenanceClaims(turn.result, turn.sources);
+  if (claims.length === 0) return null;
+  return (
+    <section className="reply-claims" aria-label="Claims and sources">
+      <h3>Claims · Sources</h3>
+      <ol>
+        {claims.map((claim) => (
+          <li key={claim.url}>
+            <a href={claim.url} target="_blank" rel="noreferrer">{claim.claim}</a>
+            {claim.sourceTitle && claim.sourceTitle !== claim.claim ? <small> — {claim.sourceTitle}</small> : null}
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
+function NextActionChips({ task, onCommand, onMessage }: {
+  task: NonNullable<TaskSnapshot['task']>;
+  onCommand: (command: TaskCommand) => Promise<TaskCommandResult>;
+  onMessage: (value: string) => void;
+}) {
+  const run = (command: TaskCommand, defaultMessage: string) => {
+    void onCommand(command).then((result) => onMessage(result.message ?? defaultMessage));
+  };
+  return (
+    <div className="reply-next-actions" aria-label="Next actions">
+      <button
+        type="button"
+        className="chip-button"
+        title="Ask the agent to keep researching the open questions in the last result."
+        onClick={() => run({
+          type: 'continueTask',
+          prompt: 'Continue researching based on the open questions in the last result. Use Agent Tabs and cite each new claim with a markdown link to the source URL.',
+        }, 'Continuing research.')}
+      >
+        <Sparkles size={12} /> Continue research
+      </button>
+      <button
+        type="button"
+        className="chip-button"
+        title="Ask the agent to compare the leading options from the last result."
+        onClick={() => run({
+          type: 'continueTask',
+          prompt: 'Compare the leading options from the last result side by side on price, features, caveats, and sources. Prefer a comparison table and cite every fact with a markdown link.',
+        }, 'Preparing comparison.')}
+      >
+        <GitCompare size={12} /> Compare
+      </button>
+      <button
+        type="button"
+        className="chip-button"
+        title="Ask the agent to draft a concise recommendation from the last result."
+        onClick={() => run({
+          type: 'continueTask',
+          prompt: 'Draft a concise recommendation from the last result. Keep it under 200 words, address the user directly, and cite each claim with a markdown link to the source URL.',
+        }, 'Drafting recommendation.')}
+      >
+        <FileSignature size={12} /> Draft
+      </button>
+      <button
+        type="button"
+        className="chip-button"
+        title="Append this result to Poppin's protected Memory page."
+        onClick={() => run({ type: 'saveResultToMemory' }, 'Saved to Memory.')}
+      >
+        <Save size={12} /> Save to Memory
+      </button>
+      <button
+        type="button"
+        className="chip-button"
+        title="Create a new Tandem page with this result and open it in Tandem World."
+        onClick={() => run({ type: 'addResultToTandem', mode: 'new' }, 'Added to Tandem.')}
+      >
+        <BookOpenText size={12} /> Add to Tandem
+      </button>
+      {task.state === 'Completed' || task.state === 'Needs Approval' ? (
+        <span className="chip-hint"><ExternalLink size={11} /> Sources open in new tabs.</span>
+      ) : null}
     </div>
   );
 }
@@ -212,6 +316,26 @@ function CodeReview({ task, workspace, onCommand }: { task: NonNullable<TaskSnap
     <div className="review-view">
       <button type="button" className="secondary-button preview-button" onClick={() => { void onCommand({ type: 'openPreview' }).then((result) => setMessage(result.message ?? 'Preview opened in the centre browser.')); }}>Open localhost preview</button>
       <section className="result-section"><h3>Codex summary</h3><pre>{task.result || (task.state === 'Running' ? 'Codex is working…' : 'No summary was returned.')}</pre></section>
+      {task.result && (task.state === 'Completed' || task.state === 'Needs Approval') ? (
+        <div className="reply-next-actions" aria-label="Result actions">
+          <button
+            type="button"
+            className="chip-button"
+            title="Append this Code summary to Poppin's protected Memory page."
+            onClick={() => { void onCommand({ type: 'saveResultToMemory' }).then((result) => setMessage(result.message ?? 'Saved to Memory.')); }}
+          >
+            <Save size={12} /> Save to Memory
+          </button>
+          <button
+            type="button"
+            className="chip-button"
+            title="Create a new Tandem page with this Code summary."
+            onClick={() => { void onCommand({ type: 'addResultToTandem', mode: 'new' }).then((result) => setMessage(result.message ?? 'Added to Tandem.')); }}
+          >
+            <BookOpenText size={12} /> Add to Tandem
+          </button>
+        </div>
+      ) : null}
       <section className="result-section diff-section"><h3>Git diff</h3><pre>{task.diff || 'No project diff yet.'}</pre></section>
       {canReview ? (
         <div className="review-actions">

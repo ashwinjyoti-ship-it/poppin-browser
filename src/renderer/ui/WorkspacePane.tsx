@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, FilePlus2, FileText, Globe2, Layers3, RefreshCw, X } from 'lucide-react';
+import { BookmarkPlus, ChevronLeft, ChevronRight, FilePlus2, FileText, Globe2, Layers3, Package, RefreshCw, Save, X } from 'lucide-react';
 import { type FormEvent, useState } from 'react';
 
 import type { WorkspaceSnapshot } from '../../shared/workspace';
@@ -86,7 +86,14 @@ export function WorkspacePane({
       {snapshot.workspace ? (
         <div className="workspace-content">
           <TandemSection snapshot={tandem} onCommand={onTandemCommand} onOpenSettings={onOpenSettings} />
-          <MemorySection onCommand={onPagesCommand} />
+          <MemorySection
+            memorySelected={snapshot.memorySelected ?? false}
+            memoryBrief={snapshot.memoryBrief ?? null}
+            onCommand={onPagesCommand}
+            onWorkspaceCommand={onCommand}
+          />
+          <ContextPacksSection snapshot={snapshot} onCommand={onCommand} />
+          <BrowserSessionsSection snapshot={snapshot} onCommand={onCommand} />
           <section className="workspace-section">
             <div className="section-heading"><span>Tabs</span><span>{tabs.length}</span></div>
             <div className="selection-list">
@@ -164,5 +171,213 @@ export function WorkspacePane({
         </form>
       )}
     </aside>
+  );
+}
+
+interface SubSectionProps {
+  snapshot: WorkspaceSnapshot;
+  onCommand: (command: import('../../shared/workspace').WorkspaceCommand) => Promise<string | null>;
+}
+
+function ContextPacksSection({ snapshot, onCommand }: SubSectionProps) {
+  const [name, setName] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState('');
+  const packs = snapshot.contextPacks ?? [];
+  const save = async () => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    setBusy(true);
+    const err = await onCommand({ type: 'saveContextPack', name: trimmed });
+    setBusy(false);
+    if (err) {
+      setMessage(err);
+    } else {
+      setMessage('Saved current selection.');
+      setName('');
+    }
+  };
+  return (
+    <section className="workspace-section" aria-label="Context packs">
+      <div className="section-heading"><span>Context packs</span><span>{packs.length}</span></div>
+      <div className="context-pack-composer">
+        <input
+          type="text"
+          placeholder="Name this selection…"
+          value={name}
+          maxLength={80}
+          onChange={(event) => { setName(event.target.value); setMessage(''); }}
+        />
+        <button
+          type="button"
+          className="secondary-button"
+          onClick={() => { void save(); }}
+          disabled={busy || !name.trim()}
+        >
+          <Package size={13} /> Save current
+        </button>
+      </div>
+      {message ? <span className="context-note">{message}</span> : null}
+      <div className="selection-list">
+        {packs.length === 0 ? <span className="section-empty">No packs saved yet.</span> : null}
+        {packs.map((pack) => (
+          <ContextPackRow key={pack.id} pack={pack} onCommand={onCommand} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+interface ContextPackRowProps {
+  pack: import('../../shared/workspace').ContextPackSnapshot;
+  onCommand: (command: import('../../shared/workspace').WorkspaceCommand) => Promise<string | null>;
+}
+
+function ContextPackRow({ pack, onCommand }: ContextPackRowProps) {
+  const [renaming, setRenaming] = useState(false);
+  const [name, setName] = useState(pack.name);
+  const commitRename = async () => {
+    const trimmed = name.trim();
+    if (!trimmed || trimmed === pack.name) {
+      setRenaming(false);
+      setName(pack.name);
+      return;
+    }
+    await onCommand({ type: 'renameContextPack', packId: pack.id, name: trimmed });
+    setRenaming(false);
+  };
+  const summary = [
+    pack.tabRefs.length ? `${pack.tabRefs.length} tab${pack.tabRefs.length === 1 ? '' : 's'}` : null,
+    pack.documentIds.length ? `${pack.documentIds.length} doc${pack.documentIds.length === 1 ? '' : 's'}` : null,
+    pack.tandemPageIds.length ? `${pack.tandemPageIds.length} tandem page${pack.tandemPageIds.length === 1 ? '' : 's'}` : null,
+    pack.includeMemory ? 'memory' : null,
+  ].filter(Boolean).join(' · ') || 'Empty selection';
+  return (
+    <div className="context-pack-row">
+      <div className="context-pack-header">
+        {renaming ? (
+          <input
+            type="text"
+            value={name}
+            autoFocus
+            maxLength={80}
+            onChange={(event) => setName(event.target.value)}
+            onBlur={() => { void commitRename(); }}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') { event.preventDefault(); void commitRename(); }
+              if (event.key === 'Escape') { setRenaming(false); setName(pack.name); }
+            }}
+          />
+        ) : (
+          <span className="context-pack-name" onDoubleClick={() => setRenaming(true)}>{pack.name}</span>
+        )}
+        <span className="context-pack-summary">{summary}</span>
+      </div>
+      <div className="context-pack-actions">
+        <button type="button" onClick={() => { void onCommand({ type: 'applyContextPack', packId: pack.id }); }}>Apply</button>
+        <button type="button" onClick={() => setRenaming(true)}>Rename</button>
+        <button type="button" onClick={() => { void onCommand({ type: 'deleteContextPack', packId: pack.id }); }} aria-label={`Delete ${pack.name}`}><X size={13} /></button>
+      </div>
+    </div>
+  );
+}
+
+function BrowserSessionsSection({ snapshot, onCommand }: SubSectionProps) {
+  const [name, setName] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState('');
+  const sessions = snapshot.browserSessions ?? [];
+  const save = async () => {
+    setBusy(true);
+    const trimmed = name.trim();
+    const err = await onCommand({ type: 'saveBrowserSession', name: trimmed || undefined });
+    setBusy(false);
+    if (err) {
+      setMessage(err);
+    } else {
+      setMessage('Saved current tabs.');
+      setName('');
+    }
+  };
+  return (
+    <section className="workspace-section" aria-label="Sessions">
+      <div className="section-heading"><span>Sessions</span><span>{sessions.length}</span></div>
+      <div className="context-pack-composer">
+        <input
+          type="text"
+          placeholder="Session name (optional)…"
+          value={name}
+          maxLength={80}
+          onChange={(event) => { setName(event.target.value); setMessage(''); }}
+        />
+        <button
+          type="button"
+          className="secondary-button"
+          onClick={() => { void save(); }}
+          disabled={busy}
+        >
+          <Save size={13} /> Save current
+        </button>
+      </div>
+      {message ? <span className="context-note">{message}</span> : null}
+      <div className="selection-list">
+        {sessions.length === 0 ? <span className="section-empty">No saved sessions yet.</span> : null}
+        {sessions.map((session) => (
+          <BrowserSessionRow key={session.id} session={session} onCommand={onCommand} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+interface BrowserSessionRowProps {
+  session: import('../../shared/workspace').BrowserSessionSnapshot;
+  onCommand: (command: import('../../shared/workspace').WorkspaceCommand) => Promise<string | null>;
+}
+
+function BrowserSessionRow({ session, onCommand }: BrowserSessionRowProps) {
+  const [renaming, setRenaming] = useState(false);
+  const [name, setName] = useState(session.name);
+  const commitRename = async () => {
+    const trimmed = name.trim();
+    if (!trimmed || trimmed === session.name) {
+      setRenaming(false);
+      setName(session.name);
+      return;
+    }
+    await onCommand({ type: 'renameBrowserSession', sessionId: session.id, name: trimmed });
+    setRenaming(false);
+  };
+  const summary = `${session.tabs.length} tab${session.tabs.length === 1 ? '' : 's'}`;
+  return (
+    <div className="context-pack-row">
+      <div className="context-pack-header">
+        {renaming ? (
+          <input
+            type="text"
+            value={name}
+            autoFocus
+            maxLength={80}
+            onChange={(event) => setName(event.target.value)}
+            onBlur={() => { void commitRename(); }}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') { event.preventDefault(); void commitRename(); }
+              if (event.key === 'Escape') { setRenaming(false); setName(session.name); }
+            }}
+          />
+        ) : (
+          <span className="context-pack-name" onDoubleClick={() => setRenaming(true)}>
+            <BookmarkPlus size={13} /> {session.name}
+          </span>
+        )}
+        <span className="context-pack-summary">{summary}</span>
+      </div>
+      <div className="context-pack-actions">
+        <button type="button" onClick={() => { void onCommand({ type: 'openBrowserSession', sessionId: session.id, mode: 'merge' }); }}>Merge</button>
+        <button type="button" onClick={() => { void onCommand({ type: 'openBrowserSession', sessionId: session.id, mode: 'replace' }); }}>Replace</button>
+        <button type="button" onClick={() => setRenaming(true)}>Rename</button>
+        <button type="button" onClick={() => { void onCommand({ type: 'deleteBrowserSession', sessionId: session.id }); }} aria-label={`Delete ${session.name}`}><X size={13} /></button>
+      </div>
+    </div>
   );
 }

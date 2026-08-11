@@ -43,6 +43,31 @@ out/make/Poppin Browser-0.1.0-<arch>.dmg
 out/make/zip/darwin/<arch>/Poppin Browser-darwin-<arch>-0.1.0.zip
 ```
 
+### Update the stable local installers in `DMG/`
+
+After a change you want to install locally, overwrite the existing stable
+files — do not keep versioned duplicates:
+
+```bash
+npm run update:dmg          # host architecture only
+npm run update:dmg:all      # arm64 + x64
+```
+
+That rebuilds with Electron Forge, `hdiutil`-verifies a temp copy, then
+atomically replaces:
+
+```
+DMG/Poppin-Browser-arm64.dmg
+DMG/Poppin-Browser-x64.dmg
+```
+
+Those files stay local (gitignored). Promoting an already-built candidate
+without rebuilding:
+
+```bash
+node scripts/update-stable-dmgs.mjs --arch=all --skip-build
+```
+
 To produce only the unpacked `.app` (faster, useful while iterating):
 
 ```bash

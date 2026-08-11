@@ -1,4 +1,4 @@
-import type { PageContextSnapshot } from '../../shared/workspace';
+import type { MemoryBriefSnapshot, PageContextSnapshot } from '../../shared/workspace';
 import type { DatabasePropertySnapshot, PageDocumentSnapshot, PageJsonValue } from '../../shared/pages';
 import { PagesStore } from './pages-store';
 
@@ -10,6 +10,30 @@ export function selectedPageContexts(store: PagesStore): PageContextSnapshot[] {
     const document = store.getPage(pageId);
     return document ? [pageContext(document)] : [];
   });
+}
+
+/**
+ * Returns a bounded, decrypted preview of the Memory page suitable for
+ * inclusion in explicit context. Never creates Memory as a side effect —
+ * unavailable encryption or a missing page returns null so the caller can
+ * decide how to react.
+ */
+export function memoryBrief(store: PagesStore): MemoryBriefSnapshot | null {
+  const pageId = store.findMemoryPageId();
+  if (!pageId) return null;
+  let document: PageDocumentSnapshot | null;
+  try {
+    document = store.getPage(pageId);
+  } catch {
+    return null;
+  }
+  if (!document) return null;
+  const raw = document.blocks.map((block) => blockText(block.content)).filter(Boolean).join('\n\n');
+  return {
+    title: document.page.title,
+    content: raw.slice(0, MAX_PAGE_CONTEXT_CHARACTERS),
+    truncated: raw.length > MAX_PAGE_CONTEXT_CHARACTERS,
+  };
 }
 
 export function querySelectedDatabase(store: PagesStore, databaseId: string, limit = 50): string {

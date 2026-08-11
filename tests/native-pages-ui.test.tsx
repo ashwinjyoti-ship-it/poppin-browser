@@ -34,7 +34,13 @@ describe('native Pages UI', () => {
   it('keeps encrypted Memory available without native Page or Database creation controls', async () => {
     const user = userEvent.setup();
     const command = vi.fn().mockResolvedValue(null);
-    render(<MemorySection onCommand={command} />);
+    const onWorkspaceCommand = vi.fn().mockResolvedValue(null);
+    render(<MemorySection
+      memorySelected={false}
+      memoryBrief={null}
+      onCommand={command}
+      onWorkspaceCommand={onWorkspaceCommand}
+    />);
     await user.click(screen.getByRole('button', { name: /Open Memory/i }));
     expect(command).toHaveBeenCalledWith({ type: 'openMemory' });
     expect(screen.queryByRole('button', { name: /^Page$/ })).not.toBeInTheDocument();

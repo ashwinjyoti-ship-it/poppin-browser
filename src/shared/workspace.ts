@@ -21,6 +21,45 @@ export interface WorkspaceSnapshot {
   pageContexts?: PageContextSnapshot[];
   /** Frozen Tandem pages the user explicitly checked into context. */
   tandemContexts?: TandemContextSnapshot[];
+  /** Named checkbox sets the user can save and re-apply. */
+  contextPacks?: ContextPackSnapshot[];
+  /** True when the user has opted the encrypted Memory brief into context. */
+  memorySelected?: boolean;
+  /** A frozen, inspectable preview of Memory content sent to the agent. */
+  memoryBrief?: MemoryBriefSnapshot | null;
+  /** Named tab collections the user saved for later re-opening. */
+  browserSessions?: BrowserSessionSnapshot[];
+}
+
+/**
+ * Named context pack: a saved selection of tabs (by URL/title, since tabs die),
+ * workspace documents, Tandem pages, and the Memory checkbox. Applying a pack
+ * re-selects whatever still exists — matching open tabs by URL, documents by
+ * id, and Tandem pages by id — without importing new content on its own.
+ */
+export interface ContextPackSnapshot {
+  id: string;
+  name: string;
+  tabRefs: { url: string; title: string }[];
+  documentIds: string[];
+  tandemPageIds: string[];
+  includeMemory: boolean;
+  createdAt: string;
+}
+
+/** A bounded copy of Memory the user opted into the context package. */
+export interface MemoryBriefSnapshot {
+  title: string;
+  content: string;
+  truncated: boolean;
+}
+
+/** A saved tab collection: URLs, titles, and pinning survive a full close. */
+export interface BrowserSessionSnapshot {
+  id: string;
+  name: string;
+  tabs: { url: string; title: string; pinned: boolean }[];
+  createdAt: string;
 }
 
 export interface PageContextSnapshot {
@@ -99,7 +138,24 @@ export type WorkspaceCommand =
       installCommand: string;
       devCommand: string;
       previewUrl: string;
-    };
+    }
+  /** Opt the encrypted Memory brief in or out of the current context package. */
+  | { type: 'setMemorySelected'; selected: boolean }
+  /** Snapshots the current selection (tabs by URL, documents, tandem pages, memory) as a named pack. */
+  | { type: 'saveContextPack'; name: string }
+  /** Re-selects whatever still exists from a saved pack. */
+  | { type: 'applyContextPack'; packId: string }
+  | { type: 'renameContextPack'; packId: string; name: string }
+  | { type: 'deleteContextPack'; packId: string }
+  /** Snapshots the current non-agent, non-Tandem-World browser tabs as a named session. */
+  | { type: 'saveBrowserSession'; name?: string }
+  /**
+   * Re-opens the tabs from a saved session. `replace` closes existing user tabs
+   * first; `merge` opens the session's tabs alongside what's already there.
+   */
+  | { type: 'openBrowserSession'; sessionId: string; mode: 'replace' | 'merge' }
+  | { type: 'renameBrowserSession'; sessionId: string; name: string }
+  | { type: 'deleteBrowserSession'; sessionId: string };
 
 export interface WorkspaceCommandResult {
   ok: boolean;

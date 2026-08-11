@@ -154,4 +154,40 @@ describe('pages store', () => {
     expect(restored.getPage(tab.pageId)?.blocks[0]?.content).toEqual({ text: 'Private preference: quiet mornings.' });
     restored.close();
   });
+
+  it('appendMemory writes an encrypted paragraph without opening a tab', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'poppin-memory-append-'));
+    const filePath = path.join(directory, 'poppin.sqlite');
+    const protector = {
+      available: () => true,
+      encrypt: (text: string) => Buffer.from(`protected:${Buffer.from(text).toString('base64')}`),
+      decrypt: (value: Buffer) => Buffer.from(value.toString().slice('protected:'.length), 'base64').toString(),
+    };
+    const store = new PagesStore(filePath, protector);
+    // ensureMemoryPage should create Memory on first append even without openMemory().
+    expect(store.findMemoryPageId()).toBeNull();
+    const block = store.appendMemory('## Task result\n\nShipped the checkout flow.');
+    const pageId = store.findMemoryPageId();
+    expect(pageId).toBeTruthy();
+    const page = store.getPage(pageId!)!;
+    expect(page.page.title).toBe('Memory');
+    expect(page.blocks.at(-1)?.id).toBe(block.id);
+    expect(page.blocks.at(-1)?.content).toEqual({ text: '## Task result\n\nShipped the checkout flow.' });
+
+    const rawBytes = await import('node:fs/promises').then(({ readFile }) => readFile(filePath));
+    expect(rawBytes.toString()).not.toContain('Shipped the checkout flow.');
+
+    expect(() => store.appendMemory('   ')).toThrow(/non-empty/i);
+    store.close();
+  });
+
+  it('appendMemory refuses to fabricate a Memory page when OS encryption is unavailable', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'poppin-memory-unencrypted-'));
+    const filePath = path.join(directory, 'poppin.sqlite');
+    // No protector: OS encryption is unavailable, so Memory must not be created.
+    const store = new PagesStore(filePath);
+    expect(() => store.appendMemory('Should not be stored.')).toThrow(/encryption/i);
+    expect(store.findMemoryPageId()).toBeNull();
+    store.close();
+  });
 });

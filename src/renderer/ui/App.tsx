@@ -7,11 +7,11 @@ import type { TaskCommand, TaskCommandResult, TaskSnapshot } from '../../shared/
 import type { BrowserAgentCommand, BrowserAgentCommandResult, BrowserAgentSnapshot } from '../../shared/browser-agent';
 import type { PagesCommand, PagesSnapshot } from '../../shared/pages';
 import { EMPTY_TANDEM_SNAPSHOT, type TandemCommand, type TandemSnapshot } from '../../shared/tandem';
-import { downloadBarHeight, EMPTY_DOWNLOADS_SNAPSHOT, type DownloadsSnapshot } from '../../shared/downloads';
+import { EMPTY_DOWNLOADS_SNAPSHOT, type DownloadsSnapshot } from '../../shared/downloads';
 import { Brand } from './Brand';
 import { BrowserToolbar } from './BrowserToolbar';
 import { TabStrip } from './TabStrip';
-import { DownloadBar } from './DownloadBar';
+import { DownloadsPopover } from './DownloadsPopover';
 import { WorkspacePane } from './WorkspacePane';
 import { TaskTabView } from './TaskTabView';
 import { AgentDock } from './AgentDock';
@@ -37,7 +37,17 @@ const EMPTY_SNAPSHOT: BrowserSnapshot = {
   authenticationPopup: null,
   linkPreview: null,
 };
-const EMPTY_WORKSPACE: WorkspaceSnapshot = { workspace: null, documents: [], tabContexts: [], project: null, visualSelection: null };
+const EMPTY_WORKSPACE: WorkspaceSnapshot = {
+  workspace: null,
+  documents: [],
+  tabContexts: [],
+  project: null,
+  visualSelection: null,
+  contextPacks: [],
+  memorySelected: false,
+  memoryBrief: null,
+  browserSessions: [],
+};
 const EMPTY_TASK: TaskSnapshot = { connection: { state: 'checking', message: 'Connecting to Codex…', accountLabel: null, models: [] }, task: null };
 const EMPTY_BROWSER_AGENT: BrowserAgentSnapshot = { state: 'idle', taskId: null, taskSpace: null, watching: false, allowedTabIds: [], activeTabId: null, currentAction: null, pendingApproval: null, log: [] };
 const EMPTY_PAGES: PagesSnapshot = { pages: [], tabs: [], activeTabId: null, selectedPageIds: [] };
@@ -64,6 +74,7 @@ export function App() {
   const [commandCollapsed, setCommandCollapsed] = useState(false);
   const [commandOverlayHeight, setCommandOverlayHeight] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [downloadsOpen, setDownloadsOpen] = useState(false);
   const [preferredLeftPaneWidth, setPreferredLeftPaneWidth] = useState(() => loadLeftPaneWidth(window.localStorage));
   const [viewport, setViewport] = useState(() => ({ width: window.innerWidth, height: window.innerHeight }));
   const addressInputRef = useRef<HTMLInputElement>(null);
@@ -89,8 +100,7 @@ export function App() {
   const address = isEditingAddress ? addressDraft : activeTab?.url ?? (activeNativeTab ? `${activeNativeTab.kind}://${activeNativeTab.pageId}` : '');
   const addressError = visibleAddressIssue(addressIssue, activeTab);
   const chromeLayout = getChromeLayout(viewport.width, viewport.height);
-  const downloadsHeight = downloadBarHeight(downloadsSnapshot.items.length);
-  const chromeHeight = chromeLayout.height + downloadsHeight;
+  const chromeHeight = chromeLayout.height;
   const leftPaneWidth = normalizeLeftPaneWidth(preferredLeftPaneWidth, viewport.width);
   const dockPresentation = getAgentDockPresentation({
     taskSnapshot,
@@ -340,6 +350,17 @@ export function App() {
             onReload={() => withActiveTab('reload')}
             onSettingsOpenChange={(open) => { void window.poppinSettings.command({ type: open ? 'open' : 'close' }); }}
             onSubmit={submitAddress}
+            downloadsSlot={
+              <DownloadsPopover
+                snapshot={downloadsSnapshot}
+                open={downloadsOpen}
+                onOpenChange={setDownloadsOpen}
+                onCancel={(id) => { void window.poppinDownloads.command({ type: 'cancel', id }); }}
+                onReveal={(id) => { void window.poppinDownloads.command({ type: 'reveal', id }); }}
+                onDismiss={(id) => { void window.poppinDownloads.command({ type: 'dismiss', id }); }}
+                onClearFinished={() => { void window.poppinDownloads.command({ type: 'clearFinished' }); }}
+              />
+            }
           />
         </div>
         <TabStrip
@@ -384,12 +405,6 @@ export function App() {
           onOpenTandemWorld={() => {
             void sendTandemCommand({ type: 'openWorld' });
           }}
-        />
-        <DownloadBar
-          snapshot={downloadsSnapshot}
-          onCancel={(id) => { void window.poppinDownloads.command({ type: 'cancel', id }); }}
-          onReveal={(id) => { void window.poppinDownloads.command({ type: 'reveal', id }); }}
-          onDismiss={(id) => { void window.poppinDownloads.command({ type: 'dismiss', id }); }}
         />
       </header>
       <WorkspacePane

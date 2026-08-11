@@ -137,7 +137,21 @@ export type TaskCommand =
   | { type: 'refreshPullRequest' }
   | { type: 'requestMerge'; strategy: 'merge' | 'squash' | 'rebase' }
   | { type: 'requestUpdateLocal' }
-  | { type: 'exportResult'; format: 'markdown' | 'text' };
+  | { type: 'exportResult'; format: 'markdown' | 'text' }
+  /**
+   * Appends the current task result to Poppin's protected Memory page. Uses
+   * the shared Memory that already lives in the native Pages store — Memory
+   * remains OS-encrypted at rest and never leaves Poppin.
+   */
+  | { type: 'saveResultToMemory' }
+  /**
+   * Copies the current task result into Tandem. `mode` picks between creating
+   * a new page and appending onto an existing page; when appending, `pageId`
+   * is required. When `mode` is 'new' and no `pageId` is provided, Poppin
+   * creates a new page in the active Tandem workspace. Success optionally
+   * opens Tandem World to the page for review.
+   */
+  | { type: 'addResultToTandem'; mode?: 'new' | 'append'; pageId?: string };
 
 export interface TaskCommandResult {
   ok: boolean;

@@ -8,6 +8,8 @@ import ExcelJS from 'exceljs';
 
 import {
   WORKSPACE_CHANNELS,
+  type BrowserSessionSnapshot,
+  type ContextPackSnapshot,
   type WorkspaceCommand,
   type WorkspaceCommandResult,
   type WorkspaceSnapshot,
@@ -17,7 +19,7 @@ import { WorkspaceStore } from './workspace-store';
 import { BrowserEngine } from '../browser/browser-engine';
 import { GitEngine } from '../project/git-engine';
 import { PagesStore } from '../pages/pages-store';
-import { selectedPageContexts } from '../pages/page-context';
+import { memoryBrief, selectedPageContexts } from '../pages/page-context';
 
 const MAX_DOCUMENT_BYTES = 60_000;
 const TEXT_DOCUMENT_EXTENSIONS = new Set([
@@ -30,19 +32,38 @@ const MAX_WORKBOOK_BYTES = 20 * 1024 * 1024;
 const MAX_DATABASE_IMPORT_ROWS = 5_000;
 const MAX_DATABASE_IMPORT_COLUMNS = 100;
 
+export interface WorkspaceEngineOptions {
+  pagesStore?: PagesStore;
+  onPagesChanged?: () => void;
+  /** Frozen Tandem pages the user checked into explicit context. */
+  getTandemContexts?: () => TandemContextSnapshot[];
+  /** Setter for the Tandem context selection so applyContextPack can reselect. */
+  setTandemPageSelected?: (pageId: string, selected: boolean) => Promise<{ ok: boolean; message?: string }>;
+}
+
 export class WorkspaceEngine {
   constructor(
     private readonly window: BrowserWindow,
     private readonly store: WorkspaceStore,
     private readonly browser: BrowserEngine,
     private readonly git: GitEngine,
-    private readonly pagesStore?: PagesStore,
-    private readonly onPagesChanged?: () => void,
-    /** Frozen Tandem pages the user checked into explicit context. */
-    private readonly getTandemContexts?: () => TandemContextSnapshot[],
+    private readonly options: WorkspaceEngineOptions = {},
   ) {}
 
+  private get pagesStore(): PagesStore | undefined {
+    return this.options.pagesStore;
+  }
+
+  private get onPagesChanged(): (() => void) | undefined {
+    return this.options.onPagesChanged;
+  }
+
+  private get getTandemContexts(): (() => TandemContextSnapshot[]) | undefined {
+    return this.options.getTandemContexts;
+  }
+
   getSnapshot(): WorkspaceSnapshot {
+    const memorySelected = this.store.isMemorySelected();
     return {
       workspace: this.store.getWorkspace(),
       documents: this.store.listDocuments(),
@@ -51,6 +72,12 @@ export class WorkspaceEngine {
       visualSelection: this.store.getVisualSelection(),
       pageContexts: this.pagesStore ? selectedPageContexts(this.pagesStore) : [],
       tandemContexts: this.getTandemContexts?.() ?? [],
+      contextPacks: this.store.listContextPacks(),
+      memorySelected,
+      // Always surface the brief when Memory exists so the checkbox can be
+      // enabled before the user opts it in; the UI only shows the preview when selected.
+      memoryBrief: this.pagesStore ? memoryBrief(this.pagesStore) : null,
+      browserSessions: this.store.listBrowserSessions(),
     };
   }
 
@@ -101,7 +128,160 @@ export class WorkspaceEngine {
         return this.chooseProjectFolder();
       case 'updateProjectSettings':
         return this.updateProjectSettings(command);
+      case 'setMemorySelected':
+        return this.setMemorySelected(command.selected);
+      case 'saveContextPack':
+        return this.saveContextPack(command.name);
+      case 'applyContextPack':
+        return await this.applyContextPack(command.packId);
+      case 'renameContextPack':
+        return this.renameContextPack(command.packId, command.name);
+      case 'deleteContextPack':
+        return this.deleteContextPack(command.packId);
+      case 'saveBrowserSession':
+        return this.saveBrowserSession(command.name);
+      case 'openBrowserSession':
+        return this.openBrowserSession(command.sessionId, command.mode);
+      case 'renameBrowserSession':
+        return this.renameBrowserSession(command.sessionId, command.name);
+      case 'deleteBrowserSession':
+        return this.deleteBrowserSession(command.sessionId);
     }
+    this.emitSnapshot();
+    return { ok: true };
+  }
+
+  private setMemorySelected(selected: boolean): WorkspaceCommandResult {
+    if (selected && !this.pagesStore) return { ok: false, message: 'Memory is not available in this environment.' };
+    if (selected && !memoryBrief(this.pagesStore!)) {
+      // The user must open Memory at least once so its OS-encrypted page exists
+      // before it can be treated as inspectable context.
+      return { ok: false, message: 'Open Memory once to initialize it before adding it to context.' };
+    }
+    this.store.setMemorySelected(selected);
+    this.emitSnapshot();
+    return { ok: true };
+  }
+
+  private saveContextPack(rawName: string): WorkspaceCommandResult {
+    const name = rawName.trim();
+    if (!name) return { ok: false, message: 'Give the context pack a name.' };
+    if (name.length > 80) return { ok: false, message: 'Use a name under 80 characters.' };
+    const tabRefs = this.store.listTabContexts().map((context) => ({
+      url: context.url,
+      title: context.title,
+    }));
+    const documentIds = this.store.listDocuments().filter((document) => document.selected).map((document) => document.id);
+    const tandemPageIds = (this.getTandemContexts?.() ?? []).map((context) => context.pageId);
+    const includeMemory = this.store.isMemorySelected();
+    const pack: ContextPackSnapshot = {
+      id: randomUUID(),
+      name,
+      tabRefs,
+      documentIds,
+      tandemPageIds,
+      includeMemory,
+      createdAt: new Date().toISOString(),
+    };
+    this.store.insertContextPack(pack);
+    this.emitSnapshot();
+    return { ok: true, message: `Saved context pack "${pack.name}".` };
+  }
+
+  private async applyContextPack(packId: string): Promise<WorkspaceCommandResult> {
+    const pack = this.store.getContextPack(packId);
+    if (!pack) return { ok: false, message: 'That context pack is no longer available.' };
+    const browserSnapshot = this.browser.getSnapshot();
+    const packUrls = new Set(pack.tabRefs.map((ref) => ref.url));
+    const openTabsByUrl = new Map(browserSnapshot.tabs.filter((tab) => !tab.taskSpaceId && !tab.surface).map((tab) => [tab.url, tab.id]));
+    let matchedTabs = 0;
+    for (const [url, tabId] of openTabsByUrl) {
+      if (packUrls.has(url)) {
+        const result = await this.captureTab(tabId);
+        if (result.ok) matchedTabs += 1;
+      }
+    }
+    const currentDocuments = new Map(this.store.listDocuments().map((document) => [document.id, document]));
+    let matchedDocuments = 0;
+    for (const documentId of pack.documentIds) {
+      if (!currentDocuments.has(documentId)) continue;
+      const result = await this.setDocumentSelected(documentId, true);
+      if (result.ok) matchedDocuments += 1;
+    }
+    let matchedTandem = 0;
+    if (this.options.setTandemPageSelected) {
+      for (const pageId of pack.tandemPageIds) {
+        const result = await this.options.setTandemPageSelected(pageId, true);
+        if (result.ok) matchedTandem += 1;
+      }
+    }
+    let memoryEnabled = false;
+    if (pack.includeMemory) {
+      const memoryResult = this.setMemorySelected(true);
+      memoryEnabled = memoryResult.ok;
+    }
+    this.emitSnapshot();
+    const parts = [
+      `${matchedTabs}/${pack.tabRefs.length} tab${pack.tabRefs.length === 1 ? '' : 's'}`,
+      `${matchedDocuments}/${pack.documentIds.length} document${pack.documentIds.length === 1 ? '' : 's'}`,
+      `${matchedTandem}/${pack.tandemPageIds.length} Tandem page${pack.tandemPageIds.length === 1 ? '' : 's'}`,
+      ...(pack.includeMemory ? [memoryEnabled ? 'Memory on' : 'Memory unavailable'] : []),
+    ];
+    return { ok: true, message: `Applied "${pack.name}" (${parts.join(', ')}).` };
+  }
+
+  private renameContextPack(packId: string, rawName: string): WorkspaceCommandResult {
+    const name = rawName.trim();
+    if (!name) return { ok: false, message: 'Give the pack a name.' };
+    if (name.length > 80) return { ok: false, message: 'Use a name under 80 characters.' };
+    if (!this.store.renameContextPack(packId, name)) return { ok: false, message: 'That pack is no longer available.' };
+    this.emitSnapshot();
+    return { ok: true };
+  }
+
+  private deleteContextPack(packId: string): WorkspaceCommandResult {
+    if (!this.store.deleteContextPack(packId)) return { ok: false, message: 'That pack is no longer available.' };
+    this.emitSnapshot();
+    return { ok: true };
+  }
+
+  private saveBrowserSession(rawName?: string): WorkspaceCommandResult {
+    const tabs = this.browser.listSaveableTabs();
+    if (tabs.length === 0) return { ok: false, message: 'Open at least one web tab before saving a session.' };
+    const trimmed = rawName?.trim() ?? '';
+    if (trimmed.length > 80) return { ok: false, message: 'Use a name under 80 characters.' };
+    const existing = this.store.listBrowserSessions();
+    const defaultName = `Session ${existing.length + 1}`;
+    const session: BrowserSessionSnapshot = {
+      id: randomUUID(),
+      name: trimmed || defaultName,
+      tabs: tabs.map((tab) => ({ url: tab.url, title: tab.title, pinned: tab.pinned })),
+      createdAt: new Date().toISOString(),
+    };
+    this.store.insertBrowserSession(session);
+    this.emitSnapshot();
+    return { ok: true, message: `Saved session "${session.name}" (${session.tabs.length} tab${session.tabs.length === 1 ? '' : 's'}).` };
+  }
+
+  private openBrowserSession(sessionId: string, mode: 'replace' | 'merge'): WorkspaceCommandResult {
+    const session = this.store.getBrowserSession(sessionId);
+    if (!session) return { ok: false, message: 'That session is no longer available.' };
+    const { openedCount } = this.browser.openSessionTabs(session.tabs, mode);
+    this.emitSnapshot();
+    return { ok: true, message: `Opened ${openedCount} tab${openedCount === 1 ? '' : 's'} from "${session.name}".` };
+  }
+
+  private renameBrowserSession(sessionId: string, rawName: string): WorkspaceCommandResult {
+    const name = rawName.trim();
+    if (!name) return { ok: false, message: 'Give the session a name.' };
+    if (name.length > 80) return { ok: false, message: 'Use a name under 80 characters.' };
+    if (!this.store.renameBrowserSession(sessionId, name)) return { ok: false, message: 'That session is no longer available.' };
+    this.emitSnapshot();
+    return { ok: true };
+  }
+
+  private deleteBrowserSession(sessionId: string): WorkspaceCommandResult {
+    if (!this.store.deleteBrowserSession(sessionId)) return { ok: false, message: 'That session is no longer available.' };
     this.emitSnapshot();
     return { ok: true };
   }

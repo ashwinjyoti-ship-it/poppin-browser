@@ -212,12 +212,21 @@ export function TabStrip({
           {agentTaskSpace ? (
             <button
               type="button"
-              className={`agent-tabs-entry ${watchingAgentTabs ? 'agent-tabs-entry-active' : ''}`}
-              aria-label={`Agent Tabs · ${agentTaskSpace.name}. Return to live view.`}
+              className={`agent-tabs-entry ${watchingAgentTabs ? 'agent-tabs-entry-active' : ''} agent-tabs-entry-${agentTaskSpace.owner === 'user' ? 'user' : 'agent'}`}
+              aria-label={`Agent Tabs · ${agentTaskSpace.name}. ${agentTaskSpace.owner === 'user' ? 'You own these tabs.' : 'Agent owns these tabs.'} Return to live view.`}
               title={`Agent Tabs · ${agentTaskSpace.name}`}
               onClick={onWatchAgentTabs}
             >
               <span className="agent-tabs-entry-label">Agent Tabs · {agentTaskSpace.name}</span>
+              {watchingAgentTabs ? (
+                <span className="agent-tabs-entry-subtitle" aria-hidden="true">
+                  {agentTaskSpace.owner === 'user' ? 'You own · Watching' : 'Agent owns · Watching'}
+                </span>
+              ) : (
+                <span className="agent-tabs-entry-subtitle" aria-hidden="true">
+                  {agentTaskSpace.owner === 'user' ? 'You own' : 'Agent owns'}
+                </span>
+              )}
               <span className="agent-tabs-entry-count" aria-hidden="true">{agentTaskSpace.tabIds.length}</span>
             </button>
           ) : null}
