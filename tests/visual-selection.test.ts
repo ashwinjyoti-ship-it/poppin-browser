@@ -6,7 +6,7 @@ import path from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { isAuthenticationPopup, isExternalLinkPreview, isLocalhostUrl } from '../src/main/browser/browser-engine';
+import { authenticationDialogBounds, isAuthenticationPopup, isExternalLinkPreview, isLocalhostUrl } from '../src/main/browser/browser-engine';
 import { WorkspaceStore } from '../src/main/workspace/workspace-store';
 import type { VisualSelectionSnapshot } from '../src/shared/workspace';
 
@@ -48,6 +48,16 @@ describe('authentication popup policy', () => {
     expect(isAuthenticationPopup('about:blank', 'https://example.com/login')).toBe(false);
     expect(isAuthenticationPopup('http://accounts.google.com/login', 'https://claude.ai/login')).toBe(false);
     expect(isAuthenticationPopup('https://accounts.google.com/login', 'http://example.com/')).toBe(false);
+  });
+
+  it('keeps the sign-in dialog smaller than the parent with a visible top Cancel strip', () => {
+    const bounds = authenticationDialogBounds({ x: 100, y: 40, width: 1280, height: 800 });
+    expect(bounds.width).toBeLessThanOrEqual(720);
+    expect(bounds.height).toBeLessThanOrEqual(620);
+    expect(bounds.width).toBeLessThan(1280 * 0.75);
+    expect(bounds.height).toBeLessThan(800 * 0.85);
+    expect(bounds.y).toBeGreaterThanOrEqual(40 + 76);
+    expect(bounds.x).toBeGreaterThanOrEqual(100);
   });
 });
 
