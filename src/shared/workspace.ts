@@ -11,6 +11,9 @@ export interface WorkspaceRecordSnapshot {
 }
 
 import type { TandemContextSnapshot } from './tandem';
+import type { RecipeSnapshot, RecipeStepSnapshot } from './recipes';
+
+export type { RecipeSnapshot, RecipeStepSnapshot } from './recipes';
 
 export interface WorkspaceSnapshot {
   workspace: WorkspaceRecordSnapshot | null;
@@ -29,6 +32,8 @@ export interface WorkspaceSnapshot {
   memoryBrief?: MemoryBriefSnapshot | null;
   /** Named tab collections the user saved for later re-opening. */
   browserSessions?: BrowserSessionSnapshot[];
+  /** Phase 13 transparent site recipes saved from successful verified runs. */
+  recipes?: RecipeSnapshot[];
 }
 
 /**
@@ -155,7 +160,20 @@ export type WorkspaceCommand =
    */
   | { type: 'openBrowserSession'; sessionId: string; mode: 'replace' | 'merge' }
   | { type: 'renameBrowserSession'; sessionId: string; name: string }
-  | { type: 'deleteBrowserSession'; sessionId: string };
+  | { type: 'deleteBrowserSession'; sessionId: string }
+  /**
+   * Saves a sanitized recipe from a successful automation log. Creation is
+   * always explicit — never auto-created. Credential-looking steps are dropped.
+   */
+  | {
+      type: 'saveRecipe';
+      name: string;
+      steps: RecipeStepSnapshot[];
+      startUrl?: string | null;
+    }
+  | { type: 'renameRecipe'; recipeId: string; name: string }
+  | { type: 'setRecipeEnabled'; recipeId: string; enabled: boolean }
+  | { type: 'deleteRecipe'; recipeId: string };
 
 export interface WorkspaceCommandResult {
   ok: boolean;

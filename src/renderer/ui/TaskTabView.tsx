@@ -2,10 +2,16 @@ import { useEffect, useRef, useState } from 'react';
 import { BookOpenText, Check, Copy, ExternalLink, FileSignature, GitCompare, Plus, RotateCcw, Save, Sparkles, X } from 'lucide-react';
 
 import type { TaskCommand, TaskCommandResult, TaskSnapshot, TaskTurnSnapshot } from '../../shared/task';
-import type { WorkspaceSnapshot } from '../../shared/workspace';
+import type { WorkspaceCommand, WorkspaceCommandResult, WorkspaceSnapshot } from '../../shared/workspace';
 import type { BrowserAgentCommand, BrowserAgentCommandResult, BrowserAgentSnapshot } from '../../shared/browser-agent';
 import { extractProvenanceClaims } from '../../shared/provenance';
+import { parseCompareMatrix } from '../../shared/compare-board';
+import { buildDeliveryStory } from '../../shared/delivery-story';
+import { recipeStartUrl, sanitizeRecipeSteps } from '../../shared/recipes';
 import { TandemMarkdown } from './TandemMarkdown';
+import { CompareBoard } from './CompareBoard';
+import { DeliveryStoryStrip } from './DeliveryStoryStrip';
+import { AutomationFilmstrip } from './AutomationFilmstrip';
 
 interface TaskTabViewProps {
   taskSnapshot: TaskSnapshot;
@@ -13,6 +19,7 @@ interface TaskTabViewProps {
   browserAgentSnapshot?: BrowserAgentSnapshot;
   onTaskCommand: (command: TaskCommand) => Promise<TaskCommandResult>;
   onBrowserAgentCommand?: (command: BrowserAgentCommand) => Promise<BrowserAgentCommandResult>;
+  onWorkspaceCommand?: (command: WorkspaceCommand) => Promise<WorkspaceCommandResult>;
 }
 
 /**
@@ -22,7 +29,7 @@ interface TaskTabViewProps {
  * old right-pane Task/Result views and the native-Pages "Tandem page" render —
  * that name belongs to the real, connected Tandem product now.
  */
-export function TaskTabView({ taskSnapshot, workspace, browserAgentSnapshot, onTaskCommand, onBrowserAgentCommand }: TaskTabViewProps) {
+export function TaskTabView({ taskSnapshot, workspace, browserAgentSnapshot, onTaskCommand, onBrowserAgentCommand, onWorkspaceCommand }: TaskTabViewProps) {
   const task = taskSnapshot.task;
   const approvalRef = useRef<HTMLElement>(null);
   useEffect(() => {
@@ -57,7 +64,14 @@ export function TaskTabView({ taskSnapshot, workspace, browserAgentSnapshot, onT
           <button type="button" className="secondary-button" onClick={() => { void onTaskCommand({ type: 'refreshConnection' }); }}>Reconnect</button>
         </p>
       ) : null}
-      {task.kind === 'work' ? <WorkThread task={task} onCommand={onTaskCommand} /> : null}
+      {task.kind === 'work' ? (
+        <WorkThread
+          task={task}
+          browserAgent={browserAgentSnapshot}
+          onCommand={onTaskCommand}
+          onWorkspaceCommand={onWorkspaceCommand}
+        />
+      ) : null}
       {isLive
         ? <LiveView task={task} browserAgent={browserAgentSnapshot} onBrowserAgentCommand={onBrowserAgentCommand} onTaskCommand={onTaskCommand} />
         : task.kind === 'code'
@@ -160,12 +174,17 @@ function BrowserUseView({ snapshot, onCommand }: { snapshot?: BrowserAgentSnapsh
       {taskSpace ? <p className="context-note">{taskSpace.contextTabIds.length} context · {taskSpace.explorationTabIds.length} exploration · {snapshot?.watching ? 'Live browser view' : 'Working in background'}</p> : null}
       {taskSpace ? <div className="browser-controls"><button type="button" onClick={() => { void onCommand({ type: 'watch' }); }}>{snapshot?.watching ? 'Watching live' : 'Return to live view'}</button>{canControl ? <button type="button" onClick={() => { void onCommand({ type: 'pause' }); }}>Pause</button> : null}{canControl ? <button type="button" onClick={() => { void onCommand({ type: 'takeOver' }); }}>Take over</button> : null}{snapshot?.state === 'paused' ? <button type="button" onClick={() => { void onCommand({ type: 'resume' }); }}>Resume agent</button> : null}{!canCleanUp ? <button type="button" onClick={() => { void onCommand({ type: 'setKeepTabs', keep: !taskSpace.kept }); }}>{taskSpace.kept ? 'Close tabs after task' : 'Keep tabs after task'}</button> : null}{!canCleanUp ? <button type="button" onClick={() => { void onCommand({ type: 'stop' }); }}>Stop</button> : null}</div> : null}
       {canCleanUp ? <div className="browser-controls browser-cleanup-controls"><button type="button" className="primary-button" onClick={() => { void onCommand({ type: 'closeTaskTabs' }); }}>Close task tabs</button>{taskSpace && !taskSpace.kept ? <button type="button" onClick={() => { void onCommand({ type: 'keepTabs' }); }}>Keep tabs</button> : null}</div> : null}
-      {snapshot?.log.length ? <ol className="browser-action-log">{snapshot.log.slice(-12).map((entry) => <li key={entry.id}><span>{entry.action}</span><small>{entry.outcome} · {entry.detail}</small></li>)}</ol> : null}
+      {snapshot?.log.length ? <AutomationFilmstrip log={snapshot.log} /> : null}
     </section>
   );
 }
 
-function WorkThread({ task, onCommand }: { task: NonNullable<TaskSnapshot['task']>; onCommand: (command: TaskCommand) => Promise<TaskCommandResult> }) {
+function WorkThread({ task, browserAgent, onCommand, onWorkspaceCommand }: {
+  task: NonNullable<TaskSnapshot['task']>;
+  browserAgent?: BrowserAgentSnapshot;
+  onCommand: (command: TaskCommand) => Promise<TaskCommandResult>;
+  onWorkspaceCommand?: (command: WorkspaceCommand) => Promise<WorkspaceCommandResult>;
+}) {
   const [revision, setRevision] = useState('');
   const [message, setMessage] = useState('');
   const canReview = task.state === 'Needs Approval' && !task.pendingApproval;
@@ -191,6 +210,7 @@ function WorkThread({ task, onCommand }: { task: NonNullable<TaskSnapshot['task'
         <article className={`task-turn task-turn-${turn.status}`} key={turn.id}>
           <header className="task-turn-request"><span>You · Turn {index + 1}</span><p>{turn.prompt}</p></header>
           {turn.result ? <TandemMarkdown markdown={turn.result} title={taskHeadline(turn.prompt)} className="reply-body task-turn-reply" /> : null}
+          {turn.result ? <TurnCompareBoard markdown={turn.result} /> : null}
           {turn.result ? <ClaimsList turn={turn} /> : null}
           {turn.sources.length ? (
             <section className="reply-sources">
@@ -202,7 +222,13 @@ function WorkThread({ task, onCommand }: { task: NonNullable<TaskSnapshot['task'
         </article>
       ))}
       {canReplyAction && lastCompletedTurn ? (
-        <NextActionChips task={task} onCommand={onCommand} onMessage={setMessage} />
+        <NextActionChips
+          task={task}
+          browserAgent={browserAgent}
+          onCommand={onCommand}
+          onWorkspaceCommand={onWorkspaceCommand}
+          onMessage={setMessage}
+        />
       ) : null}
       {canReview ? (
         <div className="review-actions">
@@ -214,6 +240,12 @@ function WorkThread({ task, onCommand }: { task: NonNullable<TaskSnapshot['task'
       {message ? <p className="review-message">{message}</p> : null}
     </div>
   );
+}
+
+function TurnCompareBoard({ markdown }: { markdown: string }) {
+  const matrix = parseCompareMatrix(markdown);
+  if (!matrix) return null;
+  return <CompareBoard matrix={matrix} title="Options compared" />;
 }
 
 function ClaimsList({ turn }: { turn: TaskTurnSnapshot }) {
@@ -234,9 +266,11 @@ function ClaimsList({ turn }: { turn: TaskTurnSnapshot }) {
   );
 }
 
-function NextActionChips({ task, onCommand, onMessage }: {
+function NextActionChips({ task, browserAgent, onCommand, onWorkspaceCommand, onMessage }: {
   task: NonNullable<TaskSnapshot['task']>;
+  browserAgent?: BrowserAgentSnapshot;
   onCommand: (command: TaskCommand) => Promise<TaskCommandResult>;
+  onWorkspaceCommand?: (command: WorkspaceCommand) => Promise<WorkspaceCommandResult>;
   onMessage: (value: string) => void;
 }) {
   const run = (command: TaskCommand, defaultMessage: string) => {
@@ -293,6 +327,30 @@ function NextActionChips({ task, onCommand, onMessage }: {
       >
         <BookOpenText size={12} /> Add to Tandem
       </button>
+      {onWorkspaceCommand && browserAgent?.log.length ? (
+        <button
+          type="button"
+          className="chip-button"
+          title="Save this verified browser run as a reusable local recipe. Credentials are never stored."
+          onClick={() => {
+            const steps = sanitizeRecipeSteps(browserAgent.log);
+            if (!steps) {
+              onMessage('Need at least two safe completed steps to save a recipe.');
+              return;
+            }
+            const name = window.prompt('Name this recipe', taskHeadline(task.prompt).slice(0, 60));
+            if (!name?.trim()) return;
+            void onWorkspaceCommand({
+              type: 'saveRecipe',
+              name: name.trim(),
+              steps,
+              startUrl: recipeStartUrl(steps),
+            }).then((result) => onMessage(result.message ?? (result.ok ? 'Recipe saved.' : 'Could not save recipe.')));
+          }}
+        >
+          <Save size={12} /> Save recipe
+        </button>
+      ) : null}
       {task.state === 'Completed' || task.state === 'Needs Approval' ? (
         <span className="chip-hint"><ExternalLink size={11} /> Sources open in new tabs.</span>
       ) : null}
@@ -348,6 +406,7 @@ function CodeReview({ task, workspace, onCommand }: { task: NonNullable<TaskSnap
       {task.state === 'Completed' ? (
         <section className="delivery-card">
           <h3>GitHub delivery</h3>
+          <DeliveryStoryStrip stages={buildDeliveryStory(task.delivery)} />
           {!task.delivery?.commit ? (
             <div className="delivery-form">
               <label>Branch<input value={branch} onChange={(event) => setBranch(event.target.value)} /></label>

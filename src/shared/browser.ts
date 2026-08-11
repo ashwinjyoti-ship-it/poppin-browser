@@ -59,6 +59,27 @@ export const DEFAULT_BROWSER_SETTINGS: BrowserSettings = {
   searchEngine: 'duckduckgo',
 };
 
+/** Sticky centre split: two live WebContentsViews side by side. */
+export type BrowserSplitMode = 'sticky' | 'peek-compare' | 'tandem-beside';
+
+export interface BrowserSplitSnapshot {
+  mode: BrowserSplitMode;
+  primaryTabId: string;
+  secondaryTabId: string;
+  /** Which pane owns the address bar / navigation chrome. */
+  focusedSide: 'primary' | 'secondary';
+  /** Primary pane width as a fraction of the content area (0.28–0.72). */
+  ratio: number;
+}
+
+export interface TabSearchMatch {
+  tabId: string;
+  title: string;
+  url: string;
+  snippet: string;
+  matchKind: 'title' | 'url' | 'content';
+}
+
 export interface BrowserSnapshot {
   tabs: BrowserTabSnapshot[];
   groups: BrowserTabGroup[];
@@ -68,6 +89,8 @@ export interface BrowserSnapshot {
   settings: BrowserSettings;
   authenticationPopup: { title: string; url: string } | null;
   linkPreview: { title: string; url: string } | null;
+  /** Dual live-page layout; null when only one centre surface is shown. */
+  split: BrowserSplitSnapshot | null;
 }
 
 export type BrowserCommand =
@@ -93,12 +116,25 @@ export type BrowserCommand =
   | { type: 'cancelAuthenticationPopup' }
   | { type: 'closeLinkPreview' }
   | { type: 'openLinkPreviewInTab' }
+  /** Promote the current link Peek into a sticky/peek-compare split beside the source page. */
+  | { type: 'openLinkPreviewInSplit' }
+  /** Open a second live tab beside the active one (sticky split or peek-compare). */
+  | { type: 'openSplit'; secondaryTabId: string; mode?: Exclude<BrowserSplitMode, 'tandem-beside'> }
+  /** Keep the current page and open/focus Tandem World beside it for annotation. */
+  | { type: 'openTandemBeside' }
+  | { type: 'closeSplit' }
+  | { type: 'setSplitRatio'; ratio: number }
+  | { type: 'focusSplitSide'; side: 'primary' | 'secondary' }
+  | { type: 'swapSplit' }
+  /** Local find across currently open tabs (title, URL, and bounded page text). */
+  | { type: 'searchOpenTabs'; query: string }
   | { type: 'setContentVisible'; visible: boolean }
   | { type: 'setLayout'; topInset: number; leftInset: number; rightInset: number; bottomInset: number };
 
 export interface BrowserCommandResult {
   ok: boolean;
   message?: string;
+  tabSearchResults?: TabSearchMatch[];
 }
 
 export interface WindowState {

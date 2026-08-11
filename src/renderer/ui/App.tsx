@@ -1,8 +1,8 @@
-import { ExternalLink, X } from 'lucide-react';
+import { ExternalLink, Columns2, X } from 'lucide-react';
 import { type CSSProperties, type FormEvent, useEffect, useRef, useState } from 'react';
 
-import { DEFAULT_BROWSER_SETTINGS, type BrowserCommand, type BrowserSnapshot } from '../../shared/browser';
-import type { WorkspaceCommand, WorkspaceSnapshot } from '../../shared/workspace';
+import { DEFAULT_BROWSER_SETTINGS, type BrowserCommand, type BrowserCommandResult, type BrowserSnapshot } from '../../shared/browser';
+import type { WorkspaceCommand, WorkspaceCommandResult, WorkspaceSnapshot } from '../../shared/workspace';
 import type { TaskCommand, TaskCommandResult, TaskSnapshot } from '../../shared/task';
 import type { BrowserAgentCommand, BrowserAgentCommandResult, BrowserAgentSnapshot } from '../../shared/browser-agent';
 import type { PagesCommand, PagesSnapshot } from '../../shared/pages';
@@ -19,6 +19,7 @@ import { CommandBar } from './CommandBar';
 import { PaneResizer } from './PaneResizer';
 import { NativePageView } from './NativePageView';
 import { NativeDatabaseView } from './NativeDatabaseView';
+import { TabSearchBar } from './TabSearchBar';
 import { getChromeLayout, getTitlebarLeftInset } from './chrome-layout';
 import { issueForCommand, visibleAddressIssue, type AddressIssue } from './address-issue';
 import { browserApprovalAttentionKey, taskAttentionKey } from './task-attention';
@@ -36,6 +37,7 @@ const EMPTY_SNAPSHOT: BrowserSnapshot = {
   settings: { ...DEFAULT_BROWSER_SETTINGS },
   authenticationPopup: null,
   linkPreview: null,
+  split: null,
 };
 const EMPTY_WORKSPACE: WorkspaceSnapshot = {
   workspace: null,
@@ -47,6 +49,7 @@ const EMPTY_WORKSPACE: WorkspaceSnapshot = {
   memorySelected: false,
   memoryBrief: null,
   browserSessions: [],
+  recipes: [],
 };
 const EMPTY_TASK: TaskSnapshot = { connection: { state: 'checking', message: 'Connecting to Codex…', accountLabel: null, models: [] }, task: null };
 const EMPTY_BROWSER_AGENT: BrowserAgentSnapshot = { state: 'idle', taskId: null, taskSpace: null, watching: false, allowedTabIds: [], activeTabId: null, currentAction: null, pendingApproval: null, log: [] };
@@ -75,6 +78,7 @@ export function App() {
   const [commandOverlayHeight, setCommandOverlayHeight] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [downloadsOpen, setDownloadsOpen] = useState(false);
+  const [tabSearchOpen, setTabSearchOpen] = useState(false);
   const [preferredLeftPaneWidth, setPreferredLeftPaneWidth] = useState(() => loadLeftPaneWidth(window.localStorage));
   const [viewport, setViewport] = useState(() => ({ width: window.innerWidth, height: window.innerHeight }));
   const addressInputRef = useRef<HTMLInputElement>(null);
@@ -221,6 +225,18 @@ export function App() {
   }, [preferredLeftPaneWidth]);
 
   useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'f') {
+        event.preventDefault();
+        setTabSearchOpen(true);
+      }
+      if (event.key === 'Escape' && tabSearchOpen) setTabSearchOpen(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [tabSearchOpen]);
+
+  useEffect(() => {
     void window.poppinBrowser.command({
       type: 'setLayout',
       topInset: chromeHeight,
@@ -234,7 +250,7 @@ export function App() {
     setPreferredLeftPaneWidth(clampResizedLeftPaneWidth(requestedWidth, viewport.width));
   };
 
-  const sendCommand = async (command: BrowserCommand) => {
+  const sendCommand = async (command: BrowserCommand): Promise<BrowserCommandResult> => {
     try {
       const result = await window.poppinBrowser.command(command);
       if (result.ok) {
@@ -242,8 +258,10 @@ export function App() {
       } else {
         setAddressIssue(issueForCommand(command, result.message ?? 'That action is not available.', snapshot, activeTab));
       }
+      return result;
     } catch {
       setAddressIssue(issueForCommand(command, 'Poppin could not complete that action.', snapshot, activeTab));
+      return { ok: false, message: 'Poppin could not complete that action.' };
     }
   };
 
@@ -257,6 +275,14 @@ export function App() {
       return result.ok ? null : result.message ?? 'Poppin could not complete that action.';
     } catch {
       return 'Poppin could not complete that action.';
+    }
+  };
+
+  const sendWorkspaceCommandResult = async (command: WorkspaceCommand): Promise<WorkspaceCommandResult> => {
+    try {
+      return await window.poppinWorkspace.command(command);
+    } catch {
+      return { ok: false, message: 'Poppin could not complete that action.' };
     }
   };
 
@@ -322,7 +348,18 @@ export function App() {
         <section className="authentication-overlay-status link-preview-status" aria-label="Link preview overlay">
           <div className="link-preview-description"><strong>{snapshot.linkPreview.title}</strong><span>{snapshot.linkPreview.url}</span></div>
           <button type="button" aria-label="Close" title="Close preview (Esc)" onClick={() => { void sendCommand({ type: 'closeLinkPreview' }); }}><X size={17} /></button>
+          <button type="button" aria-label="Peek compare" title="Compare beside current page" onClick={() => { void sendCommand({ type: 'openLinkPreviewInSplit' }); }}><Columns2 size={16} /></button>
           <button type="button" aria-label="Open in tab" title="Open preview in a tab" onClick={() => { void sendCommand({ type: 'openLinkPreviewInTab' }); }}><ExternalLink size={16} /></button>
+        </section>
+      ) : null}
+      {snapshot.split ? (
+        <section className="split-chrome" aria-label="Sticky split">
+          <div>
+            <strong>{snapshot.split.mode === 'tandem-beside' ? 'Tandem beside page' : snapshot.split.mode === 'peek-compare' ? 'Peek compare' : 'Sticky split'}</strong>
+            <span>Two live pages side by side</span>
+          </div>
+          <button type="button" onClick={() => { void sendCommand({ type: 'swapSplit' }); }}>Swap</button>
+          <button type="button" onClick={() => { void sendCommand({ type: 'closeSplit' }); }}>Close split</button>
         </section>
       ) : null}
       <header className="browser-chrome">
@@ -348,6 +385,8 @@ export function App() {
             onBack={() => withActiveTab('back')}
             onForward={() => withActiveTab('forward')}
             onReload={() => withActiveTab('reload')}
+            onOpenTabSearch={() => setTabSearchOpen(true)}
+            onOpenTandemBeside={() => { void sendCommand({ type: 'openTandemBeside' }); }}
             onSettingsOpenChange={(open) => { void window.poppinSettings.command({ type: open ? 'open' : 'close' }); }}
             onSubmit={submitAddress}
             downloadsSlot={
@@ -363,6 +402,7 @@ export function App() {
             }
           />
         </div>
+        <TabSearchBar open={tabSearchOpen} onOpenChange={setTabSearchOpen} onCommand={sendCommand} />
         <TabStrip
           tabs={visibleTabs}
           groups={snapshot.groups}
@@ -425,6 +465,19 @@ export function App() {
         tandem={tandemSnapshot}
         onTandemCommand={sendTandemCommand}
         onOpenSettings={() => { void window.poppinSettings.command({ type: 'open' }); }}
+        onRunRecipe={(prompt) => {
+          setTaskTabActive(true);
+          const connection = taskSnapshot.connection;
+          const model = connection.models[0]?.id ?? 'gpt-5';
+          const effort = 'medium';
+          const canContinue = Boolean(taskSnapshot.task && !taskSnapshot.task.pendingApproval
+            && ['Needs Approval', 'Completed', 'Failed', 'Cancelled'].includes(taskSnapshot.task.state));
+          if (canContinue) {
+            void sendTaskCommand({ type: 'continueTask', prompt });
+            return;
+          }
+          void sendTaskCommand({ type: 'startTask', prompt, model, reasoningEffort: effort, kind: 'work', useBrowser: true });
+        }}
       />
       {!workspaceCollapsed ? (
         <PaneResizer
@@ -442,6 +495,7 @@ export function App() {
             browserAgentSnapshot={browserAgentSnapshot}
             onTaskCommand={sendTaskCommand}
             onBrowserAgentCommand={sendBrowserAgentCommand}
+            onWorkspaceCommand={sendWorkspaceCommandResult}
           />
         </div>
       ) : activeNativeTab ? (

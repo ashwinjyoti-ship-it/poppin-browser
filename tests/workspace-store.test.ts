@@ -124,4 +124,48 @@ describe('workspace store', () => {
     expect(roundTrip.isMemorySelected()).toBe(false);
     roundTrip.close();
   });
+
+  it('persists recipes and supports rename, disable, and delete', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'poppin-workspace-recipes-'));
+    const filePath = path.join(directory, 'poppin.sqlite');
+    const store = new WorkspaceStore(filePath);
+    store.createWorkspace('Recipes workspace');
+
+    const steps = [
+      { action: 'navigate', target: 'https://example.com/', detail: 'Opened landing page.' },
+      { action: 'click', target: 'Sign in', detail: 'Opened the sign-in form.' },
+    ];
+    store.insertRecipe({
+      id: 'recipe-one',
+      name: 'Example sign-in',
+      startUrl: 'https://example.com/',
+      steps,
+      enabled: true,
+      createdAt: '2026-08-11T00:00:00.000Z',
+      updatedAt: '2026-08-11T00:00:00.000Z',
+    });
+    store.close();
+
+    const restored = new WorkspaceStore(filePath);
+    const recipes = restored.listRecipes();
+    expect(recipes).toHaveLength(1);
+    expect(recipes[0]).toMatchObject({
+      id: 'recipe-one',
+      name: 'Example sign-in',
+      startUrl: 'https://example.com/',
+      enabled: true,
+    });
+    expect(restored.getRecipe('recipe-one')?.steps).toEqual(steps);
+
+    expect(restored.renameRecipe('recipe-one', 'Example sign-in v2')).toBe(true);
+    expect(restored.getRecipe('recipe-one')?.name).toBe('Example sign-in v2');
+
+    expect(restored.setRecipeEnabled('recipe-one', false)).toBe(true);
+    expect(restored.getRecipe('recipe-one')?.enabled).toBe(false);
+
+    expect(restored.deleteRecipe('recipe-one')).toBe(true);
+    expect(restored.listRecipes()).toEqual([]);
+    expect(restored.getRecipe('recipe-one')).toBeNull();
+    restored.close();
+  });
 });
