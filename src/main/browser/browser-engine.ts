@@ -152,7 +152,7 @@ export class BrowserEngine {
   }
 
   restore(state: PersistedBrowserStateV2 | null): void {
-    this.settings = sanitizeBrowserSettings(state?.settings ?? DEFAULT_BROWSER_SETTINGS);
+    this.settings = state ? { ...state.settings } : { ...DEFAULT_BROWSER_SETTINGS };
     for (const group of state?.groups ?? []) this.groups.set(group.id, { ...group });
     const shouldRestore = state?.settings.startup !== 'new-tab';
     const tabs: PersistedTabState[] = shouldRestore && state?.tabs.length
@@ -1865,12 +1865,6 @@ function sanitizeBrowserSettings(settings: BrowserSettings): BrowserSettings {
     newTabPosition: settings.newTabPosition === 'end' ? 'end' : 'next-to-active',
     warnBeforeClosingMultipleTabs: Boolean(settings.warnBeforeClosingMultipleTabs),
     searchEngine: settings.searchEngine === 'google' ? 'google' : 'duckduckgo',
-    tabsStartCollapsed: typeof settings.tabsStartCollapsed === 'boolean'
-      ? settings.tabsStartCollapsed
-      : DEFAULT_BROWSER_SETTINGS.tabsStartCollapsed,
-    drawOutTabsOnHover: typeof settings.drawOutTabsOnHover === 'boolean'
-      ? settings.drawOutTabsOnHover
-      : DEFAULT_BROWSER_SETTINGS.drawOutTabsOnHover,
   };
 }
 

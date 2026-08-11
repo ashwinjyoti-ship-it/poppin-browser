@@ -65,9 +65,7 @@ export function App() {
   const [isEditingAddress, setIsEditingAddress] = useState(false);
   const [workspaceSnapshot, setWorkspaceSnapshot] = useState<WorkspaceSnapshot>(EMPTY_WORKSPACE);
   // Tabs live in a collapsible left rail. There is no permanent workspace pane.
-  // Default collapsed so the page stays the hero; Settings can change this.
-  const [tabsCollapsed, setTabsCollapsed] = useState(true);
-  const [tabsCollapseSeeded, setTabsCollapseSeeded] = useState(false);
+  const [tabsCollapsed, setTabsCollapsed] = useState(false);
   const [taskTabActive, setTaskTabActive] = useState(false);
   const [taskSnapshot, setTaskSnapshot] = useState<TaskSnapshot>(EMPTY_TASK);
   const [browserAgentSnapshot, setBrowserAgentSnapshot] = useState<BrowserAgentSnapshot>(EMPTY_BROWSER_AGENT);
@@ -142,11 +140,6 @@ export function App() {
   if (attentionKey !== seenAttentionKey) {
     setSeenAttentionKey(attentionKey);
     if (attentionKey) setTaskTabActive(true);
-  }
-
-  if (!tabsCollapseSeeded && snapshot.activeTabId) {
-    setTabsCollapseSeeded(true);
-    setTabsCollapsed(snapshot.settings.tabsStartCollapsed);
   }
 
   useEffect(() => {
@@ -425,7 +418,6 @@ export function App() {
         orientation="vertical"
         collapsed={tabsCollapsed}
         onCollapseChange={setTabsCollapsed}
-        drawOutOnHover={snapshot.settings.drawOutTabsOnHover}
         contextTabIds={contextTabIds}
         onToggleTabContext={(tabId, selected) => { void sendWorkspaceCommand({ type: 'setTabSelected', tabId, selected }); }}
         tabs={visibleTabs}
