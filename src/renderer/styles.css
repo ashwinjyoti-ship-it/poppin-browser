@@ -634,9 +634,9 @@ textarea:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
   width: var(--workspace-pane-width);
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 8px 6px 10px;
-  border-radius: 14px;
+  gap: 8px;
+  padding: 10px 8px 12px;
+  border-radius: 18px;
   overflow: hidden;
 }
 .tab-rail-hover-peek {
@@ -652,11 +652,11 @@ textarea:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 4px 2px;
+  padding: 2px 4px 6px;
   color: #8a7966;
-  font-size: 10px;
-  font-weight: 650;
-  letter-spacing: .05em;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .04em;
   text-transform: uppercase;
 }
 .tab-strip-vertical {
@@ -664,113 +664,39 @@ textarea:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
   flex: 1 1 auto;
   flex-direction: column;
   align-items: stretch;
-  gap: 3px;
+  gap: 5px;
   min-height: 0;
   overflow-x: hidden;
   overflow-y: auto;
   padding: 0;
 }
-/* Vertical rail must not inherit horizontal-tab flex-basis (145px), or each
-   row becomes a tall empty card that looks like a missing page thumbnail. */
 .tab-strip-vertical .tab,
 .tab-strip-vertical .tab-tandem-world,
 .tab-strip-vertical .new-tab-button,
-.tab-strip-vertical .tab-group,
-.tab-strip-agent-vertical .tab,
-.tab-strip-agent-vertical .new-tab-button {
-  display: grid;
-  flex: 0 0 auto;
-  flex-basis: auto;
-  width: 100%;
-  max-width: none;
-  min-width: 0;
-  height: 30px;
-  min-height: 30px;
-  max-height: 30px;
-  padding: 0 4px 0 7px;
-  overflow: hidden;
-  border-radius: 8px;
-  box-shadow: none;
-}
-.tab-strip-vertical .tab,
-.tab-strip-agent-vertical .tab {
-  grid-template-columns: 16px minmax(0, 1fr) 18px;
-  align-items: center;
-  gap: 6px;
-}
-.tab-strip-vertical .tab:has(.tab-context-mark),
-.tab-strip-agent-vertical .tab:has(.tab-context-mark) {
-  grid-template-columns: 14px 16px minmax(0, 1fr) 18px;
-  gap: 5px;
-}
-.tab-strip-vertical .tab-pinned,
-.tab-strip-agent-vertical .tab-pinned {
-  grid-template-columns: 16px minmax(0, 1fr) 18px;
-  width: 100%;
-  min-width: 0;
-  padding: 0 4px 0 7px;
-  justify-content: stretch;
-}
-.tab-strip-vertical .tab:hover,
-.tab-strip-agent-vertical .tab:hover {
-  transform: none;
-  background: rgba(255, 253, 249, .9);
-  box-shadow: none;
-}
-.tab-strip-vertical .tab-active,
-.tab-strip-agent-vertical .tab-active {
-  transform: none;
-  box-shadow: none;
-  background: rgba(255, 253, 249, .98);
-}
-.tab-strip-vertical .tab-active::after,
-.tab-strip-agent-vertical .tab-active::after {
-  left: 0;
-  right: auto;
-  top: 6px;
-  bottom: 6px;
-  width: 2px;
-  height: auto;
-  border-radius: 999px;
-}
-.tab-strip-vertical .tab-title,
-.tab-strip-agent-vertical .tab-title {
-  font-size: 11px;
-  font-weight: 600;
-}
-.tab-strip-vertical .tab-tandem-world {
-  grid-template-columns: 16px minmax(0, 1fr);
-  justify-content: start;
-  gap: 6px;
-  min-width: 0;
-  max-width: none;
-  cursor: pointer;
-}
-.tab-strip-vertical .new-tab-button,
-.tab-strip-agent-vertical .new-tab-button {
-  display: grid;
-  place-items: center;
-  grid-template-columns: none;
-  color: #8a7966;
-  background: transparent;
-  border-style: dashed;
-}
 .tab-strip-vertical .tab-group {
-  display: inline-flex;
-  height: 26px;
-  min-height: 26px;
-  max-height: 26px;
-  margin: 0;
-  padding: 1px;
+  flex: 0 0 auto;
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+  height: auto;
+  min-height: 34px;
+  border-radius: 10px;
 }
+.tab-strip-vertical .tab {
+  grid-template-columns: 14px 16px minmax(0, 1fr) 18px;
+  padding: 6px 6px 6px 8px;
+}
+.tab-strip-vertical .tab-active { transform: none; }
+.tab-strip-vertical .tab-active::after { left: 0; right: auto; top: 6px; bottom: 6px; width: 3px; height: auto; border-radius: 999px; }
+.tab-strip-vertical .new-tab-button { display: grid; place-items: center; }
 .tab-strip-agent-vertical {
   display: flex;
   flex: 0 0 auto;
   flex-direction: column;
-  gap: 3px;
+  gap: 5px;
   max-width: none;
-  margin: 6px 0 0;
-  padding: 6px 0 0;
+  margin: 8px 0 0;
+  padding: 8px 0 0;
   border-left: 0;
   border-top: 1px solid rgba(206, 122, 26, .22);
   overflow: visible;
@@ -778,9 +704,6 @@ textarea:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
 .tab-strip-agent-vertical .agent-tabs-entry {
   width: 100%;
   max-width: none;
-  min-height: 30px;
-  height: 30px;
-  padding: 0 6px;
 }
 .tab-context-mark {
   display: grid;
@@ -1578,68 +1501,3 @@ body.pane-is-resizing * { cursor: col-resize !important; user-select: none !impo
 .dock-actions { display: flex; gap: 6px; }
 .dock-btn { display: flex; align-items: center; justify-content: center; gap: 4px; flex: 1; height: 28px; padding: 0 8px; border: 1px solid var(--border); border-radius: 8px; color: #6f5b43; background: var(--surface); font-size: 10px; font-weight: 650; }
 .dock-btn-primary { border-color: transparent; color: #fff; background: var(--amber-strong); }
-
-/* Density presets set horizontal flex-basis after the vertical rules above.
-   Re-assert slim row sizing so those bases never become tall sidebar cards. */
-.chrome-compact .tab-strip-vertical .tab,
-.chrome-compact .tab-strip-vertical .tab-tandem-world,
-.chrome-compact .tab-strip-vertical .new-tab-button,
-.chrome-compact .tab-strip-agent-vertical .tab,
-.chrome-compact .tab-strip-agent-vertical .new-tab-button,
-.chrome-dense .tab-strip-vertical .tab,
-.chrome-dense .tab-strip-vertical .tab-tandem-world,
-.chrome-dense .tab-strip-vertical .new-tab-button,
-.chrome-dense .tab-strip-agent-vertical .tab,
-.chrome-dense .tab-strip-agent-vertical .new-tab-button {
-  flex: 0 0 auto;
-  flex-basis: auto;
-  width: 100%;
-  min-width: 0;
-  max-width: none;
-  height: 28px;
-  min-height: 28px;
-  max-height: 28px;
-  padding: 0 4px 0 7px;
-  border-radius: 8px;
-  box-shadow: none;
-  transform: none;
-}
-.chrome-compact .tab-strip-vertical .tab,
-.chrome-compact .tab-strip-agent-vertical .tab,
-.chrome-dense .tab-strip-vertical .tab,
-.chrome-dense .tab-strip-agent-vertical .tab {
-  grid-template-columns: 15px minmax(0, 1fr) 17px;
-}
-.chrome-compact .tab-strip-vertical .tab:has(.tab-context-mark),
-.chrome-compact .tab-strip-agent-vertical .tab:has(.tab-context-mark),
-.chrome-dense .tab-strip-vertical .tab:has(.tab-context-mark),
-.chrome-dense .tab-strip-agent-vertical .tab:has(.tab-context-mark) {
-  grid-template-columns: 13px 15px minmax(0, 1fr) 17px;
-}
-.chrome-compact .tab-strip-vertical .tab-pinned,
-.chrome-compact .tab-strip-agent-vertical .tab-pinned,
-.chrome-dense .tab-strip-vertical .tab-pinned,
-.chrome-dense .tab-strip-agent-vertical .tab-pinned {
-  grid-template-columns: 15px minmax(0, 1fr) 17px;
-  width: 100%;
-  min-width: 0;
-  padding: 0 4px 0 7px;
-}
-.chrome-compact .tab-strip-vertical .tab-active,
-.chrome-compact .tab-strip-agent-vertical .tab-active,
-.chrome-dense .tab-strip-vertical .tab-active,
-.chrome-dense .tab-strip-agent-vertical .tab-active,
-.chrome-compact .tab-strip-vertical .tab-active:hover,
-.chrome-compact .tab-strip-agent-vertical .tab-active:hover,
-.chrome-dense .tab-strip-vertical .tab-active:hover,
-.chrome-dense .tab-strip-agent-vertical .tab-active:hover {
-  transform: none;
-}
-.chrome-compact .tab-strip-agent-vertical .agent-tabs-entry,
-.chrome-dense .tab-strip-agent-vertical .agent-tabs-entry {
-  flex: 0 0 auto;
-  width: 100%;
-  max-width: none;
-  height: 28px;
-  min-height: 28px;
-}

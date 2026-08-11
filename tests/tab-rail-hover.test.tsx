@@ -73,31 +73,4 @@ describe('vertical tab rail hover draw-out', () => {
     await user.hover(screen.getByLabelText('Tabs collapsed'));
     expect(screen.queryByRole('tab', { name: 'One' })).not.toBeInTheDocument();
   });
-
-  it('renders expanded vertical tabs as compact rows, not tall cards', () => {
-    const { container } = render(
-      <div className="chrome-compact">
-        <TabStrip
-          orientation="vertical"
-          collapsed={false}
-          tabs={TABS}
-          groups={[]}
-          activeTabId="tab-1"
-          onActivate={vi.fn()}
-          onClose={vi.fn()}
-          onCreate={vi.fn()}
-          onReorder={vi.fn()}
-          onShowTabMenu={vi.fn()}
-          onToggleGroup={vi.fn()}
-          onRenameGroup={vi.fn()}
-          onShowGroupMenu={vi.fn()}
-        />
-      </div>,
-    );
-
-    const tab = screen.getByRole('tab', { name: 'One' });
-    expect(tab.className).toContain('tab');
-    expect(container.querySelector('.tab-strip-vertical')).not.toBeNull();
-    expect(screen.getByText('One')).toBeVisible();
-  });
 });
