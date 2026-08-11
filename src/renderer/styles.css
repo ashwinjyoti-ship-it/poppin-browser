@@ -628,6 +628,15 @@ textarea:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
   border-radius: 18px;
   overflow: hidden;
 }
+.tab-rail-hover-peek {
+  z-index: 8;
+  box-shadow: 0 18px 48px rgba(65, 44, 20, .18);
+  animation: tab-rail-draw-out 140ms ease-out;
+}
+@keyframes tab-rail-draw-out {
+  from { transform: translateX(-12px); opacity: .72; }
+  to { transform: none; opacity: 1; }
+}
 .tab-rail-heading {
   display: flex;
   align-items: center;

@@ -94,7 +94,7 @@ export function normalizePersistedBrowserState(value: unknown): PersistedBrowser
     }),
     groups,
     activeTabId: candidate.activeTabId,
-    settings: candidate.settings,
+    settings: normalizeBrowserSettings(candidate.settings),
     window: candidate.window,
   };
 }
@@ -120,7 +120,7 @@ function isBrowserTabGroup(value: unknown): value is BrowserTabGroup {
     && typeof group.collapsed === 'boolean';
 }
 
-function isBrowserSettings(value: unknown): value is BrowserSettings {
+function isBrowserSettings(value: unknown): value is Partial<BrowserSettings> {
   if (!value || typeof value !== 'object') return false;
   const settings = value as Partial<BrowserSettings>;
   return ['follow-site', 'new-tab', 'same-tab'].includes(settings.linkOpening ?? '')
@@ -129,4 +129,23 @@ function isBrowserSettings(value: unknown): value is BrowserSettings {
     && ['next-to-active', 'end'].includes(settings.newTabPosition ?? '')
     && typeof settings.warnBeforeClosingMultipleTabs === 'boolean'
     && ['duckduckgo', 'google'].includes(settings.searchEngine ?? '');
+}
+
+function normalizeBrowserSettings(settings: Partial<BrowserSettings>): BrowserSettings {
+  return {
+    linkOpening: ['follow-site', 'new-tab', 'same-tab'].includes(settings.linkOpening ?? '')
+      ? settings.linkOpening as BrowserSettings['linkOpening']
+      : DEFAULT_BROWSER_SETTINGS.linkOpening,
+    focusNewTabs: Boolean(settings.focusNewTabs),
+    startup: settings.startup === 'new-tab' ? 'new-tab' : 'restore',
+    newTabPosition: settings.newTabPosition === 'end' ? 'end' : 'next-to-active',
+    warnBeforeClosingMultipleTabs: Boolean(settings.warnBeforeClosingMultipleTabs),
+    searchEngine: settings.searchEngine === 'google' ? 'google' : 'duckduckgo',
+    tabsStartCollapsed: typeof settings.tabsStartCollapsed === 'boolean'
+      ? settings.tabsStartCollapsed
+      : DEFAULT_BROWSER_SETTINGS.tabsStartCollapsed,
+    drawOutTabsOnHover: typeof settings.drawOutTabsOnHover === 'boolean'
+      ? settings.drawOutTabsOnHover
+      : DEFAULT_BROWSER_SETTINGS.drawOutTabsOnHover,
+  };
 }

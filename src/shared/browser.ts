@@ -48,6 +48,10 @@ export interface BrowserSettings {
   newTabPosition: NewTabPositionPreference;
   warnBeforeClosingMultipleTabs: boolean;
   searchEngine: SearchEnginePreference;
+  /** Left tab rail starts collapsed so the page is the hero. */
+  tabsStartCollapsed: boolean;
+  /** When the rail is collapsed, hovering the edge temporarily draws tabs out. */
+  drawOutTabsOnHover: boolean;
 }
 
 export const DEFAULT_BROWSER_SETTINGS: BrowserSettings = {
@@ -57,6 +61,8 @@ export const DEFAULT_BROWSER_SETTINGS: BrowserSettings = {
   newTabPosition: 'next-to-active',
   warnBeforeClosingMultipleTabs: false,
   searchEngine: 'duckduckgo',
+  tabsStartCollapsed: true,
+  drawOutTabsOnHover: true,
 };
 
 /** Sticky centre split: two live WebContentsViews side by side. */

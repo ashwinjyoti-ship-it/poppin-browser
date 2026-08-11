@@ -151,6 +151,8 @@ describe('packaged browser workflow', () => {
     await expect.poll(() => newTabPage!.getByRole('heading', { name: /where would you like to go/i }).isVisible()).toBe(true);
 
     const address = shell.getByLabel('Address and search');
+    await expect.poll(() => shell.getByRole('button', { name: 'Open tabs' }).isVisible()).toBe(true);
+    await shell.getByRole('button', { name: 'Open tabs' }).click();
     await expect.poll(() => shell.getByRole('separator', { name: 'Resize tabs pane' }).isVisible()).toBe(true);
     const workspaceDivider = shell.getByRole('separator', { name: 'Resize tabs pane' });
     const initialWorkspaceWidth = Number(await workspaceDivider.getAttribute('aria-valuenow'));
@@ -444,6 +446,7 @@ describe('packaged browser workflow', () => {
     application = null;
 
     ({ app: application, shell } = await launch(userDataPath));
+    await shell.getByRole('button', { name: 'Open tabs' }).click();
     await expect.poll(() => shell.getByRole('tab').count()).toBe(2);
     await expect.poll(() => shell.getByRole('separator', { name: 'Resize tabs pane' }).getAttribute('aria-valuenow')).toBe(String(resizedWorkspaceWidth));
     await shell.getByRole('button', { name: /^Context/ }).click();
