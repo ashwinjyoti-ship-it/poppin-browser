@@ -30,6 +30,8 @@ interface TabStripProps {
   onCollapseChange?: (collapsed: boolean) => void;
   /** When collapsed, hovering the rail temporarily draws tabs out. */
   drawOutOnHover?: boolean;
+  /** Fires when hover-draw-out covers the page and needs a matching left inset. */
+  onHoverPeekChange?: (peeking: boolean) => void;
   /** Tab ids currently included in the Ask context package. */
   contextTabIds?: ReadonlySet<string>;
   onToggleTabContext?: (tabId: string, selected: boolean) => void;
@@ -74,6 +76,7 @@ export function TabStrip({
   collapsed = false,
   onCollapseChange,
   drawOutOnHover = true,
+  onHoverPeekChange,
   contextTabIds,
   onToggleTabContext,
 }: TabStripProps) {
@@ -116,6 +119,11 @@ export function TabStrip({
   };
 
   const peeking = Boolean(vertical && collapsed && drawOutOnHover && effectiveHoverPeek);
+
+  useEffect(() => {
+    onHoverPeekChange?.(peeking);
+    return () => onHoverPeekChange?.(false);
+  }, [onHoverPeekChange, peeking]);
 
   if (vertical && collapsed && !peeking) {
     return (
