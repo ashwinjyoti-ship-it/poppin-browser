@@ -35,6 +35,7 @@ import {
 const EMPTY_SNAPSHOT: BrowserSnapshot = {
   tabs: [], groups: [], activeTabId: '', isFullScreen: false, canReopenClosedTab: false,
   settings: { ...DEFAULT_BROWSER_SETTINGS },
+  enteredUrls: [],
   authenticationPopup: null,
   linkPreview: null,
   split: null,
@@ -78,6 +79,7 @@ export function App() {
   const [commandOverlayHeight, setCommandOverlayHeight] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [downloadsOpen, setDownloadsOpen] = useState(false);
+  const [urlOverlayOpen, setUrlOverlayOpen] = useState(false);
   const [tabSearchOpen, setTabSearchOpen] = useState(false);
   const [preferredLeftPaneWidth, setPreferredLeftPaneWidth] = useState(() => loadLeftPaneWidth(window.localStorage));
   const [viewport, setViewport] = useState(() => ({ width: window.innerWidth, height: window.innerHeight }));
@@ -239,12 +241,14 @@ export function App() {
   useEffect(() => {
     void window.poppinBrowser.command({
       type: 'setLayout',
-      topInset: chromeHeight,
+      // Downloads hang below chrome into the page; reserve space so WebContentsView does not cover the popover.
+      topInset: chromeHeight + (downloadsOpen || urlOverlayOpen ? 280 : 0),
       leftInset: workspaceCollapsed ? 46 : leftPaneWidth + 14,
       rightInset: 24,
-      bottomInset: commandCollapsed ? 0 : 94 + commandOverlayHeight + agentDockHeight,
+      // Keep a strip for the collapsed reopen control; native views paint above DOM otherwise.
+      bottomInset: commandCollapsed ? 64 : 94 + commandOverlayHeight + agentDockHeight,
     });
-  }, [agentDockHeight, chromeHeight, commandCollapsed, commandOverlayHeight, leftPaneWidth, workspaceCollapsed]);
+  }, [agentDockHeight, chromeHeight, commandCollapsed, commandOverlayHeight, downloadsOpen, leftPaneWidth, urlOverlayOpen, workspaceCollapsed]);
 
   const resizeLeftPane = (requestedWidth: number) => {
     setPreferredLeftPaneWidth(clampResizedLeftPaneWidth(requestedWidth, viewport.width));
@@ -370,6 +374,7 @@ export function App() {
           <Brand />
           <BrowserToolbar
             activeTab={activeTab}
+            enteredUrls={snapshot.enteredUrls}
             address={address}
             addressError={addressError}
             settingsOpen={settingsOpen}
@@ -388,6 +393,17 @@ export function App() {
             onBack={() => withActiveTab('back')}
             onForward={() => withActiveTab('forward')}
             onReload={() => withActiveTab('reload')}
+            onGoToHistoryIndex={(index) => {
+              if (!activeTab) return;
+              void sendCommand({ type: 'goToHistoryIndex', tabId: activeTab.id, index });
+            }}
+            onSelectSuggestion={(url) => {
+              if (!activeTab) return;
+              setAddressDraft(url);
+              setIsEditingAddress(false);
+              void sendCommand({ type: 'navigate', tabId: activeTab.id, input: url });
+            }}
+            onOverlayOpenChange={setUrlOverlayOpen}
             onOpenTabSearch={() => setTabSearchOpen(true)}
             onOpenTandemBeside={() => { void sendCommand({ type: 'openTandemBeside' }); }}
             onSettingsOpenChange={(open) => { void window.poppinSettings.command({ type: open ? 'open' : 'close' }); }}

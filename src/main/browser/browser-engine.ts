@@ -100,6 +100,8 @@ export class BrowserEngine {
 
   /** Optional workspace hook so tab menus can save a session via a dialog-free flow. */
   private saveSessionRequested: (() => void) | null = null;
+  /** Address-bar submissions this session, newest first. */
+  private enteredUrls: Array<{ url: string; title: string }> = [];
 
   setSaveSessionHandler(handler: (() => void) | null): void {
     this.saveSessionRequested = handler;
@@ -182,6 +184,7 @@ export class BrowserEngine {
       isFullScreen: this.window.isFullScreen(),
       canReopenClosedTab: this.closedTabs.length > 0,
       settings: { ...this.settings },
+      enteredUrls: this.enteredUrls.map((entry) => ({ ...entry })),
       authenticationPopup: this.authenticationWindow && !this.authenticationWindow.isDestroyed() && this.overlayKind === 'authentication' ? {
         title: this.authenticationWindow.getTitle() || 'Secure sign-in',
         url: this.authenticationWindow.webContents.getURL(),
@@ -715,6 +718,8 @@ export class BrowserEngine {
         return this.goBack(command.tabId);
       case 'forward':
         return this.goForward(command.tabId);
+      case 'goToHistoryIndex':
+        return this.goToHistoryIndex(command.tabId, command.index);
       case 'reload':
         return this.reload(command.tabId);
       case 'duplicate':
@@ -872,6 +877,8 @@ export class BrowserEngine {
       isLoading: false,
       canGoBack: false,
       canGoForward: false,
+      historyIndex: 0,
+      history: [],
       failure: null,
     };
     const record: BrowserTabRecord = {
@@ -1122,7 +1129,22 @@ export class BrowserEngine {
         : {}),
     });
     if (tab.snapshot.surface === 'tandem-world' && !isNewTab) this.applyTandemHostTheme(tab);
+    if (!isNewTab) this.touchEnteredUrlTitle(remembered, tab.snapshot.title);
     this.scheduleSave();
+  }
+
+  private recordEnteredUrl(url: string, title = ''): void {
+    const key = url.toLowerCase();
+    this.enteredUrls = [
+      { url, title: title || url },
+      ...this.enteredUrls.filter((entry) => entry.url.toLowerCase() !== key),
+    ].slice(0, 100);
+  }
+
+  private touchEnteredUrlTitle(url: string, title: string): void {
+    const key = url.toLowerCase();
+    const entry = this.enteredUrls.find((candidate) => candidate.url.toLowerCase() === key);
+    if (entry && title && title !== 'New Tab') entry.title = title;
   }
 
   /** Keep Tandem's Poppin amber theme even when its SPA drops `?host=poppin`. */
@@ -1222,6 +1244,7 @@ export class BrowserEngine {
     const normalized = normalizeAddressInput(input, this.settings.searchEngine);
     if (normalized.kind === 'invalid') return { ok: false, message: normalized.message };
     tab.snapshot.failure = null;
+    if (normalized.kind === 'url') this.recordEnteredUrl(normalized.url, tab.snapshot.title);
     // A page can intentionally replace or redirect its initial navigation. Electron
     // rejects the superseded loadURL promise with ERR_ABORTED even when the final
     // page succeeds, so command acceptance must not be treated as load completion.
@@ -1747,8 +1770,26 @@ export class BrowserEngine {
 
   private syncNavigationState(tab: BrowserTabRecord): void {
     if (tab.view.webContents.isDestroyed()) return;
-    tab.snapshot.canGoBack = tab.view.webContents.navigationHistory.canGoBack();
-    tab.snapshot.canGoForward = tab.view.webContents.navigationHistory.canGoForward();
+    const navigation = tab.view.webContents.navigationHistory;
+    tab.snapshot.canGoBack = navigation.canGoBack();
+    tab.snapshot.canGoForward = navigation.canGoForward();
+    tab.snapshot.historyIndex = navigation.getActiveIndex();
+    tab.snapshot.history = navigation.getAllEntries().map((entry, index) => ({
+      index,
+      url: entry.url,
+      title: entry.title || entry.url,
+    }));
+  }
+
+  private goToHistoryIndex(tabId: string, index: number): BrowserCommandResult {
+    const tab = this.tabs.get(tabId);
+    if (!tab || tab.view.webContents.isDestroyed()) return { ok: false, message: 'That tab is no longer open.' };
+    const navigation = tab.view.webContents.navigationHistory;
+    if (index < 0 || index >= navigation.length()) return { ok: false, message: 'That history entry is not available.' };
+    navigation.goToIndex(index);
+    this.syncNavigationState(tab);
+    this.emitSnapshot();
+    return { ok: true };
   }
 
   private emitSnapshot(): void {

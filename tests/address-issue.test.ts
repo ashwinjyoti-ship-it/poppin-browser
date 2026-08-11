@@ -13,6 +13,8 @@ const GOOGLE_TAB: BrowserTabSnapshot = {
   isLoading: false,
   canGoBack: false,
   canGoForward: false,
+  historyIndex: 0,
+  history: [],
   failure: null,
 };
 
@@ -20,7 +22,7 @@ describe('address issue scope', () => {
   it('shows a command failure only on the tab and URL that produced it', () => {
     const snapshot: BrowserSnapshot = {
       tabs: [GOOGLE_TAB], groups: [], activeTabId: GOOGLE_TAB.id, isFullScreen: false,
-      canReopenClosedTab: false, settings: DEFAULT_BROWSER_SETTINGS, authenticationPopup: null, linkPreview: null, split: null,
+      canReopenClosedTab: false, settings: DEFAULT_BROWSER_SETTINGS, enteredUrls: [], authenticationPopup: null, linkPreview: null, split: null,
     };
     const issue = issueForCommand(
       { type: 'reload', tabId: GOOGLE_TAB.id },

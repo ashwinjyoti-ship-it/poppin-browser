@@ -45,7 +45,7 @@ interface PendingRequest {
 export class AcpConnection extends EventEmitter<AcpConnectionEvents> {
   private child: ChildProcessWithoutNullStreams | null = null;
   private nextRequestId = 1;
-  private readonly pending = new Map<number, PendingRequest>();
+  private readonly pending = new Map<number | string, PendingRequest>();
   private stderr = '';
   private closing = false;
 
@@ -69,7 +69,11 @@ export class AcpConnection extends EventEmitter<AcpConnectionEvents> {
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
       ...(this.launch.cwd ? { cwd: this.launch.cwd } : {}),
-      env: { ...process.env, ...this.launch.env },
+      env: {
+        ...process.env,
+        PATH: enrichPath(process.env.PATH),
+        ...this.launch.env,
+      },
     });
     this.child = child;
     createInterface({ input: child.stdout }).on('line', (line) => this.handleLine(line));
@@ -144,10 +148,11 @@ export class AcpConnection extends EventEmitter<AcpConnectionEvents> {
       return;
     }
     if (!isRecord(message)) return;
-    if (typeof message.id === 'number' && (message.result !== undefined || message.error !== undefined)) {
-      const pending = this.pending.get(message.id);
+    const responseId = typeof message.id === 'number' || typeof message.id === 'string' ? message.id : null;
+    if (responseId !== null && (message.result !== undefined || message.error !== undefined)) {
+      const pending = this.pending.get(responseId);
       if (!pending) return;
-      this.pending.delete(message.id);
+      this.pending.delete(responseId);
       clearTimeout(pending.timeout);
       if (message.error !== undefined) pending.reject(new Error(errorMessage(message.error)));
       else pending.resolve(message.result);
@@ -191,4 +196,16 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
 function errorMessage(value: unknown): string {
   if (isRecord(value) && typeof value.message === 'string') return value.message;
   return 'The ACP agent returned an unknown protocol error.';
+}
+
+/** Ensure Homebrew / user-local bins are visible to ACP children spawned from a GUI app. */
+function enrichPath(existing: string | undefined): string {
+  const extras = [
+    '/opt/homebrew/bin',
+    '/usr/local/bin',
+    `${process.env.HOME ?? ''}/.local/bin`,
+    `${process.env.HOME ?? ''}/.cursor/bin`,
+  ].filter(Boolean);
+  const parts = [...extras, ...(existing ? existing.split(':') : [])];
+  return [...new Set(parts.filter(Boolean))].join(':');
 }

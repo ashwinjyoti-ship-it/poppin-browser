@@ -11,6 +11,19 @@ export interface BrowserFailure {
   url: string;
 }
 
+/** One entry from a tab's in-session navigation history. */
+export interface BrowserHistoryEntry {
+  index: number;
+  url: string;
+  title: string;
+}
+
+/** A URL submitted through the address bar during this browser session. */
+export interface BrowserEnteredUrl {
+  url: string;
+  title: string;
+}
+
 export interface BrowserTabSnapshot {
   id: string;
   url: string;
@@ -24,6 +37,10 @@ export interface BrowserTabSnapshot {
   isLoading: boolean;
   canGoBack: boolean;
   canGoForward: boolean;
+  /** Current index into `history` for this tab's session. */
+  historyIndex: number;
+  /** Back/forward stack for this tab (session only; not cross-profile). */
+  history: BrowserHistoryEntry[];
   failure: BrowserFailure | null;
 }
 
@@ -87,6 +104,8 @@ export interface BrowserSnapshot {
   isFullScreen: boolean;
   canReopenClosedTab: boolean;
   settings: BrowserSettings;
+  /** URLs entered in the address bar this session (newest first). */
+  enteredUrls: BrowserEnteredUrl[];
   authenticationPopup: { title: string; url: string } | null;
   linkPreview: { title: string; url: string } | null;
   /** Dual live-page layout; null when only one centre surface is shown. */
@@ -100,6 +119,7 @@ export type BrowserCommand =
   | { type: 'navigate'; tabId: string; input: string }
   | { type: 'back'; tabId: string }
   | { type: 'forward'; tabId: string }
+  | { type: 'goToHistoryIndex'; tabId: string; index: number }
   | { type: 'reload'; tabId: string }
   | { type: 'duplicate'; tabId: string }
   | { type: 'reopenClosedTab' }

@@ -264,6 +264,9 @@ export class TaskEngine {
     if (this.task && ['Running', 'Needs Approval'].includes(this.task.state)) {
       return { ok: false, message: 'Finish or cancel the current task before switching agent.' };
     }
+    if (this.task && ['Completed', 'Failed', 'Cancelled'].includes(this.task.state)) {
+      await this.finishTask();
+    }
     if (agentId === this.agentId && this.connection.state === 'ready') return { ok: true };
     this.agentId = agentId;
     this.store.setSelectedAgentId(agentId);
@@ -287,9 +290,19 @@ export class TaskEngine {
           this.capabilityBridge.clearTools();
           return [];
         }
+        if (!this.capabilityBridge.isAvailable()) {
+          throw new Error(
+            'Poppin could not launch its MCP capability bridge. Install Node.js (or set POPPIN_NODE_PATH) so ACP agents can use Browser and Tandem tools.',
+          );
+        }
         await this.capabilityBridge.bind(tools, (name, args) => this.executeCapabilityToolViaMcp(name, args));
         const server = this.capabilityBridge.toAcpMcpServer();
-        return server ? [server] : [];
+        if (!server) {
+          throw new Error(
+            'Poppin built capability tools but could not register the MCP stdio server for the ACP agent.',
+          );
+        }
+        return [server];
       },
     });
     adapter.on('event', (event) => this.queueAgentEvent(event));

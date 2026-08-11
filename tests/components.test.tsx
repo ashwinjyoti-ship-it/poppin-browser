@@ -25,6 +25,8 @@ const TAB: BrowserTabSnapshot = {
   isLoading: false,
   canGoBack: false,
   canGoForward: true,
+  historyIndex: 0,
+  history: [],
   failure: null,
 };
 
@@ -635,9 +637,8 @@ describe('Codex controls', () => {
     render(<TaskTabView taskSnapshot={snapshot} workspace={EMPTY_WORKSPACE} onTaskCommand={vi.fn()} />);
     expect(screen.getByRole('heading', { name: /guitar options/i })).toBeVisible();
     expect(screen.queryByText('Codex response')).not.toBeInTheDocument();
-    // Completed reply exposes result-follow-up chips (Save to Memory, Add to
-    // Tandem, Continue research, Compare, Draft) so the user can act on the
-    // trusted output without re-visiting the command bar.
+    // Completed reply exposes Add to Tandem in the top toolbar and follow-up
+    // chips (Save to Memory, Continue research, Compare, Draft) below the reply.
     expect(screen.getByRole('button', { name: /add to tandem/i })).toBeVisible();
     expect(screen.getByRole('button', { name: /save to memory/i })).toBeVisible();
   });

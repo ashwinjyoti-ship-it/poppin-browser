@@ -197,13 +197,28 @@ function WorkThread({ task, browserAgent, onCommand, onWorkspaceCommand }: {
   const lastCompletedTurn = [...turns].reverse().find((turn) => turn.status === 'completed' && turn.result.trim()) ?? null;
   const canReplyAction = Boolean(lastCompletedTurn) && !task.pendingApproval && ['Completed', 'Needs Approval', 'Failed', 'Cancelled'].includes(task.state);
   const threadText = turns.map((turn, index) => `Turn ${index + 1}\nYou\n${turn.prompt}\n\nAgent\n${turn.result}`).join('\n\n---\n\n');
+  const runTaskCommand = (command: TaskCommand, defaultMessage: string) => {
+    void onCommand(command).then((result) => setMessage(result.message ?? defaultMessage));
+  };
   return (
     <div className="reply-view task-thread" aria-label="Task conversation">
       {hasResult ? (
         <div className="reply-toolbar">
-          <button type="button" className="secondary-button" onClick={() => { void navigator.clipboard.writeText(threadText).then(() => setMessage('Copied thread.')); }}><Copy size={13} /> Copy thread</button>
-          <button type="button" className="secondary-button" onClick={() => { void onCommand({ type: 'exportResult', format: 'markdown' }).then((result) => setMessage(result.message ?? 'Saved.')); }}>Save</button>
-          <button type="button" className="secondary-button" onClick={() => { void onCommand({ type: 'exportResult', format: 'text' }).then((result) => setMessage(result.message ?? 'Exported.')); }}>Export</button>
+          {canReplyAction ? (
+            <button
+              type="button"
+              className="primary-button"
+              title="Create a new Tandem page with this result and open it in Tandem World."
+              onClick={() => runTaskCommand({ type: 'addResultToTandem', mode: 'new' }, 'Added to Tandem.')}
+            >
+              <BookOpenText size={13} /> Add to Tandem
+            </button>
+          ) : <span aria-hidden="true" />}
+          <div className="reply-toolbar-actions">
+            <button type="button" className="secondary-button" onClick={() => { void navigator.clipboard.writeText(threadText).then(() => setMessage('Copied thread.')); }}><Copy size={13} /> Copy thread</button>
+            <button type="button" className="secondary-button" onClick={() => { void onCommand({ type: 'exportResult', format: 'markdown' }).then((result) => setMessage(result.message ?? 'Saved.')); }}>Save</button>
+            <button type="button" className="secondary-button" onClick={() => { void onCommand({ type: 'exportResult', format: 'text' }).then((result) => setMessage(result.message ?? 'Exported.')); }}>Export</button>
+          </div>
         </div>
       ) : null}
       {turns.map((turn, index) => (
@@ -318,14 +333,6 @@ function NextActionChips({ task, browserAgent, onCommand, onWorkspaceCommand, on
         onClick={() => run({ type: 'saveResultToMemory' }, 'Saved to Memory.')}
       >
         <Save size={12} /> Save to Memory
-      </button>
-      <button
-        type="button"
-        className="chip-button"
-        title="Create a new Tandem page with this result and open it in Tandem World."
-        onClick={() => run({ type: 'addResultToTandem', mode: 'new' }, 'Added to Tandem.')}
-      >
-        <BookOpenText size={12} /> Add to Tandem
       </button>
       {onWorkspaceCommand && browserAgent?.log.length ? (
         <button

@@ -2,7 +2,7 @@ import { accessSync, constants } from 'node:fs';
 import { createServer, type Server, type Socket } from 'node:net';
 import { randomBytes } from 'node:crypto';
 import { unlink } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
 
 import type { AcpEnvVariable, AcpMcpServerStdio } from '../acp/acp-protocol';
@@ -183,8 +183,29 @@ export function resolveMcpServerEntry(): { command: string; args: string[] } | n
   }
   const script = resolveMcpServerScriptPath();
   if (!script) return null;
-  const node = process.env.POPPIN_NODE_PATH?.trim() || process.env.npm_node_execpath?.trim() || 'node';
+  const node = resolveNodeExecutable();
+  if (!node) return null;
   return { command: node, args: [script] };
+}
+
+/**
+ * Packaged Electron GUI apps often inherit a PATH without Homebrew/npm.
+ * Resolve an absolute Node binary so ACP agents can spawn the MCP stdio server.
+ */
+export function resolveNodeExecutable(): string | null {
+  const candidates = [
+    process.env.POPPIN_NODE_PATH?.trim(),
+    process.env.npm_node_execpath?.trim(),
+    '/opt/homebrew/bin/node',
+    '/usr/local/bin/node',
+    path.join(homedir(), '.local', 'bin', 'node'),
+    path.join(homedir(), '.nvm', 'current', 'bin', 'node'),
+    '/usr/bin/node',
+  ];
+  for (const candidate of candidates) {
+    if (candidate && isExecutableSync(candidate)) return candidate;
+  }
+  return null;
 }
 
 function resolveMcpServerScriptPath(): string | null {
@@ -204,6 +225,15 @@ function resolveMcpServerScriptPath(): string | null {
     }
   }
   return null;
+}
+
+function isExecutableSync(filePath: string): boolean {
+  try {
+    accessSync(filePath, constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function parseArgs(value: string | undefined): string[] {
