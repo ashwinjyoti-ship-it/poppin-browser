@@ -234,6 +234,60 @@ Critical steps stop exactly before execution and use the existing sticky approva
 
 Initial candidates are an unsent Gmail draft, a timestamped YouTube transcript summary, and approved-source research. No parallel tasks or multi-agent spaces are added.
 
+## Phase 14 — Profile Login & Partial Continuity
+
+**Status:** Implemented (2026-08-11). Local profile + passphrase-sealed continuity packages. Does not authorize always-on cloud sync or a Poppin auth server.
+
+**Outcome:** A shared DMG stays independently usable on each Mac. The same person can move tabs, workspace selections, recipes, and browser settings between office and home without moving site logins or live agent state.
+
+### Locked decisions
+
+**Sync substrate — encrypted continuity packages (export/import), not always-on sync.**
+- Continuity is an explicit **Export continuity** / **Import continuity** flow that writes or reads a passphrase-sealed `.poppin-continuity` file.
+- The user may keep that file in iCloud Drive, AirDrop it, or copy it manually. Poppin does not run a sync daemon, CloudKit client, or custom sync backend in this phase.
+- Import is confirm-gated and last-write-wins for the imported subset; it never merges cookies or credentials.
+- Sharing a DMG with another person remains independent by default: each install keeps its own Electron `userData`. Their blank install cannot open someone else's package without that person's passphrase.
+
+**Identity — local profile + passphrase, not email/password, magic link, or Apple ID.**
+- Single-machine use needs no profile (current behavior unchanged).
+- Continuity export/import requires a **local Poppin profile** (display name) and a **passphrase** that seals and opens packages. This is user separation and package binding, not security theater against a determined attacker with disk access.
+- No Poppin account server, OAuth, magic link, or Sign in with Apple in this phase.
+- Settings exposes profile create/switch/rename and Export/Import continuity. Switching profile scopes local state directories; it does not create a second workspace or parallel active task inside one profile.
+
+**Partial payload — what follows vs what stays local.**
+
+Included in a continuity package (versioned JSON inside the sealed file):
+
+| Source | Fields |
+| --- | --- |
+| `browser-state.json` | Ordinary tabs: `url`, `pinned`, `groupId` (new ids on import). Groups: `name`, `color`, `collapsed`. `activeTabId` remapped after import. All `BrowserSettings` (`linkOpening`, `focusNewTabs`, `startup`, `newTabPosition`, `warnBeforeClosingMultipleTabs`, `searchEngine`, `tabsStartCollapsed`, `drawOutTabsOnHover`). |
+| Workspace SQLite | `workspace.name`. Context packs (`name`, `tabRefs` url/title, `documentIds`, `tandemPageIds`, `includeMemory`). Named browser sessions (`name`, tabs url/title/pinned). Recipes (`name`, `startUrl`, sanitized `steps`, `enabled`). Tab-context selection refs by url/title (not ephemeral tab ids). Tandem context page ids/titles only (not connection secrets). `memorySelected` boolean only. |
+
+Excluded from every package (permanent credential / machine / live-work boundary):
+
+- Chromium `persist:poppin-browser` cookies, cache, and site sessions
+- Passwords, passkeys, tokens, Keychain, Apple Passwords, or any other browser's auth
+- Sealed Tandem API key and Codex/GitHub credentials
+- Encrypted Memory page bodies (`safeStorage`)
+- Local Git `project.repositoryPath` and other machine paths
+- Window geometry (monitor-specific)
+- Agent Tabs / `browser-agent-state.json`, active task rows, visual selections, automation filmstrips
+- Task-owned tabs (`taskSpaceId` set) and in-flight approvals — never auto-resume on import
+
+Honest product copy on import: *Your work and settings follow. Website logins stay on each Mac.*
+
+### Acceptance (when implemented)
+
+- A second Mac can import a package and restore ordinary tabs, groups, settings, workspace name, packs, sessions, and recipes without receiving cookies or credentials.
+- A different person installing the same DMG starts empty and cannot decrypt another user's package without the passphrase.
+- Import never resumes Agent Tabs or an active task.
+- One workspace and one active task per profile remain unchanged.
+- Remote pages stay sandboxed; continuity APIs stay on the main-process / preload boundary only.
+
+### Implementation notes
+
+Main-process continuity engine + sealed `.poppin-continuity` format; profile-scoped data directories under `userData/profiles/<id>/`; Settings → Profile and continuity; shared typed IPC via the Settings overlay; unit tests cover payload allow/deny lists and seal/open. The Chromium `persist:poppin-browser` partition is never packaged.
+
 ## Decision Log
 
 - **2026-08-10:** Hands-on video-research feedback makes Agent Tabs metadata-first and media-quarantined. Discovery tasks read sanitized listing/page metadata before opening candidates; finding a video never implies playing it. While the agent controls task-owned tabs, audio is muted and media starts are paused. Successful completion now closes task tabs automatically unless the user opts to keep them before completion; stopped, failed, takeover, and explicitly kept collections remain inspectable. The active task may create and close additional task-owned exploration tabs through the narrow browser contract, capped at six exploration tabs, without adding parallel tasks or agent spaces.
@@ -271,5 +325,6 @@ Initial candidates are an unsent Gmail draft, a timestamped YouTube transcript s
 - **2026-08-08:** Browser-required Work persists its task-space and browser-run state and cannot become a completed Result without a successful meaningful browser action. A zero-action Codex completion retries once in the active conversation with an explicit Agent Tabs instruction; if the retry also performs no action, Poppin surfaces an incomplete failure and retains the task and tabs instead of showing a generic answer as completed. Since Codex dynamic tools are currently registered only at thread start, a browser-required continuation after app-server restart transparently rehydrates the resumed user/assistant history into a replacement tool-enabled thread while keeping one visible Poppin conversation.
 - **2026-08-11:** Seven product surfaces ship (user-requested): Diff/Compare board (structured matrix from result tables); quiet automation filmstrip (optional action frames + refs); delivery story strip (commit→push→PR→merge→local); Phase 13 recipes from success (explicit save, sanitized steps, no credentials); sticky split / peek-compare; local search across open tabs; Tandem beside live page. One workspace and one active task remain unchanged. Remote pages stay sandboxed.
 - **2026-08-11:** Core-loop ship (user-requested, implemented): named context packs (save/reuse checkbox sets); Memory as an opt-in working brief (Use as context + Update Memory / `saveResultToMemory`); provenance-linked Work claims → source URLs; calm Agent/You ownership chrome on Agent Tabs; Result next-action chips (Continue research / Compare / Draft / Save to Memory / Add to Tandem); single Add to Tandem on Reply for all result types; Downloads as a settings-adjacent icon+popover (no viewport shelf); named browser Sessions save/restore from the workspace pane and tab ⋯. Packs, Memory selection, and sessions persist in the workspace SQLite store; applying a pack reselects only what still exists. Core loop: packs + Memory brief → Ask → provenance Result → next action / Tandem. One workspace and one active task are unchanged.
+- **2026-08-11:** Phase 14 approved as product direction, then implementation-gated and shipped: local profile + passphrase-sealed continuity packages for office↔home transfer of tabs, workspace selections, recipes, and browser settings. Explicit export/import — no always-on sync server, CloudKit, or Poppin auth backend. Credential partition, Memory bodies, Tandem API keys, project paths, window geometry, and Agent Tabs / active task state stay machine-local. Shared DMG installs remain independent via per-machine `userData`; packages will not open without the owner's passphrase.
 
 Future decisions should be added here only after an approved phase boundary or meaningful user feedback.

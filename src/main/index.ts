@@ -36,6 +36,8 @@ import { TandemEngine } from './tandem/tandem-engine';
 import { TandemCredentialStore } from './tandem/tandem-credentials';
 import { executeTandemCapability } from './tandem/tandem-capability';
 import { SettingsOverlayController } from './browser/settings-overlay-controller';
+import { ContinuityEngine } from './continuity/continuity-engine';
+import { ProfileStore } from './continuity/profile-store';
 import {
   SETTINGS_OVERLAY_CHANNELS,
   type SettingsOverlayCommand,
@@ -63,6 +65,10 @@ let previewEngine: PreviewEngine | null = null;
 let tandemEngine: TandemEngine | null = null;
 let tandemCredentials: TandemCredentialStore | null = null;
 let settingsOverlay: SettingsOverlayController | null = null;
+let profileStore: ProfileStore | null = null;
+let continuityEngine: ContinuityEngine | null = null;
+let dataRootPath: string | null = null;
+let continuitySnapshotCache: Awaited<ReturnType<ContinuityEngine['getSnapshot']>> | null = null;
 const pendingExternalUrls: string[] = [];
 
 function openExternalUrl(url: string): void {
@@ -74,7 +80,7 @@ function openExternalUrl(url: string): void {
 }
 
 async function createWindow(): Promise<void> {
-  const stateStore = new BrowserStateStore(app.getPath('userData'));
+  const stateStore = new BrowserStateStore(dataRootPath ?? app.getPath('userData'));
   const persisted = await stateStore.load();
   const windowState = clampWindowState(
     persisted?.window ?? DEFAULT_WINDOW_STATE,
@@ -138,6 +144,11 @@ async function createWindow(): Promise<void> {
           canReopenClosedTab: browser?.canReopenClosedTab ?? false,
         },
         tandem: tandemEngine?.getSnapshot() ?? EMPTY_TANDEM_SNAPSHOT,
+        continuity: continuitySnapshotCache ?? {
+          activeProfile: null,
+          profiles: [],
+          continuityReady: false,
+        },
       };
     },
   );
@@ -162,9 +173,9 @@ async function createWindow(): Promise<void> {
   pagesEngine = new PagesEngine(mainWindow, pagesStore, () => workspaceEngine?.refreshPageContexts());
   browserAgentEngine = new BrowserAgentEngine(mainWindow, browserEngine, (tabId, content) => {
     workspaceEngine?.updateTabContextFromAgent(tabId, content);
-  }, new BrowserAgentStateStore(app.getPath('userData')));
+  }, new BrowserAgentStateStore(dataRootPath ?? app.getPath('userData')));
   if (!taskStore) throw new Error('Task storage is not ready.');
-  const workDirectory = path.join(app.getPath('userData'), 'task-output');
+  const workDirectory = path.join(dataRootPath ?? app.getPath('userData'), 'task-output');
   await mkdir(workDirectory, { recursive: true });
   taskEngine = new TaskEngine(mainWindow, taskStore, workspaceStore, git, {
     workDirectory,
@@ -333,14 +344,30 @@ app.whenReady().then(async () => {
     },
     { role: 'windowMenu' },
   ]));
-  workspaceStore = new WorkspaceStore(path.join(app.getPath('userData'), 'poppin.sqlite'));
-  taskStore = new TaskStore(path.join(app.getPath('userData'), 'poppin.sqlite'));
-  tandemCredentials = new TandemCredentialStore(path.join(app.getPath('userData'), 'poppin.sqlite'), {
+  profileStore = new ProfileStore(app.getPath('userData'));
+  const profileRegistry = await profileStore.load();
+  dataRootPath = profileStore.resolveDataRoot(profileRegistry);
+  await mkdir(dataRootPath, { recursive: true });
+  continuityEngine = new ContinuityEngine(
+    profileStore,
+    () => browserEngine,
+    () => workspaceStore,
+    () => workspaceEngine,
+    () => tandemEngine,
+    () => dataRootPath ?? app.getPath('userData'),
+    () => mainWindow,
+  );
+  continuitySnapshotCache = await continuityEngine.getSnapshot();
+
+  const sqlitePath = path.join(dataRootPath, 'poppin.sqlite');
+  workspaceStore = new WorkspaceStore(sqlitePath);
+  taskStore = new TaskStore(sqlitePath);
+  tandemCredentials = new TandemCredentialStore(sqlitePath, {
     available: () => safeStorage.isEncryptionAvailable(),
     encrypt: (text) => safeStorage.encryptString(text),
     decrypt: (value) => safeStorage.decryptString(value),
   });
-  pagesStore = new PagesStore(path.join(app.getPath('userData'), 'poppin.sqlite'), {
+  pagesStore = new PagesStore(sqlitePath, {
     available: () => safeStorage.isEncryptionAvailable(),
     encrypt: (text) => safeStorage.encryptString(text),
     decrypt: (value) => safeStorage.decryptString(value),
@@ -426,11 +453,19 @@ app.whenReady().then(async () => {
     }
     if (!fromOverlay) return { ok: false, message: 'Settings changes must come from the Settings panel.' };
 
-    const result = command.type === 'updateBrowserSettings'
-      ? await (browserEngine?.execute({ type: 'updateSettings', settings: command.settings }) ?? Promise.resolve({ ok: false, message: 'Browser settings are not ready.' }))
-      : command.type === 'reopenClosedTab'
-        ? await (browserEngine?.execute({ type: 'reopenClosedTab' }) ?? Promise.resolve({ ok: false, message: 'Browser settings are not ready.' }))
-        : await (tandemEngine?.execute(command.command) ?? Promise.resolve({ ok: false, message: 'Tandem is not ready.' }));
+    let result;
+    if (command.type === 'updateBrowserSettings') {
+      result = await (browserEngine?.execute({ type: 'updateSettings', settings: command.settings }) ?? Promise.resolve({ ok: false, message: 'Browser settings are not ready.' }));
+    } else if (command.type === 'reopenClosedTab') {
+      result = await (browserEngine?.execute({ type: 'reopenClosedTab' }) ?? Promise.resolve({ ok: false, message: 'Browser settings are not ready.' }));
+    } else if (command.type === 'tandem') {
+      result = await (tandemEngine?.execute(command.command) ?? Promise.resolve({ ok: false, message: 'Tandem is not ready.' }));
+    } else if (command.type === 'continuity') {
+      result = await (continuityEngine?.execute(command.command) ?? Promise.resolve({ ok: false, message: 'Continuity is not ready.' }));
+      if (continuityEngine) continuitySnapshotCache = await continuityEngine.getSnapshot();
+    } else {
+      result = { ok: false, message: 'Unknown settings command.' };
+    }
     settingsOverlay.notify();
     return result;
   });

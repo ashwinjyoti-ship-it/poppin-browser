@@ -435,6 +435,33 @@ export class WorkspaceStore {
     return result.changes > 0;
   }
 
+  /**
+   * Phase 14 continuity import: replace allowlisted workspace collections.
+   * Does not touch project paths, Memory bodies, visual selection, or documents.
+   */
+  replaceContinuityData(plan: {
+    workspaceName: string | null;
+    memorySelected: boolean;
+    contextPacks: ContextPackSnapshot[];
+    browserSessions: BrowserSessionSnapshot[];
+    recipes: RecipeSnapshot[];
+    tabContexts: TabContextSnapshot[];
+  }): void {
+    if (plan.workspaceName) {
+      if (this.getWorkspace()) this.renameWorkspace(plan.workspaceName);
+      else this.createWorkspace(plan.workspaceName);
+    }
+    this.setMemorySelected(plan.memorySelected);
+    this.database.prepare('DELETE FROM context_packs').run();
+    this.database.prepare('DELETE FROM browser_sessions').run();
+    this.database.prepare('DELETE FROM recipes').run();
+    this.database.prepare('DELETE FROM tab_context').run();
+    for (const pack of plan.contextPacks) this.insertContextPack(pack);
+    for (const session of plan.browserSessions) this.insertBrowserSession(session);
+    for (const recipe of plan.recipes) this.insertRecipe(recipe);
+    for (const context of plan.tabContexts) this.upsertTabContext(context);
+  }
+
   close(): void {
     this.database.close();
   }

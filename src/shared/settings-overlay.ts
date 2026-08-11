@@ -1,4 +1,9 @@
 import type { BrowserCommandResult, BrowserSettings } from './browser';
+import type {
+  ContinuityCommand,
+  ContinuityCommandResult,
+  ContinuitySnapshot,
+} from './continuity';
 import type { TandemCommand, TandemCommandResult, TandemSnapshot } from './tandem';
 
 export const SETTINGS_OVERLAY_CHANNELS = {
@@ -14,6 +19,7 @@ export interface SettingsOverlaySnapshot {
     canReopenClosedTab: boolean;
   };
   tandem: TandemSnapshot;
+  continuity: ContinuitySnapshot;
 }
 
 export type TandemSettingsCommand = Extract<TandemCommand,
@@ -27,9 +33,13 @@ export type SettingsOverlayCommand =
   | { type: 'close' }
   | { type: 'updateBrowserSettings'; settings: Partial<BrowserSettings> }
   | { type: 'reopenClosedTab' }
-  | { type: 'tandem'; command: TandemSettingsCommand };
+  | { type: 'tandem'; command: TandemSettingsCommand }
+  | { type: 'continuity'; command: ContinuityCommand };
 
-export type SettingsOverlayCommandResult = BrowserCommandResult | TandemCommandResult;
+export type SettingsOverlayCommandResult =
+  | BrowserCommandResult
+  | TandemCommandResult
+  | ContinuityCommandResult;
 
 export interface PoppinSettingsOverlayApi {
   getSnapshot: () => Promise<SettingsOverlaySnapshot>;
