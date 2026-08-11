@@ -32,14 +32,14 @@ describe('browser chrome', () => {
   it('resizes a pane from the keyboard and resets it accessibly', async () => {
     const user = userEvent.setup();
     const onResize = vi.fn();
-    render(<PaneResizer side="left" width={300} minimum={240} maximum={480} onResize={onResize} />);
+    render(<PaneResizer side="left" width={220} minimum={160} maximum={320} onResize={onResize} />);
 
-    const separator = screen.getByRole('separator', { name: /resize workspace pane/i });
+    const separator = screen.getByRole('separator', { name: /resize tabs pane/i });
     separator.focus();
     await user.keyboard('{ArrowRight}');
-    expect(onResize).toHaveBeenLastCalledWith(308);
+    expect(onResize).toHaveBeenLastCalledWith(228);
     await user.dblClick(separator);
-    expect(onResize).toHaveBeenLastCalledWith(286);
+    expect(onResize).toHaveBeenLastCalledWith(200);
   });
 
   it('activates, closes, and creates tabs accessibly', async () => {
@@ -518,13 +518,22 @@ const PROJECT_WORKSPACE: WorkspaceSnapshot = {
   workspace: { id: 'primary', name: 'Fixture', createdAt: '' },
   project: { repositoryPath: '/tmp/project', remote: null, branch: 'main', installCommand: '', devCommand: '', previewUrl: 'http://localhost:3000' },
 };
+const COMMAND_BAR_CONTEXT = {
+  tabs: [] as [],
+  tandem: EMPTY_TANDEM_SNAPSHOT,
+  onWorkspaceCommand: vi.fn().mockResolvedValue(null),
+  onPagesCommand: vi.fn().mockResolvedValue(null),
+  onTandemCommand: vi.fn().mockResolvedValue(null),
+  onRefreshTab: vi.fn(),
+  onCreateWorkspace: vi.fn().mockResolvedValue(null),
+};
 
 describe('Codex controls', () => {
   it('sends the selected model, reasoning, and prompt', async () => {
     const user = userEvent.setup();
     const onCommand = vi.fn().mockResolvedValue({ ok: true });
     const onOverlayHeightChange = vi.fn();
-    render(<CommandBar snapshot={READY_TASK} workspace={PROJECT_WORKSPACE} collapsed={false} onCollapseChange={vi.fn()} onCommand={onCommand} onOverlayHeightChange={onOverlayHeightChange} />);
+    render(<CommandBar snapshot={READY_TASK} workspace={PROJECT_WORKSPACE} {...COMMAND_BAR_CONTEXT} collapsed={false} onCollapseChange={vi.fn()} onCommand={onCommand} onOverlayHeightChange={onOverlayHeightChange} />);
     await user.type(screen.getByRole('textbox', { name: /prompt/i }), 'Make the button amber');
     await user.click(screen.getByRole('button', { name: /send to codex/i }));
     expect(screen.getByRole('region', { name: /task preflight/i })).toBeVisible();
@@ -544,7 +553,7 @@ describe('Codex controls', () => {
       workspace: { id: 'primary', name: 'Fixture', createdAt: '' },
       tabContexts: [{ tabId: 'mail-tab', title: 'Inbox', url: 'https://mail.example.com', capturedText: 'A message', truncated: false, capturedAt: '' }],
     };
-    render(<CommandBar snapshot={READY_TASK} workspace={workspace} collapsed={false} onCollapseChange={vi.fn()} onCommand={onCommand} />);
+    render(<CommandBar snapshot={READY_TASK} workspace={workspace} {...COMMAND_BAR_CONTEXT} collapsed={false} onCollapseChange={vi.fn()} onCommand={onCommand} />);
     await user.type(screen.getByRole('textbox', { name: /prompt/i }), 'Use browser use and draft and save a reply');
     await user.click(screen.getByRole('button', { name: /send to codex/i }));
     await waitFor(() => expect(onCommand).toHaveBeenCalledWith({
@@ -567,7 +576,7 @@ describe('Codex controls', () => {
         createdAt: '', updatedAt: '',
       },
     };
-    render(<CommandBar snapshot={snapshot} workspace={EMPTY_WORKSPACE} collapsed={false} onCollapseChange={vi.fn()} onCommand={onCommand} />);
+    render(<CommandBar snapshot={snapshot} workspace={EMPTY_WORKSPACE} {...COMMAND_BAR_CONTEXT} collapsed={false} onCollapseChange={vi.fn()} onCommand={onCommand} />);
     const prompt = screen.getByRole('textbox', { name: /prompt/i });
     expect(prompt).toHaveAttribute('placeholder', expect.stringMatching(/same Codex conversation/i));
     await user.type(prompt, 'Tell me more');

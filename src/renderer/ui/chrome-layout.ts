@@ -5,10 +5,11 @@ export interface ChromeLayout {
   height: number;
 }
 
+/** Heights exclude the old horizontal tab row — tabs live in the left rail. */
 const CHROME_LAYOUTS: Record<ChromeDensity, ChromeLayout> = {
-  roomy: { density: 'roomy', height: 103 },
-  compact: { density: 'compact', height: 86 },
-  dense: { density: 'dense', height: 76 },
+  roomy: { density: 'roomy', height: 58 },
+  compact: { density: 'compact', height: 50 },
+  dense: { density: 'dense', height: 44 },
 };
 
 export function getChromeLayout(viewportWidth: number, viewportHeight: number): ChromeLayout {

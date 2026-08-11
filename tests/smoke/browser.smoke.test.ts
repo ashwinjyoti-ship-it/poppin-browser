@@ -151,9 +151,8 @@ describe('packaged browser workflow', () => {
     await expect.poll(() => newTabPage!.getByRole('heading', { name: /where would you like to go/i }).isVisible()).toBe(true);
 
     const address = shell.getByLabel('Address and search');
-    await expect.poll(() => shell.getByRole('button', { name: 'Open workspace' }).isVisible()).toBe(true);
-    await shell.getByRole('button', { name: 'Open workspace' }).click();
-    const workspaceDivider = shell.getByRole('separator', { name: 'Resize workspace pane' });
+    await expect.poll(() => shell.getByRole('separator', { name: 'Resize tabs pane' }).isVisible()).toBe(true);
+    const workspaceDivider = shell.getByRole('separator', { name: 'Resize tabs pane' });
     const initialWorkspaceWidth = Number(await workspaceDivider.getAttribute('aria-valuenow'));
     const chromeHeight = await shell.locator('.app-shell').evaluate((element) => Number.parseInt(getComputedStyle(element).getPropertyValue('--chrome-height'), 10));
     const initialBrowserBounds = await activeBrowserViewBounds(application);
@@ -275,23 +274,25 @@ describe('packaged browser workflow', () => {
     await address.press('Enter');
     await expect.poll(() => exactPageInfo(application!, `${origin}/`)).toMatchObject({ title: 'Local fixture' });
 
-    const workspace = shell.getByRole('complementary', { name: 'Workspace' });
-    await workspace.getByLabel('Workspace name').fill('Launch workspace');
-    await workspace.getByRole('button', { name: 'Create workspace' }).click();
-    await expect.poll(() => workspace.getByRole('heading', { name: 'Launch workspace' }).isVisible()).toBe(true);
-    const workspaceBox = await workspace.boundingBox();
-    expect(workspaceBox).not.toBeNull();
-    const memoryActionBox = await workspace.getByRole('button', { name: /Open Memory/i }).boundingBox();
+    const contextChip = shell.getByRole('button', { name: /^Context/ });
+    await contextChip.click();
+    const contextDialog = shell.getByRole('dialog', { name: 'Task context' });
+    await contextDialog.getByLabel('Workspace name').fill('Launch workspace');
+    await contextDialog.getByRole('button', { name: 'Create workspace' }).click();
+    await expect.poll(() => contextDialog.getByRole('button', { name: /Open Memory/i }).isVisible()).toBe(true);
+    const memoryActionBox = await contextDialog.getByRole('button', { name: /Open Memory/i }).boundingBox();
+    const contextBox = await contextDialog.boundingBox();
     expect(memoryActionBox).not.toBeNull();
-    expect(memoryActionBox!.x).toBeGreaterThanOrEqual(workspaceBox!.x);
-    expect(memoryActionBox!.x + memoryActionBox!.width).toBeLessThanOrEqual(workspaceBox!.x + workspaceBox!.width);
-    expect(await workspace.getByRole('button', { name: 'Page', exact: true }).count()).toBe(0);
-    expect(await workspace.getByRole('button', { name: 'Database', exact: true }).count()).toBe(0);
-    const tabContextCheckbox = workspace.getByRole('checkbox', { name: 'Local fixture' });
+    expect(contextBox).not.toBeNull();
+    expect(memoryActionBox!.x).toBeGreaterThanOrEqual(contextBox!.x);
+    expect(memoryActionBox!.x + memoryActionBox!.width).toBeLessThanOrEqual(contextBox!.x + contextBox!.width);
+    expect(await contextDialog.getByRole('button', { name: 'Page', exact: true }).count()).toBe(0);
+    expect(await contextDialog.getByRole('button', { name: 'Database', exact: true }).count()).toBe(0);
+    const tabContextCheckbox = contextDialog.getByRole('checkbox', { name: 'Local fixture' });
     await tabContextCheckbox.click();
     await expect.poll(() => tabContextCheckbox.isChecked()).toBe(true);
-    await expect.poll(() => workspace.locator('.context-preview pre').first().textContent()).toContain('Open popup');
-
+    await expect.poll(() => contextDialog.locator('.context-preview pre').first().textContent()).toContain('Open popup');
+    await shell.keyboard.press('Escape');
     await address.fill(`${origin}/agent`);
     await address.press('Enter');
     await expect.poll(() => exactPageInfo(application!, `${origin}/agent`)).toMatchObject({ title: 'Browser agent fixture' });
@@ -444,9 +445,9 @@ describe('packaged browser workflow', () => {
 
     ({ app: application, shell } = await launch(userDataPath));
     await expect.poll(() => shell.getByRole('tab').count()).toBe(2);
-    await shell.getByRole('button', { name: 'Open workspace' }).click();
-    await expect.poll(() => shell.getByRole('separator', { name: 'Resize workspace pane' }).getAttribute('aria-valuenow')).toBe(String(resizedWorkspaceWidth));
-    await expect.poll(() => shell.getByLabel('Workspace').getByRole('heading', { name: 'Launch workspace' }).isVisible()).toBe(true);
+    await expect.poll(() => shell.getByRole('separator', { name: 'Resize tabs pane' }).getAttribute('aria-valuenow')).toBe(String(resizedWorkspaceWidth));
+    await shell.getByRole('button', { name: /^Context/ }).click();
+    await expect.poll(() => shell.getByRole('dialog', { name: 'Task context' }).getByRole('button', { name: /Open Memory/i }).isVisible()).toBe(true);
     const cookies = await application.evaluate(async ({ session }, fixtureOrigin) => {
       return session.fromPartition('persist:poppin-browser').cookies.get({ url: fixtureOrigin });
     }, origin);
