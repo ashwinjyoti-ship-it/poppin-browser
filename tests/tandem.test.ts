@@ -255,6 +255,35 @@ describe('TandemEngine', () => {
     credentials.close();
   });
 
+  it('reloads the live project/page tree without mutating frozen selections', async () => {
+    const { engine, credentials, routes, onContextChanged } = await setup();
+    await engine.execute({ type: 'connect', baseUrl: BASE, apiKey: 'udm_secret' });
+    await engine.execute({ type: 'setPageSelected', pageId: 'page-1', selected: true });
+    onContextChanged.mockClear();
+
+    routes['GET /api/workspaces/workspace-1/pages'] = [
+      { id: 'page-1', title: 'Notes', type: 'page', parent_id: null, updated_at: '2026-08-01T10:00:00Z' },
+      { id: 'page-2', title: 'New brief', type: 'page', parent_id: null, updated_at: '2026-08-11T09:00:00Z' },
+      { id: 'folder-1', title: 'Project A', type: 'folder', parent_id: null },
+    ];
+    routes['GET /api/recent'] = [
+      { id: 'page-2', title: 'New brief', type: 'page' },
+      { id: 'page-1', title: 'Notes', type: 'page' },
+    ];
+    routes['GET /api/pages/page-1/markdown'] = { markdown: 'Changed remotely.' };
+
+    expect(await engine.execute({ type: 'refreshBrowse' })).toEqual({ ok: true });
+    expect(engine.getSnapshot().pages.map((page) => page.id)).toEqual(['page-1', 'page-2', 'folder-1']);
+    expect(engine.getSnapshot().recent.map((page) => page.id)).toEqual(['page-2', 'page-1']);
+    expect(engine.getSelectedContext()[0]?.capturedMarkdown).toBe('Frozen body.');
+    expect(onContextChanged).not.toHaveBeenCalled();
+
+    await engine.execute({ type: 'refreshContext' });
+    expect(engine.getSnapshot().pages.map((page) => page.id)).toContain('page-2');
+    expect(engine.getSelectedContext()[0]?.capturedMarkdown).toBe('Changed remotely.');
+    credentials.close();
+  });
+
   it('opens Tandem World with the Poppin host token', async () => {
     const { engine, credentials, openWorld } = await setup();
     await engine.execute({ type: 'connect', baseUrl: BASE, apiKey: 'udm_secret' });

@@ -369,6 +369,7 @@ describe('browser chrome', () => {
       activeWorkspaceId: 'workspace-1',
     }} onCommand={onCommand} />);
 
+    await waitFor(() => expect(onCommand).toHaveBeenCalledWith({ type: 'refreshBrowse' }));
     await user.click(screen.getByRole('button', { name: 'Open Tandem World' }));
     expect(onCommand).toHaveBeenCalledWith({ type: 'openWorld' });
   });

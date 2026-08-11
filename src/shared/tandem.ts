@@ -76,6 +76,9 @@ export type TandemCommand =
   | { type: 'selectWorkspace'; workspaceId: string }
   | { type: 'search'; query: string }
   | { type: 'setPageSelected'; pageId: string; selected: boolean }
+  /** Reloads the left-pane project/page tree from Tandem without mutating frozen selections. */
+  | { type: 'refreshBrowse' }
+  /** Reloads the browse tree and re-captures currently selected page snapshots. */
   | { type: 'refreshContext' }
   | { type: 'openWorld'; pageId?: string }
   | { type: 'closeWorld' };
