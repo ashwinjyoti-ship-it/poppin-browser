@@ -1,5 +1,5 @@
 import { BookOpenText, Check, ChevronDown, ChevronLeft, ChevronRight, CircleAlert, CircleSlash2, Database, FileDiff, FileText, Globe2, MessageSquareText, Pencil, Plus, TriangleAlert, X } from 'lucide-react';
-import { type DragEvent, useMemo, useRef, useState } from 'react';
+import { type DragEvent, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { BrowserFailure, BrowserTabGroup } from '../../shared/browser';
 import type { BrowserTaskSpace } from '../../shared/browser-agent';
@@ -28,6 +28,8 @@ interface TabStripProps {
   orientation?: 'horizontal' | 'vertical';
   collapsed?: boolean;
   onCollapseChange?: (collapsed: boolean) => void;
+  /** When collapsed, hovering the rail temporarily draws tabs out. */
+  drawOutOnHover?: boolean;
   /** Tab ids currently included in the Ask context package. */
   contextTabIds?: ReadonlySet<string>;
   onToggleTabContext?: (tabId: string, selected: boolean) => void;
@@ -71,6 +73,7 @@ export function TabStrip({
   orientation = 'horizontal',
   collapsed = false,
   onCollapseChange,
+  drawOutOnHover = true,
   contextTabIds,
   onToggleTabContext,
 }: TabStripProps) {
@@ -83,7 +86,9 @@ export function TabStrip({
   }, [tabs]);
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
   const [groupName, setGroupName] = useState('');
+  const [hoverPeek, setHoverPeek] = useState(false);
   const cancelRenameRef = useRef(false);
+  const leaveTimerRef = useRef<number | null>(null);
   const renderedGroups = new Set<string>();
   // The task's Agent Tabs (context/exploration browsing tabs while watching)
   // and its reply/review tab are a distinct, agent-owned zone: they dock to
@@ -92,10 +97,40 @@ export function TabStrip({
   const agentOwnedTabs = tabs.filter((tab) => tab.taskSpaceId || tab.kind === 'task');
   const showAgentCluster = Boolean(agentTaskSpace) || agentOwnedTabs.length > 0;
   const hasTandemWorldTab = ordinaryTabs.some((tab) => tab.kind === 'tandem');
+  const effectiveHoverPeek = collapsed ? hoverPeek : false;
 
-  if (vertical && collapsed) {
+  useEffect(() => () => {
+    if (leaveTimerRef.current !== null) window.clearTimeout(leaveTimerRef.current);
+  }, []);
+
+  const cancelHoverLeave = () => {
+    if (leaveTimerRef.current !== null) {
+      window.clearTimeout(leaveTimerRef.current);
+      leaveTimerRef.current = null;
+    }
+  };
+
+  const scheduleHoverLeave = () => {
+    cancelHoverLeave();
+    leaveTimerRef.current = window.setTimeout(() => setHoverPeek(false), 160);
+  };
+
+  const peeking = Boolean(vertical && collapsed && drawOutOnHover && effectiveHoverPeek);
+
+  if (vertical && collapsed && !peeking) {
     return (
-      <aside className="side-rail side-rail-left tab-rail-collapsed" aria-label="Tabs collapsed">
+      <aside
+        className="side-rail side-rail-left tab-rail-collapsed"
+        aria-label="Tabs collapsed"
+        onMouseEnter={() => {
+          if (!drawOutOnHover) return;
+          cancelHoverLeave();
+          setHoverPeek(true);
+        }}
+        onMouseLeave={() => {
+          if (drawOutOnHover) scheduleHoverLeave();
+        }}
+      >
         <button type="button" className="pane-toggle" onClick={() => onCollapseChange?.(false)} aria-label="Open tabs">
           <ChevronRight size={17} />
         </button>
@@ -277,12 +312,29 @@ export function TabStrip({
 
   if (vertical) {
     return (
-      <aside className="tab-rail side-pane" aria-label="Tabs">
+      <aside
+        className={`tab-rail side-pane ${peeking ? 'tab-rail-hover-peek' : ''}`}
+        aria-label="Tabs"
+        onMouseEnter={() => {
+          if (!peeking) return;
+          cancelHoverLeave();
+          setHoverPeek(true);
+        }}
+        onMouseLeave={() => {
+          if (peeking) scheduleHoverLeave();
+        }}
+      >
         <div className="tab-rail-heading">
           <span>Tabs</span>
-          <button type="button" className="pane-toggle" onClick={() => onCollapseChange?.(true)} aria-label="Collapse tabs">
-            <ChevronLeft size={17} />
-          </button>
+          {peeking ? (
+            <button type="button" className="pane-toggle" onClick={() => onCollapseChange?.(false)} aria-label="Keep tabs open">
+              <ChevronRight size={17} />
+            </button>
+          ) : (
+            <button type="button" className="pane-toggle" onClick={() => onCollapseChange?.(true)} aria-label="Collapse tabs">
+              <ChevronLeft size={17} />
+            </button>
+          )}
         </div>
         {ordinaryStrip}
         {agentStrip}
