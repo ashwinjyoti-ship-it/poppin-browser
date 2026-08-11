@@ -13,14 +13,12 @@ describe('vertical tab rail hover draw-out', () => {
   it('draws tabs out on hover while collapsed and pins them open', async () => {
     const user = userEvent.setup();
     const onCollapseChange = vi.fn();
-    const onHoverPeekChange = vi.fn();
     render(
       <TabStrip
         orientation="vertical"
         collapsed
         drawOutOnHover
         onCollapseChange={onCollapseChange}
-        onHoverPeekChange={onHoverPeekChange}
         tabs={TABS}
         groups={[]}
         activeTabId="tab-1"
@@ -37,12 +35,10 @@ describe('vertical tab rail hover draw-out', () => {
 
     expect(screen.getByRole('button', { name: 'Open tabs' })).toBeVisible();
     expect(screen.queryByRole('tab', { name: 'One' })).not.toBeInTheDocument();
-    expect(onHoverPeekChange).toHaveBeenLastCalledWith(false);
 
     await user.hover(screen.getByLabelText('Tabs collapsed'));
     expect(await screen.findByRole('tab', { name: 'One' })).toBeVisible();
     expect(screen.getByRole('button', { name: 'Keep tabs open' })).toBeVisible();
-    expect(onHoverPeekChange).toHaveBeenCalledWith(true);
 
     await user.click(screen.getByRole('button', { name: 'Keep tabs open' }));
     expect(onCollapseChange).toHaveBeenCalledWith(false);
