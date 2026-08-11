@@ -54,8 +54,13 @@ export function formatDownloadBytes(bytes: number): string {
   return `${(bytes / (1024 ** 3)).toFixed(2)} GB`;
 }
 
-/** Visible chrome height reserved when download rows are showing. */
-export function downloadBarHeight(itemCount: number): number {
-  if (itemCount <= 0) return 0;
-  return 10 + itemCount * 34;
+/**
+ * Count of downloads still transferring. Consumed by the downloads icon in
+ * the toolbar to render a live badge and to short-circuit UI updates when
+ * nothing is in flight.
+ */
+export function countProgressingDownloads(snapshot: DownloadsSnapshot): number {
+  let count = 0;
+  for (const item of snapshot.items) if (item.state === 'progressing') count += 1;
+  return count;
 }

@@ -139,7 +139,14 @@ export type PagesCommand =
   | { type: 'updateDatabaseRow'; rowId: string; properties: Record<string, PageJsonValue> }
   | { type: 'deleteDatabaseRow'; rowId: string }
   | { type: 'addDatabaseView'; databaseId: string; name: string; viewType?: DatabaseViewType; filters?: PageJsonValue[]; sorts?: PageJsonValue[]; viewState?: Record<string, PageJsonValue>; position?: number }
-  | { type: 'saveViewState'; pageId: string; state: Record<string, PageJsonValue> };
+  | { type: 'saveViewState'; pageId: string; state: Record<string, PageJsonValue> }
+  /**
+   * Append a Markdown-formatted block to the encrypted Memory page, creating
+   * Memory when it is not yet initialized. Never sends the block to any
+   * provider directly; Memory is only surfaced when the user opts it into
+   * context via the workspace checkbox.
+   */
+  | { type: 'appendMemory'; markdown: string };
 
 export interface PagesCommandResult {
   ok: boolean;

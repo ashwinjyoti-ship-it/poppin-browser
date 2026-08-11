@@ -635,7 +635,11 @@ describe('Codex controls', () => {
     render(<TaskTabView taskSnapshot={snapshot} workspace={EMPTY_WORKSPACE} onTaskCommand={vi.fn()} />);
     expect(screen.getByRole('heading', { name: /guitar options/i })).toBeVisible();
     expect(screen.queryByText('Codex response')).not.toBeInTheDocument();
-    expect(screen.queryByText(/tandem/i)).not.toBeInTheDocument();
+    // Completed reply exposes result-follow-up chips (Save to Memory, Add to
+    // Tandem, Continue research, Compare, Draft) so the user can act on the
+    // trusted output without re-visiting the command bar.
+    expect(screen.getByRole('button', { name: /add to tandem/i })).toBeVisible();
+    expect(screen.getByRole('button', { name: /save to memory/i })).toBeVisible();
   });
 
   it('renders follow-ups as one persistent task thread and exposes an explicit new-task action', async () => {

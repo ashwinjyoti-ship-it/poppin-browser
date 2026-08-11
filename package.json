@@ -17,7 +17,9 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint . --max-warnings=0",
     "package": "electron-forge package",
-    "make": "electron-forge make"
+    "make": "electron-forge make",
+    "update:dmg": "node scripts/update-stable-dmgs.mjs",
+    "update:dmg:all": "node scripts/update-stable-dmgs.mjs --arch=all"
   },
   "dependencies": {
     "docx": "^9.7.1",

@@ -88,6 +88,24 @@ interface TaskEngineOptions {
   executeTandemCapability?: (args: unknown) => Promise<{ ok: boolean; text: string }>;
   querySelectedDatabase?: (databaseId: string, limit: number) => string;
   applyPageComment?: (commentId: string, replacement: string) => string;
+  /**
+   * Appends the task result to Poppin's protected Memory page. Injected by
+   * `main/index.ts` so the engine never depends on the PagesStore directly.
+   * Return the target page id so tests can assert against it.
+   */
+  saveResultToMemory?: (input: { title: string; markdown: string; prompt: string }) => { pageId: string };
+  /**
+   * Copies the task result into Tandem via the existing provider. When mode
+   * is 'new' Poppin creates a fresh page; when 'append' the caller must
+   * supply an existing pageId. Returns the target page id so the engine can
+   * optionally open Tandem World to that page after success.
+   */
+  addResultToTandem?: (input: {
+    mode: 'new' | 'append';
+    pageId?: string;
+    title: string;
+    markdown: string;
+  }) => Promise<{ pageId: string; opened: boolean }>;
 }
 
 interface PendingExternalAction {
@@ -211,6 +229,10 @@ export class TaskEngine {
           return this.requestUpdateLocal();
         case 'exportResult':
           return await this.exportResult(command.format);
+        case 'saveResultToMemory':
+          return this.saveResultToMemory();
+        case 'addResultToTandem':
+          return await this.addResultToTandem(command.mode ?? 'new', command.pageId);
       }
     } catch (error) {
       return { ok: false, message: error instanceof Error ? error.message : 'Codex could not complete that action.' };
@@ -426,6 +448,7 @@ export class TaskEngine {
           ...(workspace.documents.some((item) => item.selected) ? ['document'] : []),
           ...(workspace.pageContexts?.length ? ['native-page'] : []),
           ...(workspace.tandemContexts?.length ? ['tandem-page'] : []),
+          ...(workspace.memorySelected && workspace.memoryBrief ? ['memory-brief'] : []),
           ...(workspace.visualSelection ? ['localhost-visual-selection'] : []),
         ],
       },
@@ -746,6 +769,33 @@ export class TaskEngine {
     if (!this.options.onExportResult) return { ok: false, message: 'Result export is not available.' };
     const filePath = await this.options.onExportResult(cloneTask(this.task), format);
     return { ok: true, message: filePath ? `Saved a new output artifact to ${filePath}.` : 'Export cancelled.' };
+  }
+
+  private saveResultToMemory(): TaskCommandResult {
+    const task = this.task;
+    if (!task?.result) return { ok: false, message: 'There is no result to save yet.' };
+    if (!this.options.saveResultToMemory) return { ok: false, message: 'Memory is not available in this environment.' };
+    try {
+      const title = taskHeadline(task.turns?.[0]?.prompt ?? task.prompt);
+      this.options.saveResultToMemory({ title, markdown: task.result, prompt: task.prompt });
+      return { ok: true, message: 'Saved to Memory.' };
+    } catch (error) {
+      return { ok: false, message: error instanceof Error ? error.message : 'Poppin could not save to Memory.' };
+    }
+  }
+
+  private async addResultToTandem(mode: 'new' | 'append', pageId?: string): Promise<TaskCommandResult> {
+    const task = this.task;
+    if (!task?.result) return { ok: false, message: 'There is no result to add to Tandem yet.' };
+    if (!this.options.addResultToTandem) return { ok: false, message: 'Tandem is not connected. Connect Tandem in Settings, then try again.' };
+    if (mode === 'append' && !pageId) return { ok: false, message: 'Choose a Tandem page to append to.' };
+    try {
+      const title = taskHeadline(task.turns?.[0]?.prompt ?? task.prompt);
+      const result = await this.options.addResultToTandem({ mode, ...(pageId ? { pageId } : {}), title, markdown: task.result });
+      return { ok: true, message: mode === 'append' ? 'Appended to the Tandem page.' : 'Created a new Tandem page.' + (result.opened ? ' Opened it in Tandem World.' : '') };
+    } catch (error) {
+      return { ok: false, message: error instanceof Error ? error.message : 'Poppin could not update Tandem.' };
+    }
   }
 
   private validateStart(modelId: string, effort: string, kind: TaskKind): {
@@ -1180,7 +1230,8 @@ For discovery and comparison requests, use readMetadata on a results or listing 
 Do not claim that a browser action succeeded unless the tool output confirms it. For a requested draft, perform the browser actions, verify that the page reports the draft as saved, and leave it unsent.
 Use the bounded batch tool to reduce round trips when several refs from one snapshot can be acted on safely. End every batch with read or assert, and treat any pause, takeover, stale ref, skipped step, or failed assertion as a stop rather than retrying.
 When the Tandem capability tool is supplied, use it for every Tandem read and write. It speaks the Tandem REST API: search or list to resolve a page, read_page before editing, and prefer append or edit_section so existing content survives. Never navigate to Tandem in a browser tab or automate its interface to do something the tool can do, and never ask the user for a Tandem API key.
-Your final agent message becomes Poppin's trusted Result page for contextual, browser-only, and mixed tasks. Return the complete polished outcome rather than a browser activity summary. Include source URLs and the time-sensitive date or timestamp when research, prices, availability, or other changing facts are involved. Create a new output artifact rather than overwriting an input.`;
+Your final agent message becomes Poppin's trusted Result page for contextual, browser-only, and mixed tasks. Return the complete polished outcome rather than a browser activity summary. Include source URLs and the time-sensitive date or timestamp when research, prices, availability, or other changing facts are involved. Create a new output artifact rather than overwriting an input.
+Cite provenance for every load-bearing claim. Inline each factual claim as a markdown link — write [<the exact claim or the source title>](<the real http(s) URL from an Agent Tab visit or from SELECTED CONTEXT>). Use only URLs Poppin actually opened for this task or that appear in SELECTED CONTEXT; do not fabricate, shorten, or paraphrase URLs. Prefer one link per claim so Poppin can render a Claims list. If a paragraph draws from several sources, add the links at the end of that paragraph. A trailing "Sources" list is fine in addition to inline links, but the inline claim→URL links are required so Poppin can render provenance.`;
 
 function buildTaskPrompt(
   prompt: string,
@@ -1204,6 +1255,14 @@ function buildTaskPrompt(
       updatedAt: item.updatedAt, content: item.capturedMarkdown, truncated: item.truncated,
       capturedAt: item.capturedAt, stale: item.stale,
     })),
+    // Memory is only included when the user has explicitly opted it into the
+    // context package via the workspace checkbox — it is never sent implicitly.
+    ...(workspace.memorySelected && workspace.memoryBrief ? [{
+      type: 'memory-brief',
+      title: workspace.memoryBrief.title,
+      content: workspace.memoryBrief.content,
+      truncated: workspace.memoryBrief.truncated,
+    }] : []),
     ...(workspace.visualSelection ? [{
       type: 'localhost-visual-selection', source: workspace.visualSelection.url,
       selector: workspace.visualSelection.selector, html: workspace.visualSelection.html,
@@ -1545,6 +1604,7 @@ function selectedContextCount(workspace: WorkspaceSnapshot): number {
     + workspace.documents.filter((item) => item.selected).length
     + (workspace.pageContexts?.length ?? 0)
     + (workspace.tandemContexts?.length ?? 0)
+    + (workspace.memorySelected && workspace.memoryBrief ? 1 : 0)
     + (workspace.visualSelection ? 1 : 0);
 }
 
@@ -1611,6 +1671,12 @@ function workspaceSnapshot(
 
 
 
+
+function taskHeadline(prompt: string): string {
+  const oneLine = prompt.replace(/\s+/gu, ' ').trim();
+  if (!oneLine) return 'Poppin task result';
+  return oneLine.length > 90 ? `${oneLine.slice(0, 87).trimEnd()}…` : oneLine;
+}
 
 function validatePrompt(input: string): string {
   const prompt = input.trim();

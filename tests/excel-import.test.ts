@@ -30,7 +30,7 @@ describe('Excel documents', () => {
     workspace.upsertDocument({ id: 'excel-one', name: 'inventory.xlsx', path: filePath, sizeBytes: file.size, capturedText: null, truncated: false });
     const refreshed = vi.fn();
     const window = { isDestroyed: () => false, webContents: { isDestroyed: () => false, send: vi.fn() } };
-    const engine = new WorkspaceEngine(window as unknown as Electron.BrowserWindow, workspace, {} as never, {} as never, pages, refreshed);
+    const engine = new WorkspaceEngine(window as unknown as Electron.BrowserWindow, workspace, {} as never, {} as never, { pagesStore: pages, onPagesChanged: refreshed });
 
     expect(await engine.execute({ type: 'setDocumentSelected', documentId: 'excel-one', selected: true })).toMatchObject({ ok: true });
     expect(workspace.listDocuments()[0]?.capturedText).toContain('Acoustic guitar');

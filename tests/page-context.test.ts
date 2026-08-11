@@ -6,8 +6,14 @@ import path from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { querySelectedDatabase, selectedPageContexts } from '../src/main/pages/page-context';
+import { memoryBrief, querySelectedDatabase, selectedPageContexts } from '../src/main/pages/page-context';
 import { PagesStore } from '../src/main/pages/pages-store';
+
+const stubProtector = {
+  available: () => true,
+  encrypt: (text: string) => Buffer.from(`protected:${Buffer.from(text).toString('base64')}`),
+  decrypt: (value: Buffer) => Buffer.from(value.toString().slice('protected:'.length), 'base64').toString(),
+};
 
 describe('native Page context', () => {
   it('flattens checked Pages and exposes open anchored instructions', async () => {
@@ -19,6 +25,17 @@ describe('native Page context', () => {
     expect(selectedPageContexts(store)).toEqual([]);
     store.setPageSelected(page.id, true);
     expect(selectedPageContexts(store)[0]).toMatchObject({ title: 'Launch note', kind: 'page', content: expect.stringContaining('Move to Tuesday') });
+    store.close();
+  });
+
+  it('exposes a bounded Memory brief only after Memory is initialized', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'poppin-memory-brief-'));
+    const store = new PagesStore(path.join(directory, 'poppin.sqlite'), stubProtector);
+    expect(memoryBrief(store)).toBeNull();
+    store.appendMemory('Working brief for the launch.');
+    const brief = memoryBrief(store);
+    expect(brief).toMatchObject({ title: 'Memory', truncated: false });
+    expect(brief?.content).toContain('Working brief for the launch.');
     store.close();
   });
 

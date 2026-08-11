@@ -1,5 +1,5 @@
 import { ArrowLeft, ArrowRight, LockKeyhole, RefreshCw, RotateCcw, Search, Settings2, Unplug, X } from 'lucide-react';
-import { type FormEvent, type RefObject, useState } from 'react';
+import { type FormEvent, type ReactNode, type RefObject, useState } from 'react';
 
 import type { BrowserSettings, BrowserTabSnapshot } from '../../shared/browser';
 import type { TandemSnapshot } from '../../shared/tandem';
@@ -19,6 +19,11 @@ interface BrowserToolbarProps {
   onReload: () => void;
   onSettingsOpenChange: (open: boolean) => void;
   onSubmit: (event: FormEvent) => void;
+  /**
+   * Downloads control (icon + popover) rendered next to the Settings button.
+   * Provided by the App so `BrowserToolbar` stays stateless.
+   */
+  downloadsSlot?: ReactNode;
 }
 
 export function BrowserToolbar({
@@ -35,6 +40,7 @@ export function BrowserToolbar({
   onReload,
   onSettingsOpenChange,
   onSubmit,
+  downloadsSlot,
 }: BrowserToolbarProps) {
   return (
     <div className="toolbar-controls">
@@ -72,6 +78,7 @@ export function BrowserToolbar({
       </form>
 
       <div className="toolbar-actions">
+        {downloadsSlot}
         <button
           type="button"
           className="settings-button"

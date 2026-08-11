@@ -126,6 +126,9 @@ export class PagesEngine {
         case 'saveViewState':
           id = this.store.saveViewState(command.pageId, command.state).pageId;
           break;
+        case 'appendMemory':
+          id = this.store.appendMemory(command.markdown).id;
+          break;
       }
       this.emitSnapshot();
       this.onChanged?.();

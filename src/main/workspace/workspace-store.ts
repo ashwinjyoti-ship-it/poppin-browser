@@ -1,6 +1,8 @@
 import { DatabaseSync } from 'node:sqlite';
 
 import type {
+  BrowserSessionSnapshot,
+  ContextPackSnapshot,
   TabContextSnapshot,
   WorkspaceDocumentSnapshot,
   WorkspaceRecordSnapshot,
@@ -84,6 +86,25 @@ export class WorkspaceStore {
       CREATE TABLE IF NOT EXISTS visual_selection (
         id TEXT PRIMARY KEY CHECK (id = 'primary'),
         selection_json TEXT NOT NULL
+      ) STRICT;
+      CREATE TABLE IF NOT EXISTS context_packs (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        tab_refs_json TEXT NOT NULL DEFAULT '[]',
+        document_ids_json TEXT NOT NULL DEFAULT '[]',
+        tandem_page_ids_json TEXT NOT NULL DEFAULT '[]',
+        include_memory INTEGER NOT NULL DEFAULT 0 CHECK (include_memory IN (0, 1)),
+        created_at TEXT NOT NULL
+      ) STRICT;
+      CREATE TABLE IF NOT EXISTS memory_state (
+        id TEXT PRIMARY KEY CHECK (id = 'primary'),
+        selected INTEGER NOT NULL DEFAULT 0 CHECK (selected IN (0, 1))
+      ) STRICT;
+      CREATE TABLE IF NOT EXISTS browser_sessions (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        tabs_json TEXT NOT NULL DEFAULT '[]',
+        created_at TEXT NOT NULL
       ) STRICT;
     `);
   }
@@ -252,8 +273,144 @@ export class WorkspaceStore {
     this.database.prepare("DELETE FROM visual_selection WHERE id = 'primary'").run();
   }
 
+  isMemorySelected(): boolean {
+    const row = this.database.prepare("SELECT selected FROM memory_state WHERE id = 'primary'").get() as { selected: number } | undefined;
+    return Boolean(row?.selected);
+  }
+
+  setMemorySelected(selected: boolean): void {
+    this.database.prepare(`
+      INSERT INTO memory_state (id, selected) VALUES ('primary', ?)
+      ON CONFLICT(id) DO UPDATE SET selected = excluded.selected
+    `).run(Number(selected));
+  }
+
+  listContextPacks(): ContextPackSnapshot[] {
+    const rows = this.database.prepare(`
+      SELECT id, name, tab_refs_json, document_ids_json, tandem_page_ids_json, include_memory, created_at
+      FROM context_packs ORDER BY created_at
+    `).all() as unknown as Array<{
+      id: string; name: string; tab_refs_json: string; document_ids_json: string;
+      tandem_page_ids_json: string; include_memory: number; created_at: string;
+    }>;
+    return rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      tabRefs: parseTabRefs(row.tab_refs_json),
+      documentIds: parseStringArray(row.document_ids_json),
+      tandemPageIds: parseStringArray(row.tandem_page_ids_json),
+      includeMemory: Boolean(row.include_memory),
+      createdAt: row.created_at,
+    }));
+  }
+
+  insertContextPack(pack: ContextPackSnapshot): void {
+    this.database.prepare(`
+      INSERT INTO context_packs (id, name, tab_refs_json, document_ids_json, tandem_page_ids_json, include_memory, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      pack.id,
+      pack.name,
+      JSON.stringify(pack.tabRefs),
+      JSON.stringify(pack.documentIds),
+      JSON.stringify(pack.tandemPageIds),
+      Number(pack.includeMemory),
+      pack.createdAt,
+    );
+  }
+
+  getContextPack(packId: string): ContextPackSnapshot | null {
+    return this.listContextPacks().find((pack) => pack.id === packId) ?? null;
+  }
+
+  renameContextPack(packId: string, name: string): boolean {
+    const result = this.database.prepare('UPDATE context_packs SET name = ? WHERE id = ?').run(name, packId);
+    return result.changes > 0;
+  }
+
+  deleteContextPack(packId: string): boolean {
+    const result = this.database.prepare('DELETE FROM context_packs WHERE id = ?').run(packId);
+    return result.changes > 0;
+  }
+
+  listBrowserSessions(): BrowserSessionSnapshot[] {
+    const rows = this.database.prepare(`
+      SELECT id, name, tabs_json, created_at FROM browser_sessions ORDER BY created_at
+    `).all() as unknown as Array<{ id: string; name: string; tabs_json: string; created_at: string }>;
+    return rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      tabs: parseSessionTabs(row.tabs_json),
+      createdAt: row.created_at,
+    }));
+  }
+
+  insertBrowserSession(session: BrowserSessionSnapshot): void {
+    this.database.prepare(`
+      INSERT INTO browser_sessions (id, name, tabs_json, created_at) VALUES (?, ?, ?, ?)
+    `).run(session.id, session.name, JSON.stringify(session.tabs), session.createdAt);
+  }
+
+  getBrowserSession(sessionId: string): BrowserSessionSnapshot | null {
+    return this.listBrowserSessions().find((session) => session.id === sessionId) ?? null;
+  }
+
+  renameBrowserSession(sessionId: string, name: string): boolean {
+    const result = this.database.prepare('UPDATE browser_sessions SET name = ? WHERE id = ?').run(name, sessionId);
+    return result.changes > 0;
+  }
+
+  deleteBrowserSession(sessionId: string): boolean {
+    const result = this.database.prepare('DELETE FROM browser_sessions WHERE id = ?').run(sessionId);
+    return result.changes > 0;
+  }
+
   close(): void {
     this.database.close();
+  }
+}
+
+function parseStringArray(value: string): string[] {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((entry): entry is string => typeof entry === 'string');
+  } catch {
+    return [];
+  }
+}
+
+function parseTabRefs(value: string): { url: string; title: string }[] {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.flatMap((entry) => {
+      if (!entry || typeof entry !== 'object') return [];
+      const candidate = entry as Record<string, unknown>;
+      if (typeof candidate.url !== 'string' || typeof candidate.title !== 'string') return [];
+      return [{ url: candidate.url, title: candidate.title }];
+    });
+  } catch {
+    return [];
+  }
+}
+
+function parseSessionTabs(value: string): { url: string; title: string; pinned: boolean }[] {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.flatMap((entry) => {
+      if (!entry || typeof entry !== 'object') return [];
+      const candidate = entry as Record<string, unknown>;
+      if (typeof candidate.url !== 'string' || typeof candidate.title !== 'string') return [];
+      return [{
+        url: candidate.url,
+        title: candidate.title,
+        pinned: candidate.pinned === true,
+      }];
+    });
+  } catch {
+    return [];
   }
 }
 

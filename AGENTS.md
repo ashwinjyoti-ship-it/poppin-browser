@@ -19,7 +19,7 @@ Read [docs/DEVELOPMENT_GUIDE.md](docs/DEVELOPMENT_GUIDE.md) before changing this
 2. Prefer small, cohesive changes. Update `POPPIN_MVP_ROADMAP.md` only for meaningful approved decisions or user feedback.
 3. Add or adjust tests at the appropriate level. Run `npm run lint`, `npm run typecheck`, and `npm test`.
 4. For browser-shell, Electron, packaging, or visual behavior, also run the Node 22 packaged smoke flow documented in the development guide. Local DMG builds are documented in [docs/BUILD_DMG.md](docs/BUILD_DMG.md).
-5. Do not push, open a PR, merge, or replace the stable DMG unless the user explicitly asks for release/deploy work.
+5. Do not push, open a PR, merge, or replace the stable DMG unless the user explicitly asks for release/deploy work. When they do ask to update local installers, use `npm run update:dmg` (host arch) or `npm run update:dmg:all` to overwrite `DMG/Poppin-Browser-*.dmg` — never commit those binaries.
 
 ## Fast orientation
 

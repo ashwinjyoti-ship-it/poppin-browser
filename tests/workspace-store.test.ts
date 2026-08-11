@@ -56,4 +56,72 @@ describe('workspace store', () => {
     expect(restored.getProject()).toMatchObject({ repositoryPath: '/tmp/project', branch: 'main' });
     restored.close();
   });
+
+  it('persists memory-selected state, context packs, and browser sessions across restarts', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'poppin-workspace-packs-'));
+    const filePath = path.join(directory, 'poppin.sqlite');
+    const store = new WorkspaceStore(filePath);
+    store.createWorkspace('Packs workspace');
+
+    expect(store.isMemorySelected()).toBe(false);
+    store.setMemorySelected(true);
+    expect(store.isMemorySelected()).toBe(true);
+
+    store.insertContextPack({
+      id: 'pack-one',
+      name: 'Launch prep',
+      tabRefs: [{ url: 'https://example.com/', title: 'Example' }],
+      documentIds: ['doc-one'],
+      tandemPageIds: ['tandem-42'],
+      includeMemory: true,
+      createdAt: '2026-08-11T00:00:00.000Z',
+    });
+    store.insertBrowserSession({
+      id: 'sess-one',
+      name: 'Morning research',
+      tabs: [
+        { url: 'https://poppin.example/', title: 'Poppin', pinned: true },
+        { url: 'https://example.com/', title: 'Example', pinned: false },
+      ],
+      createdAt: '2026-08-11T00:00:00.000Z',
+    });
+    store.close();
+
+    const restored = new WorkspaceStore(filePath);
+    expect(restored.isMemorySelected()).toBe(true);
+    const packs = restored.listContextPacks();
+    expect(packs).toHaveLength(1);
+    expect(packs[0]).toMatchObject({
+      id: 'pack-one',
+      name: 'Launch prep',
+      documentIds: ['doc-one'],
+      tandemPageIds: ['tandem-42'],
+      includeMemory: true,
+    });
+    expect(packs[0]?.tabRefs).toEqual([{ url: 'https://example.com/', title: 'Example' }]);
+
+    expect(restored.renameContextPack('pack-one', 'Launch prep v2')).toBe(true);
+    expect(restored.getContextPack('pack-one')?.name).toBe('Launch prep v2');
+    expect(restored.deleteContextPack('pack-one')).toBe(true);
+    expect(restored.listContextPacks()).toEqual([]);
+
+    const sessions = restored.listBrowserSessions();
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0]).toMatchObject({ id: 'sess-one', name: 'Morning research' });
+    expect(sessions[0]?.tabs).toEqual([
+      { url: 'https://poppin.example/', title: 'Poppin', pinned: true },
+      { url: 'https://example.com/', title: 'Example', pinned: false },
+    ]);
+    expect(restored.renameBrowserSession('sess-one', 'Morning research v2')).toBe(true);
+    expect(restored.getBrowserSession('sess-one')?.name).toBe('Morning research v2');
+    expect(restored.deleteBrowserSession('sess-one')).toBe(true);
+    expect(restored.listBrowserSessions()).toEqual([]);
+
+    restored.setMemorySelected(false);
+    restored.close();
+
+    const roundTrip = new WorkspaceStore(filePath);
+    expect(roundTrip.isMemorySelected()).toBe(false);
+    roundTrip.close();
+  });
 });

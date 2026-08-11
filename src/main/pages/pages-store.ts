@@ -260,14 +260,38 @@ export class PagesStore {
 
   openMemory(): NativePageTabSnapshot {
     return this.transaction(() => {
-      const existing = this.database.prepare("SELECT page_id FROM protected_pages WHERE purpose = 'memory'").get() as { page_id: string } | undefined;
-      const pageId = existing?.page_id ?? this.createPage({ title: 'Memory', kind: 'page' }).id;
-      if (!existing) {
-        if (!this.protector?.available()) throw new Error('OS-backed encryption is not available, so Memory was not created.');
-        this.database.prepare("INSERT INTO protected_pages (page_id, purpose) VALUES (?, 'memory')").run(pageId);
-        this.addBlock({ pageId, type: 'paragraph', content: { text: 'Keep durable notes, preferences, and working context here.' } });
-      }
+      const pageId = this.ensureMemoryPage();
       return this.openPage(pageId);
+    });
+  }
+
+  /**
+   * Returns the OS-encrypted Memory page id, creating an initialized page on
+   * first use. Unlike {@link openMemory}, this does not activate a Pages tab.
+   */
+  ensureMemoryPage(): string {
+    return this.transaction(() => {
+      const existing = this.database.prepare("SELECT page_id FROM protected_pages WHERE purpose = 'memory'").get() as { page_id: string } | undefined;
+      if (existing) return existing.page_id;
+      if (!this.protector?.available()) throw new Error('OS-backed encryption is not available, so Memory was not created.');
+      const pageId = this.createPage({ title: 'Memory', kind: 'page' }).id;
+      this.database.prepare("INSERT INTO protected_pages (page_id, purpose) VALUES (?, 'memory')").run(pageId);
+      this.addBlock({ pageId, type: 'paragraph', content: { text: 'Keep durable notes, preferences, and working context here.' } });
+      return pageId;
+    });
+  }
+
+  findMemoryPageId(): string | null {
+    const row = this.database.prepare("SELECT page_id FROM protected_pages WHERE purpose = 'memory'").get() as { page_id: string } | undefined;
+    return row?.page_id ?? null;
+  }
+
+  appendMemory(markdown: string): PageBlockSnapshot {
+    const text = markdown.replace(/\r\n/g, '\n').trim();
+    if (!text) throw new Error('Provide non-empty content to append to Memory.');
+    return this.transaction(() => {
+      const pageId = this.ensureMemoryPage();
+      return this.addBlock({ pageId, type: 'paragraph', content: { text } });
     });
   }
 

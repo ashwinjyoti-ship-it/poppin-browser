@@ -63,7 +63,7 @@ export function AgentDock({ taskSnapshot, browserAgentSnapshot, onTaskCommand, o
   if (browserAgentSnapshot?.taskSpace?.status === 'user-controlling' && onBrowserAgentCommand) {
     return (
       <div className="agent-dock agent-dock-card" role="status">
-        <p>You're in control of the agent's tab.</p>
+        <p><span className="ownership-pill ownership-pill-user">You own these tabs</span> The agent is paused until you hand control back.</p>
         <button type="button" className="dock-btn dock-btn-primary" onClick={() => { void onBrowserAgentCommand({ type: 'resume' }); }}>Resume agent</button>
       </div>
     );
