@@ -33,6 +33,7 @@ import {
 import { errorPageUrl } from './internal-pages';
 import { BrowserStateStore } from './state-store';
 import { normalizeTabOrder } from './tab-model';
+import { ensureTandemHostParam, TANDEM_HOST_THEME_SCRIPT } from '../../shared/tandem';
 import { displayUrl, NEW_TAB_URL, normalizeAddressInput, normalizeTabInput } from './url-input';
 import type { CapturedTabContext } from '../../shared/workspace';
 import type { VisualSelectionSnapshot } from '../../shared/workspace';
@@ -159,7 +160,8 @@ export class BrowserEngine {
       ? state.tabs
       : [{ id: randomUUID(), url: NEW_TAB_URL, pinned: false, groupId: null }];
     for (const tab of tabs) {
-      this.createTab(tab.url, tab.id, false, tab, false, 'end');
+      const url = tab.surface === 'tandem-world' ? ensureTandemHostParam(tab.url) : tab.url;
+      this.createTab(url, tab.id, false, { ...tab, url }, false, 'end');
       if (tab.surface === 'tandem-world') this.tandemWorldTabId = tab.id;
     }
     const requestedActive = shouldRestore && state?.activeTabId ? this.tabs.get(state.activeTabId) : null;
@@ -208,15 +210,16 @@ export class BrowserEngine {
   openTandemWorld(url: string): void {
     const normalized = normalizeAddressInput(url);
     if (normalized.kind !== 'url') return;
+    const hostedUrl = ensureTandemHostParam(normalized.url);
     const existing = this.tandemWorldTabId ? this.tabs.get(this.tandemWorldTabId) : undefined;
     if (existing && !existing.view.webContents.isDestroyed()) {
-      void existing.view.webContents.loadURL(normalized.url).catch(() => undefined);
+      void existing.view.webContents.loadURL(hostedUrl).catch(() => undefined);
       this.activateTab(existing.snapshot.id);
       return;
     }
     const id = randomUUID();
     this.tandemWorldTabId = id;
-    this.createTab(normalized.url, id, false, { id, url: normalized.url, pinned: false, groupId: null, surface: 'tandem-world' }, true, 'end');
+    this.createTab(hostedUrl, id, false, { id, url: hostedUrl, pinned: false, groupId: null, surface: 'tandem-world' }, true, 'end');
     const created = this.tabs.get(id);
     if (created) {
       created.snapshot.title = 'Tandem World';
@@ -976,6 +979,7 @@ export class BrowserEngine {
     });
     contents.on('dom-ready', () => {
       this.applyLinkOpeningPreference(tab);
+      if (tab.snapshot.surface === 'tandem-world') this.applyTandemHostTheme(tab);
       if (tab.snapshot.taskSpaceId && this.mediaBlockedTaskSpaces.has(tab.snapshot.taskSpaceId)) this.pauseTaskOwnedMedia(tab);
     });
     contents.on('media-started-playing', () => {
@@ -1105,18 +1109,26 @@ export class BrowserEngine {
     }
     const isNewTab = url.startsWith('poppin://new-tab');
     const previousOrigin = safeOrigin(tab.lastExternalUrl);
-    tab.lastExternalUrl = isNewTab ? NEW_TAB_URL : url;
+    const remembered = !isNewTab && tab.snapshot.surface === 'tandem-world' ? ensureTandemHostParam(url) : url;
+    tab.lastExternalUrl = isNewTab ? NEW_TAB_URL : remembered;
     this.syncNavigationState(tab);
     const nextOrigin = safeOrigin(url);
     this.updateTab(tab, {
-      url: displayUrl(url),
+      url: displayUrl(remembered),
       title: isNewTab ? 'New Tab' : tab.snapshot.title,
       failure: null,
       ...(resetFavicon && previousOrigin !== nextOrigin
         ? { faviconUrls: faviconForUrl(url, this.faviconByOrigin) }
         : {}),
     });
+    if (tab.snapshot.surface === 'tandem-world' && !isNewTab) this.applyTandemHostTheme(tab);
     this.scheduleSave();
+  }
+
+  /** Keep Tandem's Poppin amber theme even when its SPA drops `?host=poppin`. */
+  private applyTandemHostTheme(tab: BrowserTabRecord): void {
+    if (tab.view.webContents.isDestroyed()) return;
+    void tab.view.webContents.executeJavaScript(TANDEM_HOST_THEME_SCRIPT, true).catch(() => undefined);
   }
 
   private pauseTaskOwnedMedia(tab: BrowserTabRecord): void {

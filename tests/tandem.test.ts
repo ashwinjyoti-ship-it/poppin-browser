@@ -10,7 +10,7 @@ import { TandemClient } from '../src/main/tandem/tandem-client';
 import { TandemCredentialStore, normalizeTandemBaseUrl } from '../src/main/tandem/tandem-credentials';
 import { TandemEngine } from '../src/main/tandem/tandem-engine';
 import { executeTandemCapability, TANDEM_CAPABILITY_TOOL } from '../src/main/tandem/tandem-capability';
-import { tandemWorldUrl } from '../src/shared/tandem';
+import { tandemWorldUrl, ensureTandemHostParam, TANDEM_HOST_THEME_SCRIPT } from '../src/shared/tandem';
 
 interface Call { method: string; url: string; body: unknown; apiKey: string | null }
 
@@ -50,6 +50,15 @@ describe('Tandem base URL', () => {
   it('builds Tandem World URLs that carry the Poppin host token', () => {
     expect(tandemWorldUrl(BASE)).toBe('https://tandem.example.com/?host=poppin');
     expect(tandemWorldUrl(BASE, 'page-1')).toBe('https://tandem.example.com/page/page-1?host=poppin');
+  });
+
+  it('re-stamps host=poppin on restored or SPA Tandem URLs', () => {
+    expect(ensureTandemHostParam('https://tandem.example.com/page/abc')).toBe('https://tandem.example.com/page/abc?host=poppin');
+    expect(ensureTandemHostParam('https://tandem.example.com/page/abc?host=poppin&x=1')).toBe('https://tandem.example.com/page/abc?host=poppin&x=1');
+    expect(ensureTandemHostParam('https://tandem.example.com/page/abc?host=other')).toBe('https://tandem.example.com/page/abc?host=poppin');
+    expect(ensureTandemHostParam('poppin://new-tab/')).toBe('poppin://new-tab/');
+    expect(TANDEM_HOST_THEME_SCRIPT).toContain('host-poppin');
+    expect(TANDEM_HOST_THEME_SCRIPT).toContain('udm.host');
   });
 });
 
