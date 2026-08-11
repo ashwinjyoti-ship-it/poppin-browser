@@ -35,14 +35,14 @@ const CURSOR_AGENT_BINARIES = [
 ] as const;
 
 export async function locateCodexAcp(): Promise<AcpLaunch | null> {
-  return locateConfiguredOrBinary('POPPIN_ACP_AGENT_COMMAND', 'POPPIN_ACP_AGENT_ARGS', CODEX_ACP_BINARIES);
+  return locateConfiguredOrBinary('POPPIN_ACP_AGENT_COMMAND', 'POPPIN_ACP_AGENT_ARGS', CODEX_ACP_BINARIES, undefined, 'codex-acp');
 }
 
 export async function locateClaudeAcp(): Promise<AcpLaunch | null> {
   return locateConfiguredOrBinary('POPPIN_CLAUDE_ACP_COMMAND', 'POPPIN_CLAUDE_ACP_ARGS', CLAUDE_ACP_BINARIES, {
     fallbackEnvCommand: 'POPPIN_ACP_AGENT_COMMAND',
     fallbackEnvArgs: 'POPPIN_ACP_AGENT_ARGS',
-  });
+  }, 'claude-agent-acp');
 }
 
 /**
@@ -57,6 +57,8 @@ export async function locateCursorAcp(): Promise<AcpLaunch | null> {
   for (const executable of CURSOR_AGENT_BINARIES) {
     if (await isExecutable(executable)) return { executable, args: ['acp'] };
   }
+  const onPath = await findOnPath('agent');
+  if (onPath) return { executable: onPath, args: ['acp'] };
   return null;
 }
 
@@ -78,6 +80,7 @@ async function locateConfiguredOrBinary(
   envArgs: string,
   binaries: readonly string[],
   fallback?: { fallbackEnvCommand: string; fallbackEnvArgs: string },
+  pathBinaryName?: string,
 ): Promise<AcpLaunch | null> {
   const configured = process.env[envCommand]?.trim();
   if (configured) {
@@ -92,9 +95,36 @@ async function locateConfiguredOrBinary(
   for (const executable of binaries) {
     if (await isExecutable(executable)) return { executable, args: [] };
   }
+  if (pathBinaryName) {
+    const onPath = await findOnPath(pathBinaryName);
+    if (onPath) return { executable: onPath, args: [] };
+  }
   return null;
 }
 
 async function isExecutable(filePath: string): Promise<boolean> {
   return access(filePath, constants.X_OK).then(() => true, () => false);
+}
+
+/**
+ * Falls back to scanning `PATH` for a binary by name.
+ *
+ * The hardcoded candidate lists above only cover a handful of common install
+ * locations (Homebrew, `~/.local/bin`, `~/.bun/bin`). Agents installed
+ * through nvm, a custom npm prefix, Linux package managers, or anywhere else
+ * on `PATH` were reported "not installed" even when they were — this widens
+ * discovery to match what the user's shell can already find.
+ */
+async function findOnPath(name: string): Promise<string | null> {
+  const pathValue = process.env.PATH;
+  if (!pathValue) return null;
+  const dirs = pathValue.split(path.delimiter).filter(Boolean);
+  const names = process.platform === 'win32' ? [`${name}.cmd`, `${name}.exe`, `${name}.bat`, name] : [name];
+  for (const dir of dirs) {
+    for (const candidateName of names) {
+      const candidate = path.join(dir, candidateName);
+      if (await isExecutable(candidate)) return candidate;
+    }
+  }
+  return null;
 }

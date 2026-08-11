@@ -993,7 +993,7 @@ body.pane-is-resizing * { cursor: col-resize !important; user-select: none !impo
   height: 78px;
   display: grid;
   /* Default: agent only (ACP without model/reasoning selectors). */
-  grid-template-columns: 42px 94px minmax(220px, 1fr) 46px 28px;
+  grid-template-columns: 42px 132px minmax(220px, 1fr) 46px 28px;
   align-items: center;
   gap: 10px;
   padding: 10px 12px;
@@ -1004,10 +1004,10 @@ body.pane-is-resizing * { cursor: col-resize !important; user-select: none !impo
   -webkit-app-region: no-drag;
 }
 .command-bar:has(.command-model):not(:has(.command-reasoning)) {
-  grid-template-columns: 42px 94px minmax(140px, 190px) minmax(220px, 1fr) 46px 28px;
+  grid-template-columns: 42px 132px minmax(140px, 190px) minmax(220px, 1fr) 46px 28px;
 }
 .command-bar:has(.command-model):has(.command-reasoning) {
-  grid-template-columns: 42px 94px minmax(140px, 190px) 112px minmax(220px, 1fr) 46px 28px;
+  grid-template-columns: 42px 132px minmax(140px, 190px) 112px minmax(220px, 1fr) 46px 28px;
 }
 
 .command-activity { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 13px; background: var(--surface-muted); }
@@ -1209,9 +1209,9 @@ body.pane-is-resizing * { cursor: col-resize !important; user-select: none !impo
   .toolbar-controls { grid-template-columns: 108px minmax(260px, 1fr) 132px; }
   .tab-row { margin-left: 16px; }
   .tab { min-width: 158px; }
-  .command-bar { grid-template-columns: 38px 80px minmax(180px, 1fr) 42px 25px; gap: 7px; }
-  .command-bar:has(.command-model):not(:has(.command-reasoning)) { grid-template-columns: 38px 80px 140px minmax(180px, 1fr) 42px 25px; }
-  .command-bar:has(.command-model):has(.command-reasoning) { grid-template-columns: 38px 80px 140px 98px minmax(180px, 1fr) 42px 25px; }
+  .command-bar { grid-template-columns: 38px 112px minmax(180px, 1fr) 42px 25px; gap: 7px; }
+  .command-bar:has(.command-model):not(:has(.command-reasoning)) { grid-template-columns: 38px 112px 140px minmax(180px, 1fr) 42px 25px; }
+  .command-bar:has(.command-model):has(.command-reasoning) { grid-template-columns: 38px 112px 140px 98px minmax(180px, 1fr) 42px 25px; }
 }
 
 @media (max-width: 720px) {

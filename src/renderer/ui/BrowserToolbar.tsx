@@ -96,6 +96,7 @@ export function BrowserToolbar({
           <button
             type="button"
             aria-label="Go back"
+            title="Go back (hold for history)"
             aria-expanded={backMenuOpen}
             disabled={!activeTab?.canGoBack && previousEntries.length === 0}
             onPointerDown={() => {
@@ -143,10 +144,10 @@ export function BrowserToolbar({
             </ul>
           ) : null}
         </div>
-        <button type="button" aria-label="Go forward" disabled={!activeTab?.canGoForward} onClick={onForward}>
+        <button type="button" aria-label="Go forward" title="Go forward" disabled={!activeTab?.canGoForward} onClick={onForward}>
           <ArrowRight size={20} strokeWidth={1.8} />
         </button>
-        <button type="button" aria-label="Refresh page" disabled={!activeTab} onClick={onReload}>
+        <button type="button" aria-label="Refresh page" title="Refresh page" disabled={!activeTab} onClick={onReload}>
           <RefreshCw size={19} strokeWidth={1.8} />
         </button>
       </div>
@@ -243,6 +244,7 @@ export function BrowserToolbar({
           type="button"
           className="settings-button"
           aria-label="Poppin settings"
+          title="Poppin settings"
           aria-expanded={settingsOpen}
           onClick={() => onSettingsOpenChange(!settingsOpen)}
         >
@@ -270,7 +272,7 @@ export function BrowserSettingsPanel({ settings, canReopenClosedTab, onClose, on
     <aside className="browser-settings-panel" aria-label="Poppin settings">
       <div className="settings-heading">
         <div><span>Poppin</span><strong>Settings</strong></div>
-        <button type="button" aria-label="Close Poppin settings" onClick={onClose}><X size={15} /></button>
+        <button type="button" aria-label="Close Poppin settings" title="Close" onClick={onClose}><X size={15} /></button>
       </div>
 
       <section className="settings-section" aria-labelledby="browser-settings-heading">

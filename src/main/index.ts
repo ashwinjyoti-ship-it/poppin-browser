@@ -332,6 +332,14 @@ function isTrustedSettingsSender(sender: Electron.WebContents): boolean {
 }
 
 app.whenReady().then(async () => {
+  // Registers Poppin as an http/https handler candidate so it can be picked
+  // from OS default-browser pickers (macOS Desktop & Dock settings, Windows
+  // Default Apps, etc). Guarded to packaged builds so a dev run of Electron
+  // itself never claims the system's default browser.
+  if (app.isPackaged) {
+    app.setAsDefaultProtocolClient('http');
+    app.setAsDefaultProtocolClient('https');
+  }
   Menu.setApplicationMenu(Menu.buildFromTemplate([
     { role: 'appMenu' },
     {
