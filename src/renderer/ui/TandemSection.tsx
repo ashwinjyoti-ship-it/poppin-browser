@@ -1,7 +1,10 @@
-import { type ReactNode, useState } from 'react';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { BookOpenText, ChevronDown, ChevronRight, Database, FileText, Folder, RefreshCw, Search, Settings2, Shapes } from 'lucide-react';
 
 import type { TandemCommand, TandemContextSnapshot, TandemPageSnapshot, TandemSnapshot } from '../../shared/tandem';
+
+/** How often the expanded picker re-reads Tandem's live project/page tree. */
+const BROWSE_POLL_MS = 20_000;
 
 interface TandemSectionProps {
   snapshot: TandemSnapshot;
@@ -21,6 +24,11 @@ export function TandemSection({ snapshot, onCommand, onOpenSettings }: TandemSec
   const [pagesExpanded, setPagesExpanded] = useState(false);
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
+  const onCommandRef = useRef(onCommand);
+
+  useEffect(() => {
+    onCommandRef.current = onCommand;
+  }, [onCommand]);
 
   const run = async (command: TandemCommand) => {
     setBusy(true);
@@ -28,6 +36,26 @@ export function TandemSection({ snapshot, onCommand, onOpenSettings }: TandemSec
     setBusy(false);
     setMessage(error ?? '');
   };
+
+  // Keep Recent / Projects & pages aligned with Tandem while the picker is open.
+  // Frozen selected snapshots are intentionally left alone until the user hits refresh.
+  useEffect(() => {
+    if (snapshot.connection.state !== 'ready' || !expanded) return;
+    let cancelled = false;
+    const refreshBrowse = () => {
+      if (cancelled) return;
+      void onCommandRef.current({ type: 'refreshBrowse' });
+    };
+    refreshBrowse();
+    const interval = window.setInterval(refreshBrowse, BROWSE_POLL_MS);
+    const onFocus = () => refreshBrowse();
+    window.addEventListener('focus', onFocus);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [snapshot.connection.state, snapshot.activeWorkspaceId, expanded]);
 
   if (snapshot.connection.state !== 'ready') {
     return (
@@ -63,7 +91,7 @@ export function TandemSection({ snapshot, onCommand, onOpenSettings }: TandemSec
           <span>Tandem</span>
           <span className="section-count">{snapshot.selected.length} selected</span>
         </button>
-        <button type="button" disabled={busy} onClick={() => { void run({ type: 'refreshContext' }); }} aria-label="Refresh Tandem context"><RefreshCw size={13} /></button>
+        <button type="button" disabled={busy} onClick={() => { void run({ type: 'refreshContext' }); }} aria-label="Refresh Tandem pages and selected context"><RefreshCw size={13} /></button>
       </div>
       <button type="button" className="tandem-world-button" disabled={busy} onClick={() => { void run({ type: 'openWorld' }); }}>
         <BookOpenText size={15} /> Open Tandem World

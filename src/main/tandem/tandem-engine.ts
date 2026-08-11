@@ -103,6 +103,8 @@ export class TandemEngine {
           return await this.search(command.query);
         case 'setPageSelected':
           return await this.setPageSelected(command.pageId, command.selected);
+        case 'refreshBrowse':
+          return await this.refreshBrowse();
         case 'refreshContext':
           return await this.refreshContext();
         case 'openWorld':
@@ -245,11 +247,28 @@ export class TandemEngine {
   }
 
   /**
-   * Explicit refresh. Poppin never silently mutates the frozen context of an
-   * active task when a Tandem page changes remotely.
+   * Reloads the browse/recent tree from Tandem. Selected context stays frozen.
+   */
+  private async refreshBrowse(): Promise<TandemCommandResult> {
+    if (!this.provider) return { ok: false, message: 'Connect Tandem first.' };
+    await this.loadWorkspace();
+    if (this.snapshot.searchQuery.trim()) {
+      this.snapshot.searchResults = await this.provider.search(this.snapshot.searchQuery.trim());
+    }
+    this.emit();
+    return { ok: true };
+  }
+
+  /**
+   * Explicit refresh. Reloads the browse tree, then re-captures selected page
+   * snapshots. Poppin never silently mutates frozen context on a remote edit.
    */
   private async refreshContext(): Promise<TandemCommandResult> {
     if (!this.provider) return { ok: false, message: 'Connect Tandem first.' };
+    await this.loadWorkspace();
+    if (this.snapshot.searchQuery.trim()) {
+      this.snapshot.searchResults = await this.provider.search(this.snapshot.searchQuery.trim());
+    }
     const refreshed: TandemContextSnapshot[] = [];
     const failures: string[] = [];
     for (const item of this.snapshot.selected) {
