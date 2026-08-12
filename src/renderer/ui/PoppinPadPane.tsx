@@ -15,12 +15,19 @@ export function PoppinPadPane({ snapshot, onCollapseChange, onCommand }: PoppinP
   const [message, setMessage] = useState('');
 
   if (snapshot.pad.collapsed) {
+    const openPad = () => {
+      void onCommand({ type: 'setCollapsed', collapsed: false });
+      onCollapseChange(false);
+    };
     return (
-      <aside className="side-rail side-rail-right" aria-label="Poppin Pad collapsed">
-        <button type="button" className="pane-toggle" onClick={() => { void onCommand({ type: 'setCollapsed', collapsed: false }); onCollapseChange(false); }} aria-label="Open Poppin Pad" title="Open Poppin Pad">
-          <ChevronLeft size={16} />
+      <aside className="side-rail side-rail-right side-rail-pad" aria-label="Poppin Pad collapsed">
+        <button type="button" className="pane-toggle pane-toggle-pad" onClick={openPad} aria-label="Open Poppin Pad" title="Open Poppin Pad">
+          <ChevronLeft size={17} />
         </button>
-        <LayoutGrid size={16} aria-hidden="true" />
+        <button type="button" className="side-rail-pad-open" onClick={openPad} aria-label="Open Poppin Pad canvas" title="Open Poppin Pad">
+          <span className="side-rail-label">Pad</span>
+          <LayoutGrid size={17} aria-hidden="true" />
+        </button>
       </aside>
     );
   }

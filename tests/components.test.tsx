@@ -447,6 +447,35 @@ describe('browser chrome', () => {
     expect(onSettingsOpenChange).toHaveBeenCalledWith(true);
   });
 
+  it('toggles Poppin Pad from the toolbar grid button', async () => {
+    const user = userEvent.setup();
+    const onTogglePad = vi.fn();
+    render(
+      <BrowserToolbar
+        activeTab={TAB}
+        address={TAB.url}
+        addressError=""
+        settingsOpen={false}
+        addressInputRef={{ current: null }}
+        onAddressChange={vi.fn()}
+        onAddressFocus={vi.fn()}
+        onAddressBlur={vi.fn()}
+        onBack={vi.fn()}
+        onForward={vi.fn()}
+        onReload={vi.fn()}
+        onSettingsOpenChange={vi.fn()}
+        onSubmit={vi.fn()}
+        padOpen={false}
+        onTogglePad={onTogglePad}
+      />,
+    );
+
+    const padButton = screen.getByRole('button', { name: 'Open Poppin Pad' });
+    expect(padButton).toHaveTextContent('Pad');
+    await user.click(padButton);
+    expect(onTogglePad).toHaveBeenCalledOnce();
+  });
+
   it('updates link behavior from the settings overlay', async () => {
     const user = userEvent.setup();
     const onUpdateSettings = vi.fn();

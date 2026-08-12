@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { getChromeLayout, getTitlebarLeftInset } from '../src/renderer/ui/chrome-layout';
+import {
+  getChromeLayout,
+  getTitlebarLeftInset,
+  resolveChromeHeight,
+  TAB_SEARCH_CHROME_EXTRA,
+} from '../src/renderer/ui/chrome-layout';
 
 describe('responsive browser chrome', () => {
   it('uses the roomy layout only when both dimensions have space', () => {
@@ -27,5 +32,11 @@ describe('responsive browser chrome', () => {
     expect(getTitlebarLeftInset('roomy', true)).toBe(16);
     expect(getTitlebarLeftInset('compact', true)).toBe(12);
     expect(getTitlebarLeftInset('dense', true)).toBe(12);
+  });
+
+  it('grows chrome height when open-tab search is open so the tab strip stays visible', () => {
+    const layout = getChromeLayout(1728, 1117);
+    expect(resolveChromeHeight(layout, false)).toBe(103);
+    expect(resolveChromeHeight(layout, true)).toBe(103 + TAB_SEARCH_CHROME_EXTRA);
   });
 });
