@@ -113,8 +113,17 @@ async function main() {
     throw new Error('Stable DMG updates only run on macOS.');
   }
 
+  const major = Number(process.versions.node.split('.')[0]);
+  if (major !== 22) {
+    throw new Error(
+      `Stable DMG updates require Node 22 (found ${process.versions.node}). `
+      + 'electron-forge make can exit early on newer Node and promote stale out/make DMGs. '
+      + 'Re-run with: PATH="/opt/homebrew/opt/node@22/bin:$PATH" npm run update:dmg:all',
+    );
+  }
+
   const { arches, skipBuild } = parseArgs(process.argv.slice(2));
-  console.log(`Updating stable local DMGs for: ${arches.join(', ')}`);
+  console.log(`Updating stable local DMGs for: ${arches.join(', ')} (node ${process.versions.node})`);
 
   if (!skipBuild) {
     for (const arch of arches) {
