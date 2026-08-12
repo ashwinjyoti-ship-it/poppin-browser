@@ -2,7 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { createInterface } from 'node:readline';
 
-import { mergePathDirs, shellPathDirs } from './shell-path';
+import { mergePathDirs, shellPathDirs, versionManagerBinDirs } from './shell-path';
 
 const REQUEST_TIMEOUT_MS = 30_000;
 const STDERR_LIMIT = 12_000;
@@ -212,5 +212,5 @@ async function enrichPath(existing: string | undefined): Promise<string> {
     `${process.env.HOME ?? ''}/.local/bin`,
     `${process.env.HOME ?? ''}/.cursor/bin`,
   ].filter(Boolean);
-  return mergePathDirs(extras, existing ? existing.split(':') : [], await shellPathDirs()).join(':');
+  return mergePathDirs(extras, existing ? existing.split(':') : [], await shellPathDirs(), await versionManagerBinDirs()).join(':');
 }

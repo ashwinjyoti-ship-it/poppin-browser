@@ -5,7 +5,7 @@ import path from 'node:path';
 
 import type { AgentHarnessId } from '../../shared/agent';
 import type { AcpLaunch } from './acp-connection';
-import { mergePathDirs, shellPathDirs } from './shell-path';
+import { mergePathDirs, shellPathDirs, versionManagerBinDirs } from './shell-path';
 
 /**
  * Resolves the ACP agent process for a harness.
@@ -119,7 +119,11 @@ async function isExecutable(filePath: string): Promise<boolean> {
  * `PATH` (cached) so discovery matches what the user's terminal can find.
  */
 async function findOnPath(name: string): Promise<string | null> {
-  const dirs = mergePathDirs((process.env.PATH ?? '').split(path.delimiter), await shellPathDirs());
+  const dirs = mergePathDirs(
+    (process.env.PATH ?? '').split(path.delimiter),
+    await shellPathDirs(),
+    await versionManagerBinDirs(),
+  );
   if (dirs.length === 0) return null;
   const names = process.platform === 'win32' ? [`${name}.cmd`, `${name}.exe`, `${name}.bat`, name] : [name];
   for (const dir of dirs) {
