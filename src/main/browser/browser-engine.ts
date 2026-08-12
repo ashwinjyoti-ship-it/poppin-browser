@@ -989,6 +989,7 @@ export class BrowserEngine {
       if (tab.snapshot.surface === 'tandem-world') this.applyTandemHostTheme(tab);
       if (tab.snapshot.taskSpaceId && this.mediaBlockedTaskSpaces.has(tab.snapshot.taskSpaceId)) this.pauseTaskOwnedMedia(tab);
       void contents.executeJavaScript(CURSOR_AUTOHIDE_SCRIPT, true).catch(() => undefined);
+      void contents.executeJavaScript(AUTOPLAY_GUARD_SCRIPT, true).catch(() => undefined);
     });
     contents.on('media-started-playing', () => {
       if (tab.snapshot.taskSpaceId && this.mediaBlockedTaskSpaces.has(tab.snapshot.taskSpaceId)) this.pauseTaskOwnedMedia(tab);
@@ -2106,6 +2107,31 @@ const CURSOR_AUTOHIDE_SCRIPT = `(() => {
   document.addEventListener('play', (event) => { if (event.target instanceof HTMLVideoElement) scheduleHide(); }, true);
   document.addEventListener('pause', showCursor, true);
   document.addEventListener('ended', showCursor, true);
+})()`;
+
+/**
+ * Pages should not start playing video on their own. This pauses any video
+ * already playing (or that starts playing, e.g. via the `autoplay`
+ * attribute or a page's own load-time script) for a short window right
+ * after the page loads, then stops interfering so a later, user-initiated
+ * play works normally.
+ */
+const AUTOPLAY_GUARD_SCRIPT = `(() => {
+  if (window.__poppinAutoplayGuard) return;
+  window.__poppinAutoplayGuard = true;
+  const GUARD_MS = 1500;
+  const guardUntil = Date.now() + GUARD_MS;
+  const pauseIfWithinGuard = (video) => {
+    if (Date.now() > guardUntil || video.paused) return;
+    video.pause();
+  };
+  document.querySelectorAll('video').forEach(pauseIfWithinGuard);
+  document.addEventListener('play', (event) => {
+    if (event.target instanceof HTMLVideoElement) pauseIfWithinGuard(event.target);
+  }, true);
+  const observer = new MutationObserver(() => document.querySelectorAll('video').forEach(pauseIfWithinGuard));
+  observer.observe(document.documentElement, { childList: true, subtree: true });
+  setTimeout(() => observer.disconnect(), GUARD_MS);
 })()`;
 
 const READ_VISIBLE_PAGE_SCRIPT = `(() => {

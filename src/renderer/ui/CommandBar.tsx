@@ -140,7 +140,7 @@ export function CommandBar({ snapshot, workspace, collapsed, onCollapseChange, o
         >
           {agents.map((agent) => (
             <option key={agent.id} value={agent.id} title={agent.summary}>
-              {agent.availability === 'preview' ? `${agent.name} · preview` : agent.name}
+              {agent.name}
             </option>
           ))}
         </select>

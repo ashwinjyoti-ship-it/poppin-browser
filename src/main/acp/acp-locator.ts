@@ -5,6 +5,7 @@ import path from 'node:path';
 
 import type { AgentHarnessId } from '../../shared/agent';
 import type { AcpLaunch } from './acp-connection';
+import { mergePathDirs, shellPathDirs } from './shell-path';
 
 /**
  * Resolves the ACP agent process for a harness.
@@ -112,13 +113,14 @@ async function isExecutable(filePath: string): Promise<boolean> {
  * The hardcoded candidate lists above only cover a handful of common install
  * locations (Homebrew, `~/.local/bin`, `~/.bun/bin`). Agents installed
  * through nvm, a custom npm prefix, Linux package managers, or anywhere else
- * on `PATH` were reported "not installed" even when they were — this widens
- * discovery to match what the user's shell can already find.
+ * on `PATH` were reported "not installed" even when they were. Poppin is
+ * usually launched from Finder/Dock rather than a terminal, so its own
+ * `process.env.PATH` is minimal too — this also asks a login shell for its
+ * `PATH` (cached) so discovery matches what the user's terminal can find.
  */
 async function findOnPath(name: string): Promise<string | null> {
-  const pathValue = process.env.PATH;
-  if (!pathValue) return null;
-  const dirs = pathValue.split(path.delimiter).filter(Boolean);
+  const dirs = mergePathDirs((process.env.PATH ?? '').split(path.delimiter), await shellPathDirs());
+  if (dirs.length === 0) return null;
   const names = process.platform === 'win32' ? [`${name}.cmd`, `${name}.exe`, `${name}.bat`, name] : [name];
   for (const dir of dirs) {
     for (const candidateName of names) {

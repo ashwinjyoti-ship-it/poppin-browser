@@ -2,6 +2,8 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { createInterface } from 'node:readline';
 
+import { mergePathDirs, shellPathDirs } from './shell-path';
+
 const REQUEST_TIMEOUT_MS = 30_000;
 const STDERR_LIMIT = 12_000;
 
@@ -62,7 +64,7 @@ export class AcpConnection extends EventEmitter<AcpConnectionEvents> {
     return this.stderr.trim();
   }
 
-  start(): void {
+  async start(): Promise<void> {
     if (this.child) return;
     this.closing = false;
     const child = spawn(this.launch.executable, this.launch.args, {
@@ -71,7 +73,7 @@ export class AcpConnection extends EventEmitter<AcpConnectionEvents> {
       ...(this.launch.cwd ? { cwd: this.launch.cwd } : {}),
       env: {
         ...process.env,
-        PATH: enrichPath(process.env.PATH),
+        PATH: await enrichPath(process.env.PATH),
         ...this.launch.env,
       },
     });
@@ -198,14 +200,17 @@ function errorMessage(value: unknown): string {
   return 'The ACP agent returned an unknown protocol error.';
 }
 
-/** Ensure Homebrew / user-local bins are visible to ACP children spawned from a GUI app. */
-function enrichPath(existing: string | undefined): string {
+/**
+ * Ensure Homebrew / user-local bins and the user's real login-shell `PATH`
+ * (nvm, cargo, custom prefixes, ...) are visible to ACP children spawned
+ * from a GUI app, which otherwise inherit Poppin's own minimal `PATH`.
+ */
+async function enrichPath(existing: string | undefined): Promise<string> {
   const extras = [
     '/opt/homebrew/bin',
     '/usr/local/bin',
     `${process.env.HOME ?? ''}/.local/bin`,
     `${process.env.HOME ?? ''}/.cursor/bin`,
   ].filter(Boolean);
-  const parts = [...extras, ...(existing ? existing.split(':') : [])];
-  return [...new Set(parts.filter(Boolean))].join(':');
+  return mergePathDirs(extras, existing ? existing.split(':') : [], await shellPathDirs()).join(':');
 }
