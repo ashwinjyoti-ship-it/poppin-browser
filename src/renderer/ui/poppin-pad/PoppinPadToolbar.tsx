@@ -1,6 +1,7 @@
 import {
   ArrowUpRight,
   Eraser,
+  FileDown,
   MousePointer2,
   PenLine,
   Square,
@@ -17,27 +18,30 @@ interface PoppinPadToolbarProps {
   active: boolean;
 }
 
-const TOOLS: Array<{ id: PadTool; label: string; icon: typeof MousePointer2 }> = [
-  { id: 'select', label: 'Select / move', icon: MousePointer2 },
-  { id: 'pen', label: 'Freehand pen', icon: PenLine },
-  { id: 'arrow', label: 'Directional arrow', icon: ArrowUpRight },
-  { id: 'rect', label: 'Rectangle', icon: Square },
-  { id: 'text', label: 'Text callout', icon: Type },
-  { id: 'sticky', label: 'Sticky note', icon: StickyNote },
+const TOOLS: Array<{ id: PadTool; label: string; shortLabel: string; icon: typeof MousePointer2 }> = [
+  { id: 'select', label: 'Select / move', shortLabel: 'Select', icon: MousePointer2 },
+  { id: 'pen', label: 'Freehand pen', shortLabel: 'Pen', icon: PenLine },
+  { id: 'arrow', label: 'Directional arrow', shortLabel: 'Arrow', icon: ArrowUpRight },
+  { id: 'rect', label: 'Rectangle', shortLabel: 'Rect', icon: Square },
+  { id: 'text', label: 'Text callout — click canvas, then type', shortLabel: 'Text', icon: Type },
+  { id: 'sticky', label: 'Sticky note — click canvas, then type', shortLabel: 'Sticky', icon: StickyNote },
 ];
 
 export function PoppinPadToolbar({ tool, onCommand, onMessage, active }: PoppinPadToolbarProps) {
   return (
     <div className="poppin-pad-toolbar" role="toolbar" aria-label="Poppin Pad tools">
-      {TOOLS.map(({ id, label, icon: Icon }) => (
+      {TOOLS.map(({ id, label, shortLabel, icon: Icon }) => (
         <button
           key={id}
           type="button"
           className={`poppin-pad-tool ${tool === id ? 'poppin-pad-tool-active' : ''}`}
           aria-label={label}
           title={label}
+          data-tooltip={shortLabel}
           aria-pressed={tool === id}
-          onClick={() => { void onCommand({ type: 'setTool', tool: id }); }}
+          onClick={() => {
+            void onCommand({ type: 'setTool', tool: id });
+          }}
         >
           <Icon size={15} />
         </button>
@@ -47,9 +51,11 @@ export function PoppinPadToolbar({ tool, onCommand, onMessage, active }: PoppinP
         className="poppin-pad-tool"
         aria-label="Clear canvas"
         title="Clear canvas"
+        data-tooltip="Clear"
         onClick={() => {
-          if (!window.confirm('Clear drawings and cards from Poppin Pad?')) return;
-          void onCommand({ type: 'clearCanvas', scope: 'all' });
+          void onCommand({ type: 'clearCanvas', scope: 'all' }).then((result) => {
+            if (result.message) onMessage(result.message);
+          });
         }}
       >
         <Eraser size={15} />
@@ -63,17 +69,33 @@ export function PoppinPadToolbar({ tool, onCommand, onMessage, active }: PoppinP
       >
         Focus
       </button>
-      <button
-        type="button"
-        className="poppin-pad-export"
-        onClick={() => {
-          void onCommand({ type: 'exportToTandem' }).then((result) => {
-            onMessage(result.message ?? (result.ok ? 'Exported to Tandem.' : 'Export failed.'));
-          });
-        }}
-      >
-        Create Tandem page
-      </button>
+      <div className="poppin-pad-export-group">
+        <button
+          type="button"
+          className="poppin-pad-export"
+          title="Save the pad as a PDF"
+          onClick={() => {
+            void onCommand({ type: 'exportToPdf' }).then((result) => {
+              onMessage(result.message ?? (result.ok ? 'Saved PDF.' : 'PDF export failed.'));
+            });
+          }}
+        >
+          <FileDown size={13} />
+          Export PDF
+        </button>
+        <button
+          type="button"
+          className="poppin-pad-export"
+          title="Create a readable Tandem page from this pad"
+          onClick={() => {
+            void onCommand({ type: 'exportToTandem' }).then((result) => {
+              onMessage(result.message ?? (result.ok ? 'Exported to Tandem.' : 'Export failed.'));
+            });
+          }}
+        >
+          Create Tandem page
+        </button>
+      </div>
     </div>
   );
 }

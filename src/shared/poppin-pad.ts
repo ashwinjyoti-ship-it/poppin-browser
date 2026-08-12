@@ -132,6 +132,8 @@ export type PoppinPadCommand =
   | { type: 'ingestDrop'; payload: PadDropPayload; x: number; y: number }
   | { type: 'ingestBrowser'; payload: PadBrowserIngestPayload }
   | { type: 'exportToTandem'; title?: string }
+  | { type: 'exportToPdf'; title?: string }
+  | { type: 'focusShell' }
   | { type: 'queueAttachment'; objectId: string }
   | { type: 'removeAttachment'; objectId: string }
   | { type: 'clearAttachments' };

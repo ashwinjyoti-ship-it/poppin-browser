@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import type {
   PadObjectSnapshot,
@@ -30,15 +30,62 @@ function createId(): string {
 
 export function PoppinPadCanvas({ objects, tool, onCommand }: PoppinPadCanvasProps) {
   const surfaceRef = useRef<HTMLDivElement>(null);
+  const editInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const editingIdRef = useRef<string | null>(null);
+  const draftsRef = useRef<Record<string, string>>({});
+  const suppressBlurRef = useRef(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [draft, setDraft] = useState<DraftState | null>(null);
   const [localObjects, setLocalObjects] = useState<Record<string, PadObjectSnapshot>>({});
 
+  useEffect(() => {
+    editingIdRef.current = editingId;
+  }, [editingId]);
+
+  useEffect(() => {
+    draftsRef.current = drafts;
+  }, [drafts]);
+
+  const storeEmpty = objects.length === 0;
+  const activeEditingId = storeEmpty ? null : editingId;
+
   const mergedObjects = useMemo(() => {
+    // After Clear (or any full wipe), ignore optimistic locals so the canvas matches the store.
+    if (storeEmpty) return [];
     const map = new Map(objects.map((object) => [object.id, object]));
     Object.values(localObjects).forEach((object) => map.set(object.id, object));
     return [...map.values()].sort((a, b) => a.zIndex - b.zIndex);
-  }, [localObjects, objects]);
+  }, [localObjects, objects, storeEmpty]);
+
+  // Electron's native BrowserView often steals focus right after a pad click.
+  // Pull focus back to the shell, then hold it on the editor briefly.
+  useEffect(() => {
+    if (!activeEditingId) return;
+    let cancelled = false;
+    const editingTarget = activeEditingId;
+    const input = editInputRef.current;
+    void onCommand({ type: 'focusShell' }).then(() => {
+      if (cancelled) return;
+      input?.focus();
+      input?.select();
+    });
+    const keep = window.setInterval(() => {
+      if (cancelled || editingIdRef.current !== editingTarget) return;
+      if (document.activeElement !== editInputRef.current) {
+        void onCommand({ type: 'focusShell' }).then(() => {
+          editInputRef.current?.focus();
+        });
+      }
+    }, 40);
+    const stop = window.setTimeout(() => window.clearInterval(keep), 800);
+    return () => {
+      cancelled = true;
+      window.clearInterval(keep);
+      window.clearTimeout(stop);
+    };
+  }, [activeEditingId, onCommand]);
 
   const upsertLocal = (object: PadObjectSnapshot) => {
     setLocalObjects((current) => ({ ...current, [object.id]: object }));
@@ -150,8 +197,6 @@ export function PoppinPadCanvas({ objects, tool, onCommand }: PoppinPadCanvasPro
     const id = createId();
     const zIndex = mergedObjects.length + 1;
     if (tool === 'text') {
-      const text = window.prompt('Text callout')?.trim();
-      if (!text) return;
       upsertLocal({
         id,
         kind: 'text',
@@ -161,14 +206,17 @@ export function PoppinPadCanvas({ objects, tool, onCommand }: PoppinPadCanvasPro
         height: 48,
         rotation: 0,
         zIndex,
-        payload: { text, fontSize: 14, color: '#40372f' },
+        payload: { text: '', fontSize: 14, color: '#40372f' },
         createdAt: now,
         updatedAt: now,
       });
+      setDrafts((current) => ({ ...current, [id]: '' }));
+      suppressBlurRef.current = true;
+      window.setTimeout(() => { suppressBlurRef.current = false; }, 500);
+      setEditingId(id);
       return;
     }
     if (tool === 'sticky') {
-      const text = window.prompt('Sticky note')?.trim() ?? 'Note';
       upsertLocal({
         id,
         kind: 'sticky',
@@ -178,11 +226,82 @@ export function PoppinPadCanvas({ objects, tool, onCommand }: PoppinPadCanvasPro
         height: 120,
         rotation: 0,
         zIndex,
-        payload: { text, color: '#fff4bf' },
+        payload: { text: '', color: '#fff4bf' },
         createdAt: now,
         updatedAt: now,
       });
+      setDrafts((current) => ({ ...current, [id]: '' }));
+      suppressBlurRef.current = true;
+      window.setTimeout(() => { suppressBlurRef.current = false; }, 500);
+      setEditingId(id);
     }
+  };
+
+  const clearDraft = (objectId: string) => {
+    setDrafts((currentDrafts) => {
+      const next = { ...currentDrafts };
+      delete next[objectId];
+      return next;
+    });
+  };
+
+  const commitEdit = (objectId: string, nextText: string) => {
+    const current = mergedObjects.find((entry) => entry.id === objectId);
+    if (!current || (current.kind !== 'text' && current.kind !== 'sticky')) return;
+    const text = nextText.trim();
+    // Empty text/sticky after blur, Escape, or tool switch should vanish — not become a "Text"/"Note" label.
+    if (!text) {
+      setLocalObjects((locals) => {
+        const next = { ...locals };
+        delete next[objectId];
+        return next;
+      });
+      void onCommand({ type: 'deleteObject', objectId });
+      clearDraft(objectId);
+      setEditingId(null);
+      return;
+    }
+    upsertLocal({
+      ...current,
+      payload: { ...current.payload, text },
+      updatedAt: new Date().toISOString(),
+    });
+    clearDraft(objectId);
+    setEditingId(null);
+  };
+
+  // Leaving text/sticky tool while editing must finalize (empty → delete, not "Text" label).
+  useEffect(() => {
+    if (tool === 'text' || tool === 'sticky') return;
+    const id = editingIdRef.current;
+    if (!id) return;
+    commitEdit(id, draftsRef.current[id] ?? '');
+    // Tool-only deps: Select + double-click edit must not auto-commit.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tool]);
+
+  const beginEdit = (objectId: string, initial: string) => {
+    setDrafts((current) => ({ ...current, [objectId]: initial }));
+    suppressBlurRef.current = true;
+    window.setTimeout(() => { suppressBlurRef.current = false; }, 500);
+    setEditingId(objectId);
+  };
+
+  const handleEditorBlur = (objectId: string) => {
+    // Ignore the immediate BrowserView focus steal after placing/opening the editor.
+    if (suppressBlurRef.current) {
+      window.requestAnimationFrame(() => editInputRef.current?.focus());
+      return;
+    }
+    window.setTimeout(() => {
+      if (editingIdRef.current !== objectId) return;
+      if (document.activeElement === editInputRef.current) return;
+      commitEdit(objectId, draftsRef.current[objectId] ?? '');
+    }, 0);
+  };
+
+  const stopEditPointer = (event: React.SyntheticEvent) => {
+    event.stopPropagation();
   };
 
   return (
@@ -192,7 +311,13 @@ export function PoppinPadCanvas({ objects, tool, onCommand }: PoppinPadCanvasPro
       onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; }}
       onDrop={(event) => { void handleDrop(event); }}
       onPointerDown={(event) => {
+        if ((event.target as HTMLElement).closest('textarea')) return;
+        // Commit the open editor when clicking elsewhere on the canvas.
+        if (activeEditingId && !(event.target as HTMLElement).closest(`[data-pad-object="${activeEditingId}"]`)) {
+          commitEdit(activeEditingId, drafts[activeEditingId] ?? '');
+        }
         if (tool === 'select') return;
+        if ((event.target as HTMLElement).closest('.poppin-pad-text, .poppin-pad-sticky')) return;
         const point = pointFromEvent(event);
         if (tool === 'text' || tool === 'sticky') {
           placeObject(point);
@@ -263,30 +388,90 @@ export function PoppinPadCanvas({ objects, tool, onCommand }: PoppinPadCanvasPro
 
       {mergedObjects.filter((object) => object.kind === 'text').map((object) => {
         const payload = object.payload as { text: string; fontSize: number; color: string };
+        const editing = activeEditingId === object.id;
         return (
           <div
             key={object.id}
+            data-pad-object={object.id}
             className="poppin-pad-text"
             style={{ left: object.x, top: object.y, fontSize: payload.fontSize, color: payload.color, zIndex: object.zIndex }}
-            draggable
+            draggable={!editing}
             onDragStart={(event) => event.dataTransfer.setData('application/x-poppin-pad-attachment', object.id)}
+            onDoubleClick={(event) => {
+              event.stopPropagation();
+              beginEdit(object.id, payload.text);
+            }}
           >
-            {payload.text}
+            {editing ? (
+              <textarea
+                ref={editInputRef}
+                className="poppin-pad-inline-input"
+                value={drafts[object.id] ?? payload.text}
+                placeholder="Type here…"
+                aria-label="Text callout"
+                onChange={(event) => setDrafts((current) => ({ ...current, [object.id]: event.target.value }))}
+                onPointerDown={stopEditPointer}
+                onMouseDown={(event) => { event.stopPropagation(); }}
+                onClick={stopEditPointer}
+                onBlur={() => handleEditorBlur(object.id)}
+                onKeyDown={(event) => {
+                  event.stopPropagation();
+                  if (event.key === 'Enter' && !event.shiftKey) {
+                    event.preventDefault();
+                    commitEdit(object.id, drafts[object.id] ?? '');
+                  }
+                  if (event.key === 'Escape') {
+                    event.preventDefault();
+                    commitEdit(object.id, drafts[object.id] ?? '');
+                  }
+                }}
+              />
+            ) : (
+              payload.text
+            )}
           </div>
         );
       })}
 
       {mergedObjects.filter((object) => object.kind === 'sticky').map((object) => {
         const payload = object.payload as { text: string; color: string };
+        const editing = activeEditingId === object.id;
         return (
           <div
             key={object.id}
+            data-pad-object={object.id}
             className="poppin-pad-sticky"
             style={{ left: object.x, top: object.y, width: object.width, height: object.height, background: payload.color, zIndex: object.zIndex }}
-            draggable
+            draggable={!editing}
             onDragStart={(event) => event.dataTransfer.setData('application/x-poppin-pad-attachment', object.id)}
+            onDoubleClick={(event) => {
+              event.stopPropagation();
+              beginEdit(object.id, payload.text);
+            }}
           >
-            {payload.text}
+            {editing ? (
+              <textarea
+                ref={editInputRef}
+                className="poppin-pad-inline-input poppin-pad-inline-input-sticky"
+                value={drafts[object.id] ?? payload.text}
+                placeholder="Sticky note…"
+                aria-label="Sticky note"
+                onChange={(event) => setDrafts((current) => ({ ...current, [object.id]: event.target.value }))}
+                onPointerDown={stopEditPointer}
+                onMouseDown={(event) => { event.stopPropagation(); }}
+                onClick={stopEditPointer}
+                onBlur={() => handleEditorBlur(object.id)}
+                onKeyDown={(event) => {
+                  event.stopPropagation();
+                  if ((event.key === 'Enter' && (event.metaKey || event.ctrlKey)) || event.key === 'Escape') {
+                    event.preventDefault();
+                    commitEdit(object.id, drafts[object.id] ?? '');
+                  }
+                }}
+              />
+            ) : (
+              payload.text || 'Note'
+            )}
           </div>
         );
       })}

@@ -81,9 +81,8 @@ export function getRightPaneWidthRange(
 
 export function getFocusedRightPaneWidth(viewportWidth: number, leftPaneWidth: number, workspaceCollapsed: boolean): number {
   const left = workspaceCollapsed ? COLLAPSED_RAIL_WIDTH + 18 : leftPaneWidth + 14;
-  const available = Math.max(MIN_RIGHT_PANE_WIDTH, Math.round(viewportWidth) - left - MIN_BROWSER_WIDTH - 24);
-  // Focus mode may open wider than a prior preference, but still respects the screen-aware ceiling.
-  return Math.min(getMaxRightPaneWidth(viewportWidth), available);
+  // Focus may grow past the drag-resize ceiling so the pad can use leftover window space.
+  return Math.max(MIN_RIGHT_PANE_WIDTH, Math.round(viewportWidth) - left - MIN_BROWSER_WIDTH - 24);
 }
 
 /** Native BrowserView right inset so the view stops before the pad + resize gutter. */

@@ -79,10 +79,11 @@ describe('resizable Poppin Pad layout', () => {
     expect(normalizeRightPaneWidth(800, 1920, DEFAULT_LEFT_PANE_WIDTH, true)).toBe(720);
   });
 
-  it('expands focus mode up to the screen-aware pad surface', () => {
-    expect(getFocusedRightPaneWidth(1920, DEFAULT_LEFT_PANE_WIDTH, true)).toBe(720);
-    expect(getFocusedRightPaneWidth(2560, DEFAULT_LEFT_PANE_WIDTH, true)).toBe(1040);
-    expect(getFocusedRightPaneWidth(1280, DEFAULT_LEFT_PANE_WIDTH, true)).toBeLessThanOrEqual(MAX_RIGHT_PANE_WIDTH);
+  it('expands focus mode past the drag-resize ceiling into leftover window space', () => {
+    expect(getFocusedRightPaneWidth(1920, DEFAULT_LEFT_PANE_WIDTH, true)).toBe(1524);
+    expect(getFocusedRightPaneWidth(2560, DEFAULT_LEFT_PANE_WIDTH, true)).toBe(2164);
+    expect(getFocusedRightPaneWidth(1280, DEFAULT_LEFT_PANE_WIDTH, true)).toBe(884);
+    expect(getFocusedRightPaneWidth(1280, DEFAULT_LEFT_PANE_WIDTH, true)).toBeGreaterThan(MAX_RIGHT_PANE_WIDTH);
   });
 
   it('loads a wide stored pad width and lets live normalize clamp to the screen', () => {
