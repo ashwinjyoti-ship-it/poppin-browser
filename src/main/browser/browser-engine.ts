@@ -45,7 +45,7 @@ import { DownloadManager } from './downloads';
 const PAGE_MARGIN = 12;
 const DEFAULT_CHROME_HEIGHT = 103;
 const SAVE_DELAY_MS = 250;
-const MAX_LAYOUT_INSET = 520;
+const MAX_LAYOUT_INSET = 4096;
 const MAX_TAB_CONTEXT_CHARACTERS = 60_000;
 const SPLIT_GAP = 8;
 const MIN_SPLIT_RATIO = 0.28;

@@ -670,7 +670,7 @@ textarea:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
 .task-stage {
   position: absolute;
   z-index: 1;
-  inset: var(--chrome-height) calc(var(--poppin-pad-width) + 24px) calc(104px + var(--command-overlay-height, 0px) + var(--agent-dock-height, 0px)) calc(var(--workspace-pane-width) + 24px);
+  inset: var(--chrome-height) calc(var(--poppin-pad-width) + 30px) calc(104px + var(--command-overlay-height, 0px) + var(--agent-dock-height, 0px)) calc(var(--workspace-pane-width) + 24px);
   border: 1px solid rgba(226, 216, 204, .9);
   border-radius: 20px;
   background: var(--surface);
@@ -783,10 +783,10 @@ textarea:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
 
 .pane-resizer {
   position: absolute;
-  z-index: 5;
+  z-index: 8;
   top: calc(var(--chrome-height) + 12px);
   bottom: 116px;
-  width: 12px;
+  width: 14px;
   padding: 0;
   border: 0;
   outline: 0;
@@ -795,19 +795,23 @@ textarea:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
   -webkit-app-region: no-drag;
   touch-action: none;
 }
-.pane-resizer-left { left: calc(12px + var(--workspace-pane-width) - 6px); }
-.pane-resizer-right { right: calc(12px + var(--poppin-pad-width) - 6px); }
+.pane-resizer-left { left: calc(12px + var(--workspace-pane-width) - 7px); }
+.pane-resizer-right { right: calc(12px + var(--poppin-pad-width) + 2px); }
 .command-is-collapsed .pane-resizer { bottom: 24px; }
 .pane-resizer::before {
   content: '';
   position: absolute;
   top: 18px;
   bottom: 18px;
-  left: 5px;
+  left: 6px;
   width: 2px;
   border-radius: 999px;
   background: transparent;
   transition: background-color 120ms ease, box-shadow 120ms ease;
+}
+.pane-resizer-right::before {
+  background: color-mix(in srgb, var(--amber-strong) 42%, transparent);
+  box-shadow: 0 0 0 3px rgba(232, 130, 11, .08);
 }
 .pane-resizer:hover::before,
 .pane-resizer:focus-visible::before,
@@ -817,6 +821,13 @@ textarea:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
 }
 body.pane-is-resizing,
 body.pane-is-resizing * { cursor: col-resize !important; user-select: none !important; }
+body.pane-is-resizing .browser-stage,
+body.pane-is-resizing .native-stage,
+body.pane-is-resizing .task-stage,
+body.pane-is-resizing .workspace-pane,
+body.pane-is-resizing .poppin-pad-pane {
+  transition: none !important;
+}
 
 .pane-heading {
   display: flex;
