@@ -1,10 +1,17 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import {
+  browserLeftInset,
+  browserRightInset,
   clampResizedLeftPaneWidth,
+  clampResizedRightPaneWidth,
   DEFAULT_LEFT_PANE_WIDTH,
+  DEFAULT_RIGHT_PANE_WIDTH,
   loadLeftPaneWidth,
+  MAX_RIGHT_PANE_WIDTH,
   normalizeLeftPaneWidth,
+  normalizeRightPaneWidth,
+  PANE_BROWSER_GUTTER,
   saveLeftPaneWidth,
 } from '../src/renderer/ui/pane-layout';
 
@@ -36,5 +43,23 @@ describe('resizable left pane layout', () => {
     saveLeftPaneWidth({ setItem }, 330);
     expect(setItem).toHaveBeenCalledWith('poppin:pane-width:v2', '330');
     expect(() => saveLeftPaneWidth({ setItem: () => { throw new Error('blocked'); } }, DEFAULT_LEFT_PANE_WIDTH)).not.toThrow();
+  });
+});
+
+describe('resizable Poppin Pad layout', () => {
+  it('preserves the default pad width when the browser has enough room', () => {
+    expect(normalizeRightPaneWidth(DEFAULT_RIGHT_PANE_WIDTH, 1440, DEFAULT_LEFT_PANE_WIDTH)).toBe(DEFAULT_RIGHT_PANE_WIDTH);
+  });
+
+  it('reserves a browser gutter so the resize handle stays outside the native view', () => {
+    expect(browserRightInset(DEFAULT_RIGHT_PANE_WIDTH)).toBe(DEFAULT_RIGHT_PANE_WIDTH + PANE_BROWSER_GUTTER);
+    expect(browserRightInset(MAX_RIGHT_PANE_WIDTH)).toBe(MAX_RIGHT_PANE_WIDTH + PANE_BROWSER_GUTTER);
+    expect(browserLeftInset(DEFAULT_LEFT_PANE_WIDTH, false)).toBe(DEFAULT_LEFT_PANE_WIDTH + PANE_BROWSER_GUTTER);
+    expect(browserLeftInset(DEFAULT_LEFT_PANE_WIDTH, true)).toBe(46);
+  });
+
+  it('lets the pad grow to its max without being clipped by the prior 520px inset ceiling', () => {
+    expect(browserRightInset(MAX_RIGHT_PANE_WIDTH)).toBeGreaterThan(520);
+    expect(clampResizedRightPaneWidth(900, 1600, DEFAULT_LEFT_PANE_WIDTH, true)).toBe(MAX_RIGHT_PANE_WIDTH);
   });
 });

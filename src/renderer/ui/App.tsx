@@ -27,6 +27,8 @@ import { issueForCommand, visibleAddressIssue, type AddressIssue } from './addre
 import { browserApprovalAttentionKey, taskAttentionKey } from './task-attention';
 import { getAgentDockPresentation, getTaskTabStatus } from './task-surface';
 import {
+  browserLeftInset,
+  browserRightInset,
   clampResizedLeftPaneWidth,
   clampResizedRightPaneWidth,
   COLLAPSED_RAIL_WIDTH,
@@ -121,9 +123,12 @@ export function App() {
   const leftPaneWidth = normalizeLeftPaneWidth(preferredLeftPaneWidth, viewport.width);
   const padCollapsed = padSnapshot.pad.collapsed;
   const padActive = padSnapshot.pad.active;
-  const rightPaneWidth = padActive
-    ? getFocusedRightPaneWidth(viewport.width, leftPaneWidth, workspaceCollapsed)
-    : normalizeRightPaneWidth(preferredRightPaneWidth, viewport.width, leftPaneWidth);
+  const rightPaneWidth = normalizeRightPaneWidth(
+    preferredRightPaneWidth,
+    viewport.width,
+    leftPaneWidth,
+    workspaceCollapsed,
+  );
   const effectiveRightPaneWidth = padCollapsed ? COLLAPSED_RAIL_WIDTH : rightPaneWidth;
   const dockPresentation = getAgentDockPresentation({
     taskSnapshot,
@@ -277,8 +282,8 @@ export function App() {
       // The address suggestions dropdown spans near the full width under the
       // toolbar, so it needs the page pushed down to stay uncovered.
       topInset: chromeHeight + (urlOverlayOpen ? 280 : 0) + (tabSearchOpen ? TAB_SEARCH_RESULTS_INSET : 0),
-      leftInset: workspaceCollapsed ? 46 : leftPaneWidth + 14,
-      rightInset: Math.max(downloadsOpen ? 400 : 24, effectiveRightPaneWidth + 14),
+      leftInset: browserLeftInset(leftPaneWidth, workspaceCollapsed),
+      rightInset: browserRightInset(effectiveRightPaneWidth, downloadsOpen),
       // Keep a strip for the collapsed reopen control; native views paint above DOM otherwise.
       bottomInset: commandCollapsed ? 64 : 94 + commandOverlayHeight + agentDockHeight,
     });
@@ -289,13 +294,19 @@ export function App() {
   };
 
   const resizeRightPane = (requestedWidth: number) => {
-    const width = clampResizedRightPaneWidth(requestedWidth, viewport.width, leftPaneWidth);
+    const width = clampResizedRightPaneWidth(requestedWidth, viewport.width, leftPaneWidth, workspaceCollapsed);
     setPreferredRightPaneWidth(width);
     void window.poppinPad.command({ type: 'setWidth', width });
+    if (padActive) void window.poppinPad.command({ type: 'setActive', active: false });
   };
 
   const sendPadCommand = async (command: PoppinPadCommand): Promise<PoppinPadCommandResult> => {
     try {
+      if (command.type === 'setActive' && command.active) {
+        const focused = getFocusedRightPaneWidth(viewport.width, leftPaneWidth, workspaceCollapsed);
+        setPreferredRightPaneWidth(focused);
+        await window.poppinPad.command({ type: 'setWidth', width: focused });
+      }
       return await window.poppinPad.command(command);
     } catch {
       return { ok: false, message: 'Poppin Pad could not complete that action.' };
@@ -579,7 +590,7 @@ export function App() {
         <PaneResizer
           side="right"
           width={rightPaneWidth}
-          {...getRightPaneWidthRange(viewport.width, leftPaneWidth)}
+          {...getRightPaneWidthRange(viewport.width, leftPaneWidth, workspaceCollapsed)}
           onResize={resizeRightPane}
         />
       ) : null}

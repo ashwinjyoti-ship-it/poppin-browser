@@ -16,6 +16,8 @@ export const DEFAULT_RIGHT_PANE_WIDTH = 320;
 export const MIN_RIGHT_PANE_WIDTH = 240;
 export const MAX_RIGHT_PANE_WIDTH = 560;
 export const COLLAPSED_RAIL_WIDTH = 34;
+/** Gap between the native browser edge and the Poppin Pad (keeps the resizer clickable). */
+export const PANE_BROWSER_GUTTER = 18;
 
 const MIN_BROWSER_WIDTH = 320;
 const FIXED_HORIZONTAL_SPACE = 52;
@@ -27,8 +29,13 @@ export function normalizeLeftPaneWidth(width: number, viewportWidth: number): nu
   return clamp(width, minimum, maximum);
 }
 
-export function normalizeRightPaneWidth(width: number, viewportWidth: number, leftPaneWidth = DEFAULT_LEFT_PANE_WIDTH): number {
-  const { minimum, maximum } = getRightPaneWidthRange(viewportWidth, leftPaneWidth);
+export function normalizeRightPaneWidth(
+  width: number,
+  viewportWidth: number,
+  leftPaneWidth = DEFAULT_LEFT_PANE_WIDTH,
+  workspaceCollapsed = false,
+): number {
+  const { minimum, maximum } = getRightPaneWidthRange(viewportWidth, leftPaneWidth, workspaceCollapsed);
   return clamp(width, minimum, maximum);
 }
 
@@ -40,8 +47,13 @@ export function getLeftPaneWidthRange(viewportWidth: number): { minimum: number;
   };
 }
 
-export function getRightPaneWidthRange(viewportWidth: number, leftPaneWidth = DEFAULT_LEFT_PANE_WIDTH): { minimum: number; maximum: number } {
-  const available = Math.round(viewportWidth) - FIXED_HORIZONTAL_SPACE - MIN_BROWSER_WIDTH - leftPaneWidth;
+export function getRightPaneWidthRange(
+  viewportWidth: number,
+  leftPaneWidth = DEFAULT_LEFT_PANE_WIDTH,
+  workspaceCollapsed = false,
+): { minimum: number; maximum: number } {
+  const leftFootprint = workspaceCollapsed ? COLLAPSED_RAIL_WIDTH + 18 : leftPaneWidth;
+  const available = Math.round(viewportWidth) - FIXED_HORIZONTAL_SPACE - MIN_BROWSER_WIDTH - leftFootprint;
   return {
     minimum: MIN_RIGHT_PANE_WIDTH,
     maximum: Math.max(MIN_RIGHT_PANE_WIDTH, Math.min(MAX_RIGHT_PANE_WIDTH, available)),
@@ -53,13 +65,28 @@ export function getFocusedRightPaneWidth(viewportWidth: number, leftPaneWidth: n
   return Math.max(MIN_RIGHT_PANE_WIDTH, Math.round(viewportWidth) - left - MIN_BROWSER_WIDTH - 24);
 }
 
+/** Native BrowserView right inset so the view stops before the pad + resize gutter. */
+export function browserRightInset(padWidth: number, downloadsOpen = false): number {
+  return Math.max(downloadsOpen ? 400 : 24, padWidth + PANE_BROWSER_GUTTER);
+}
+
+/** Native BrowserView left inset so the view starts after the context pane + gutter. */
+export function browserLeftInset(leftPaneWidth: number, workspaceCollapsed: boolean): number {
+  return workspaceCollapsed ? COLLAPSED_RAIL_WIDTH + 12 : leftPaneWidth + PANE_BROWSER_GUTTER;
+}
+
 export function clampResizedLeftPaneWidth(requestedWidth: number, viewportWidth: number): number {
   const { minimum, maximum } = getLeftPaneWidthRange(viewportWidth);
   return clamp(requestedWidth, minimum, maximum);
 }
 
-export function clampResizedRightPaneWidth(requestedWidth: number, viewportWidth: number, leftPaneWidth = DEFAULT_LEFT_PANE_WIDTH): number {
-  const { minimum, maximum } = getRightPaneWidthRange(viewportWidth, leftPaneWidth);
+export function clampResizedRightPaneWidth(
+  requestedWidth: number,
+  viewportWidth: number,
+  leftPaneWidth = DEFAULT_LEFT_PANE_WIDTH,
+  workspaceCollapsed = false,
+): number {
+  const { minimum, maximum } = getRightPaneWidthRange(viewportWidth, leftPaneWidth, workspaceCollapsed);
   return clamp(requestedWidth, minimum, maximum);
 }
 
