@@ -54,6 +54,11 @@ import { PoppinPadEngine } from './poppin-pad/poppin-pad-engine';
 
 registerInternalScheme();
 
+// Require a real user gesture before sites can autoplay media. The page-level
+// autoplay guard still pauses late-attaching players (YouTube); this blocks the
+// common Chromium autoplay path up front.
+app.commandLine.appendSwitch('autoplay-policy', 'user-gesture-required');
+
 let mainWindow: BrowserWindow | null = null;
 let browserEngine: BrowserEngine | null = null;
 let downloadManager: DownloadManager | null = null;

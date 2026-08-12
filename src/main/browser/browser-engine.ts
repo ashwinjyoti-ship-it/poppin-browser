@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { appendFileSync } from 'node:fs';
 
 import {
   app,
@@ -718,7 +719,7 @@ export class BrowserEngine {
   async execute(command: BrowserCommand): Promise<BrowserCommandResult> {
     switch (command.type) {
       case 'create':
-        this.createTab(command.input);
+        this.createTab(command.input, randomUUID(), true, undefined, true, 'end');
         return { ok: true };
       case 'activate':
         return this.activateTab(command.tabId);
@@ -791,6 +792,40 @@ export class BrowserEngine {
           right: clampInset(command.rightInset),
           bottom: clampInset(command.bottomInset),
         };
+        // #region agent log
+        void this.window.webContents.executeJavaScript(`(() => {
+          const chrome = document.querySelector('.browser-chrome');
+          const tabRow = document.querySelector('.tab-row');
+          const shell = document.querySelector('.app-shell');
+          const cr = chrome?.getBoundingClientRect();
+          const tr = tabRow?.getBoundingClientRect();
+          return {
+            chromeHeightCss: shell ? getComputedStyle(shell).getPropertyValue('--chrome-height').trim() : null,
+            chromeRect: cr ? { top: cr.top, bottom: cr.bottom, height: cr.height } : null,
+            tabRowBottom: tr?.bottom ?? null,
+            gapChromeVsTabs: cr && tr ? (cr.bottom - tr.bottom) : null,
+          };
+        })()`).then((measured) => {
+          try {
+            appendFileSync('/Users/ashwinjyoti/Documents/poppin_browser/.cursor/debug-f83ef7.log', `${JSON.stringify({
+              sessionId: 'f83ef7',
+              hypothesisId: 'A',
+              location: 'browser-engine.ts:setLayout',
+              message: 'native setLayout insets',
+              data: {
+                requested: command,
+                applied: this.viewInsets,
+                measured,
+                deltaTopMinusTabBottom: measured && typeof measured === 'object' && measured !== null && 'tabRowBottom' in measured
+                  ? this.viewInsets.top - Number((measured as { tabRowBottom?: number }).tabRowBottom ?? 0)
+                  : null,
+                newTabPosition: this.settings.newTabPosition,
+              },
+              timestamp: Date.now(),
+            })}\n`);
+          } catch { /* ignore debug log failures */ }
+        }).catch(() => undefined);
+        // #endregion
         this.layoutViews();
         return { ok: true };
     }
@@ -837,7 +872,7 @@ export class BrowserEngine {
     }
     if (key === 't') {
       if (input.shift) return this.reopenClosedTab().ok;
-      this.createTab();
+      this.createTab('', randomUUID(), true, undefined, true, 'end');
       return true;
     }
     if (key === 'w') {
@@ -1029,7 +1064,51 @@ export class BrowserEngine {
       void contents.executeJavaScript(AUTOPLAY_GUARD_SCRIPT, true).catch(() => undefined);
     });
     contents.on('media-started-playing', () => {
-      if (tab.snapshot.taskSpaceId && this.mediaBlockedTaskSpaces.has(tab.snapshot.taskSpaceId)) this.pauseTaskOwnedMedia(tab);
+      // #region agent log
+      try {
+        appendFileSync('/Users/ashwinjyoti/Documents/poppin_browser/.cursor/debug-f83ef7.log', `${JSON.stringify({
+          sessionId: 'f83ef7',
+          runId: 'post-fix',
+          hypothesisId: 'D',
+          location: 'browser-engine.ts:media-started-playing',
+          message: 'media started',
+          data: {
+            tabId: tab.snapshot.id,
+            url: tab.snapshot.url,
+            taskSpaceId: tab.snapshot.taskSpaceId,
+            mutedTask: Boolean(tab.snapshot.taskSpaceId && this.mediaBlockedTaskSpaces.has(tab.snapshot.taskSpaceId)),
+          },
+          timestamp: Date.now(),
+        })}\n`);
+      } catch { /* ignore debug log failures */ }
+      // #endregion
+      if (tab.snapshot.taskSpaceId && this.mediaBlockedTaskSpaces.has(tab.snapshot.taskSpaceId)) {
+        this.pauseTaskOwnedMedia(tab);
+        return;
+      }
+      // Regular browsing: keep pausing autoplay until the page sees a real user gesture.
+      void contents.executeJavaScript(`(() => {
+        if (window.__poppinUserMediaInteracted) return false;
+        let paused = 0;
+        document.querySelectorAll('video').forEach((video) => {
+          if (!video.paused) { video.pause(); paused += 1; }
+        });
+        return paused;
+      })()`, true).then((paused) => {
+        // #region agent log
+        try {
+          appendFileSync('/Users/ashwinjyoti/Documents/poppin_browser/.cursor/debug-f83ef7.log', `${JSON.stringify({
+            sessionId: 'f83ef7',
+            runId: 'post-fix',
+            hypothesisId: 'D',
+            location: 'browser-engine.ts:media-started-playing',
+            message: 'main-process autoplay pause',
+            data: { tabId: tab.snapshot.id, paused },
+            timestamp: Date.now(),
+          })}\n`);
+        } catch { /* ignore debug log failures */ }
+        // #endregion
+      }).catch(() => undefined);
     });
     contents.on('did-navigate', (_event, url) => this.handleNavigation(tab, url, true));
     contents.on('did-navigate-in-page', (_event, url) => this.handleNavigation(tab, url, false));
@@ -1735,13 +1814,35 @@ export class BrowserEngine {
   private insertTabId(id: string, position: 'preferred' | 'end'): void {
     const tab = this.tabs.get(id);
     if (!tab) return;
-    if (position === 'end' || this.settings.newTabPosition === 'end' || !this.activeTabId) {
+    const before = [...this.tabOrder];
+    const mode = position === 'end' || this.settings.newTabPosition === 'end' || !this.activeTabId ? 'end' : 'next-to-active';
+    if (mode === 'end') {
       this.tabOrder.push(id);
     } else {
       const activeIndex = this.tabOrder.indexOf(this.activeTabId);
       this.tabOrder.splice(activeIndex >= 0 ? activeIndex + 1 : this.tabOrder.length, 0, id);
     }
     this.tabOrder = this.normalizeTabOrder();
+    // #region agent log
+    try {
+      appendFileSync('/Users/ashwinjyoti/Documents/poppin_browser/.cursor/debug-f83ef7.log', `${JSON.stringify({
+        sessionId: 'f83ef7',
+        hypothesisId: 'C',
+        location: 'browser-engine.ts:insertTabId',
+        message: 'tab insertion',
+        data: {
+          id,
+          requestedPosition: position,
+          setting: this.settings.newTabPosition,
+          mode,
+          activeTabId: this.activeTabId,
+          before,
+          after: this.tabOrder,
+        },
+        timestamp: Date.now(),
+      })}\n`);
+    } catch { /* ignore debug log failures */ }
+    // #endregion
   }
 
   private normalizeTabOrder(order: string[] = this.tabOrder): string[] {
@@ -1842,6 +1943,18 @@ export class BrowserEngine {
     const [width = 1, height = 1] = this.window.getContentSize();
     const isHtmlFullscreen = this.htmlFullscreen.isActiveFor(this.activeTabId);
     const contentBounds = this.computeContentBounds(width, height, isHtmlFullscreen);
+    // #region agent log
+    try {
+      appendFileSync('/Users/ashwinjyoti/Documents/poppin_browser/.cursor/debug-f83ef7.log', `${JSON.stringify({
+        sessionId: 'f83ef7',
+        hypothesisId: 'A',
+        location: 'browser-engine.ts:layoutViews',
+        message: 'native content bounds',
+        data: { window: { width, height }, insets: this.viewInsets, contentBounds, gapBelowChrome: contentBounds.y },
+        timestamp: Date.now(),
+      })}\n`);
+    } catch { /* ignore debug log failures */ }
+    // #endregion
 
     if (this.split && !isHtmlFullscreen) {
       const { primaryTabId, secondaryTabId, ratio } = this.split;
@@ -2167,15 +2280,27 @@ const AUTOPLAY_GUARD_SCRIPT = `(() => {
   const pauseIfAuto = (video) => {
     if (userInteracted || video.paused) return;
     video.pause();
+    try {
+      fetch('http://127.0.0.1:7585/ingest/d4a7c3e7-ffba-4ada-a407-71795d29b25b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'f83ef7'},body:JSON.stringify({sessionId:'f83ef7',runId:'post-fix',hypothesisId:'D',location:'AUTOPLAY_GUARD_SCRIPT',message:'paused autoplay video',data:{src:(video.currentSrc||video.src||'').slice(0,120),readyState:video.readyState},timestamp:Date.now()})}).catch(()=>{});
+    } catch (_) {}
   };
   const scan = () => document.querySelectorAll('video').forEach(pauseIfAuto);
   const observer = new MutationObserver(scan);
   const markInteracted = () => {
     userInteracted = true;
+    window.__poppinUserMediaInteracted = true;
     observer.disconnect();
+    if (scanTimer) cancelAnimationFrame(scanTimer);
+  };
+  let scanTimer = 0;
+  const tick = () => {
+    if (userInteracted) return;
+    scan();
+    scanTimer = requestAnimationFrame(tick);
   };
   observer.observe(document.documentElement, { childList: true, subtree: true });
   scan();
+  tick();
   document.addEventListener('play', (event) => { if (event.target instanceof HTMLVideoElement) pauseIfAuto(event.target); }, true);
   document.addEventListener('playing', (event) => { if (event.target instanceof HTMLVideoElement) pauseIfAuto(event.target); }, true);
   document.addEventListener('pointerdown', markInteracted, true);

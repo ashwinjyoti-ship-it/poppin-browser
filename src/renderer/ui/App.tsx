@@ -1,5 +1,5 @@
 import { ExternalLink, Columns2, X } from 'lucide-react';
-import { type CSSProperties, type FormEvent, useEffect, useRef, useState } from 'react';
+import { type CSSProperties, type FormEvent, useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import { DEFAULT_BROWSER_SETTINGS, type BrowserCommand, type BrowserCommandResult, type BrowserSnapshot } from '../../shared/browser';
 import type { WorkspaceCommand, WorkspaceCommandResult, WorkspaceSnapshot } from '../../shared/workspace';
@@ -96,6 +96,7 @@ export function App() {
   const [preferredRightPaneWidth, setPreferredRightPaneWidth] = useState(() => loadRightPaneWidth(window.localStorage));
   const [padSnapshot, setPadSnapshot] = useState<PoppinPadSnapshot>(EMPTY_POPPIN_PAD_SNAPSHOT);
   const [viewport, setViewport] = useState(() => ({ width: window.innerWidth, height: window.innerHeight }));
+  const [measuredChromeBottom, setMeasuredChromeBottom] = useState(0);
   const addressInputRef = useRef<HTMLInputElement>(null);
 
   const activeNativeTab = pagesSnapshot.tabs.find((tab) => tab.id === pagesSnapshot.activeTabId) ?? null;
@@ -120,6 +121,9 @@ export function App() {
   const addressError = visibleAddressIssue(addressIssue, activeTab);
   const chromeLayout = getChromeLayout(viewport.width, viewport.height);
   const chromeHeight = resolveChromeHeight(chromeLayout, tabSearchOpen);
+  // Prefer the live chrome bottom so the native BrowserView never sits below an
+  // empty band when CSS chrome height and painted chrome diverge.
+  const topInsetBase = Math.max(chromeHeight, measuredChromeBottom || chromeHeight);
   const leftPaneWidth = normalizeLeftPaneWidth(preferredLeftPaneWidth, viewport.width);
   const padCollapsed = padSnapshot.pad.collapsed;
   const padActive = padSnapshot.pad.active;
@@ -159,6 +163,17 @@ export function App() {
     setSeenAttentionKey(attentionKey);
     if (attentionKey) setTaskTabActive(true);
   }
+
+  useLayoutEffect(() => {
+    const chrome = document.querySelector('.browser-chrome');
+    if (!(chrome instanceof HTMLElement)) return;
+    const sync = () => setMeasuredChromeBottom(Math.round(chrome.getBoundingClientRect().bottom));
+    sync();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(sync);
+    observer.observe(chrome);
+    return () => observer.disconnect();
+  }, [chromeHeight, tabSearchOpen, chromeLayout.density]);
 
   useEffect(() => {
     let mounted = true;
@@ -277,17 +292,26 @@ export function App() {
   }, [tabSearchOpen]);
 
   useEffect(() => {
+    const topInset = topInsetBase + (urlOverlayOpen ? 280 : 0) + (tabSearchOpen ? TAB_SEARCH_RESULTS_INSET : 0);
+    const leftInset = browserLeftInset(leftPaneWidth, workspaceCollapsed);
+    const rightInset = browserRightInset(effectiveRightPaneWidth, downloadsOpen);
+    const bottomInset = commandCollapsed ? 64 : 94 + commandOverlayHeight + agentDockHeight;
+    // #region agent log
+    const chromeEl = document.querySelector('.browser-chrome');
+    const chromeRect = chromeEl?.getBoundingClientRect();
+    fetch('http://127.0.0.1:7585/ingest/d4a7c3e7-ffba-4ada-a407-71795d29b25b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'f83ef7'},body:JSON.stringify({sessionId:'f83ef7',runId:'post-fix',hypothesisId:'A',location:'App.tsx:setLayout',message:'renderer layout request',data:{chromeHeight,topInsetBase,measuredChromeBottom,tabSearchOpen,urlOverlayOpen,topInset,leftInset,rightInset,bottomInset,chromeRectHeight:chromeRect?.height??null,chromeRectBottom:chromeRect?.bottom??null,viewport,padCollapsed,effectiveRightPaneWidth},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     void window.poppinBrowser.command({
       type: 'setLayout',
       // The address suggestions dropdown spans near the full width under the
       // toolbar, so it needs the page pushed down to stay uncovered.
-      topInset: chromeHeight + (urlOverlayOpen ? 280 : 0) + (tabSearchOpen ? TAB_SEARCH_RESULTS_INSET : 0),
-      leftInset: browserLeftInset(leftPaneWidth, workspaceCollapsed),
-      rightInset: browserRightInset(effectiveRightPaneWidth, downloadsOpen),
+      topInset,
+      leftInset,
+      rightInset,
       // Keep a strip for the collapsed reopen control; native views paint above DOM otherwise.
-      bottomInset: commandCollapsed ? 64 : 94 + commandOverlayHeight + agentDockHeight,
+      bottomInset,
     });
-  }, [agentDockHeight, chromeHeight, commandCollapsed, commandOverlayHeight, downloadsOpen, effectiveRightPaneWidth, leftPaneWidth, tabSearchOpen, urlOverlayOpen, workspaceCollapsed]);
+  }, [agentDockHeight, chromeHeight, commandCollapsed, commandOverlayHeight, downloadsOpen, effectiveRightPaneWidth, leftPaneWidth, measuredChromeBottom, tabSearchOpen, topInsetBase, urlOverlayOpen, workspaceCollapsed, padCollapsed, viewport]);
 
   const resizeLeftPane = (requestedWidth: number) => {
     setPreferredLeftPaneWidth(clampResizedLeftPaneWidth(requestedWidth, viewport.width));
