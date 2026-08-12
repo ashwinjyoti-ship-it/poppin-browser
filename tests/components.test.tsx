@@ -13,6 +13,7 @@ import { DEFAULT_BROWSER_SETTINGS, type BrowserTabSnapshot } from '../src/shared
 import type { BrowserAgentSnapshot } from '../src/shared/browser-agent';
 import type { TaskSnapshot } from '../src/shared/task';
 import type { WorkspaceSnapshot } from '../src/shared/workspace';
+import { EMPTY_POPPIN_PAD_SNAPSHOT } from '../src/shared/poppin-pad';
 import { EMPTY_TANDEM_SNAPSHOT } from '../src/shared/tandem';
 
 const TAB: BrowserTabSnapshot = {
@@ -36,7 +37,7 @@ describe('browser chrome', () => {
     const onResize = vi.fn();
     render(<PaneResizer side="left" width={300} minimum={240} maximum={480} onResize={onResize} />);
 
-    const separator = screen.getByRole('separator', { name: /resize workspace pane/i });
+    const separator = screen.getByRole('separator', { name: /resize poppin context pane/i });
     separator.focus();
     await user.keyboard('{ArrowRight}');
     expect(onResize).toHaveBeenLastCalledWith(308);
@@ -526,7 +527,7 @@ describe('Codex controls', () => {
     const user = userEvent.setup();
     const onCommand = vi.fn().mockResolvedValue({ ok: true });
     const onOverlayHeightChange = vi.fn();
-    render(<CommandBar snapshot={READY_TASK} workspace={PROJECT_WORKSPACE} collapsed={false} onCollapseChange={vi.fn()} onCommand={onCommand} onOverlayHeightChange={onOverlayHeightChange} />);
+    render(<CommandBar snapshot={READY_TASK} workspace={PROJECT_WORKSPACE} pad={EMPTY_POPPIN_PAD_SNAPSHOT} collapsed={false} onCollapseChange={vi.fn()} onCommand={onCommand} onPadCommand={vi.fn()} onOverlayHeightChange={onOverlayHeightChange} />);
     await user.type(screen.getByRole('textbox', { name: /prompt/i }), 'Make the button amber');
     await user.click(screen.getByRole('button', { name: /send to codex/i }));
     expect(screen.getByRole('region', { name: /task preflight/i })).toBeVisible();
@@ -546,7 +547,7 @@ describe('Codex controls', () => {
       workspace: { id: 'primary', name: 'Fixture', createdAt: '' },
       tabContexts: [{ tabId: 'mail-tab', title: 'Inbox', url: 'https://mail.example.com', capturedText: 'A message', truncated: false, capturedAt: '' }],
     };
-    render(<CommandBar snapshot={READY_TASK} workspace={workspace} collapsed={false} onCollapseChange={vi.fn()} onCommand={onCommand} />);
+    render(<CommandBar snapshot={READY_TASK} workspace={workspace} pad={EMPTY_POPPIN_PAD_SNAPSHOT} collapsed={false} onCollapseChange={vi.fn()} onCommand={onCommand} onPadCommand={vi.fn()} />);
     await user.type(screen.getByRole('textbox', { name: /prompt/i }), 'Use browser use and draft and save a reply');
     await user.click(screen.getByRole('button', { name: /send to codex/i }));
     await waitFor(() => expect(onCommand).toHaveBeenCalledWith({
@@ -569,7 +570,7 @@ describe('Codex controls', () => {
         createdAt: '', updatedAt: '',
       },
     };
-    render(<CommandBar snapshot={snapshot} workspace={EMPTY_WORKSPACE} collapsed={false} onCollapseChange={vi.fn()} onCommand={onCommand} />);
+    render(<CommandBar snapshot={snapshot} workspace={EMPTY_WORKSPACE} pad={EMPTY_POPPIN_PAD_SNAPSHOT} collapsed={false} onCollapseChange={vi.fn()} onCommand={onCommand} onPadCommand={vi.fn()} />);
     const prompt = screen.getByRole('textbox', { name: /prompt/i });
     expect(prompt).toHaveAttribute('placeholder', expect.stringMatching(/same Codex conversation/i));
     await user.type(prompt, 'Tell me more');

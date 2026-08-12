@@ -100,11 +100,23 @@ export class BrowserEngine {
 
   /** Optional workspace hook so tab menus can save a session via a dialog-free flow. */
   private saveSessionRequested: (() => void) | null = null;
+  private padIngestRequested: ((payload: {
+    tabId: string;
+    url: string;
+    kind: 'selection' | 'link' | 'image';
+    text?: string;
+    linkUrl?: string;
+    srcUrl?: string;
+  }) => void) | null = null;
   /** Address-bar submissions this session, newest first. */
   private enteredUrls: Array<{ url: string; title: string }> = [];
 
   setSaveSessionHandler(handler: (() => void) | null): void {
     this.saveSessionRequested = handler;
+  }
+
+  setPadIngestHandler(handler: BrowserEngine['padIngestRequested']): void {
+    this.padIngestRequested = handler;
   }
 
   constructor(
@@ -960,6 +972,31 @@ export class BrowserEngine {
             else this.createTab(search.url, randomUUID(), false, undefined, true);
           }
         },
+        onAddSelectionToPad: this.padIngestRequested
+          ? (selection) => this.padIngestRequested?.({
+            tabId: tab.snapshot.id,
+            url: tab.snapshot.url,
+            kind: 'selection',
+            text: selection,
+          })
+          : undefined,
+        onAddLinkToPad: this.padIngestRequested
+          ? (linkUrl, label) => this.padIngestRequested?.({
+            tabId: tab.snapshot.id,
+            url: tab.snapshot.url,
+            kind: 'link',
+            text: label,
+            linkUrl,
+          })
+          : undefined,
+        onAddImageToPad: this.padIngestRequested
+          ? (srcUrl) => this.padIngestRequested?.({
+            tabId: tab.snapshot.id,
+            url: tab.snapshot.url,
+            kind: 'image',
+            srcUrl,
+          })
+          : undefined,
       });
     });
     contents.on('will-navigate', (event, url) => {

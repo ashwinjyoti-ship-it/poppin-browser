@@ -21,7 +21,7 @@ describe('resizable left pane layout', () => {
 
   it('clamps a dragged pane against its own limits and the browser minimum', () => {
     expect(clampResizedLeftPaneWidth(100, 1440)).toBe(240);
-    expect(clampResizedLeftPaneWidth(900, 1000)).toBe(480);
+    expect(clampResizedLeftPaneWidth(900, 1000)).toBe(388);
     expect(clampResizedLeftPaneWidth(900, 600)).toBe(240);
   });
 

@@ -65,8 +65,8 @@ export function WorkspacePane({
 
   if (collapsed) {
     return (
-      <aside className="side-rail side-rail-left" aria-label="Workspace collapsed">
-        <button type="button" className="pane-toggle" onClick={() => onCollapseChange(false)} aria-label="Open workspace" title="Open workspace">
+      <aside className="side-rail side-rail-left" aria-label="Poppin Context collapsed">
+        <button type="button" className="pane-toggle" onClick={() => onCollapseChange(false)} aria-label="Open Poppin Context" title="Open Poppin Context">
           <ChevronRight size={17} />
         </button>
         <Layers3 size={17} aria-hidden="true" />
@@ -75,13 +75,13 @@ export function WorkspacePane({
   }
 
   return (
-    <aside className="workspace-pane side-pane" aria-label="Workspace">
+    <aside className="workspace-pane side-pane" aria-label="Poppin Context">
       <div className="pane-heading">
         <div>
-          <span className="eyebrow">Workspace</span>
+          <span className="eyebrow">Poppin Context</span>
           <h2>{snapshot.workspace?.name ?? 'Create your workspace'}</h2>
         </div>
-        <button type="button" className="pane-toggle" onClick={() => onCollapseChange(true)} aria-label="Collapse workspace" title="Collapse workspace">
+        <button type="button" className="pane-toggle" onClick={() => onCollapseChange(true)} aria-label="Collapse Poppin Context" title="Collapse Poppin Context">
           <ChevronLeft size={17} />
         </button>
       </div>

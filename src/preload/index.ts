@@ -50,6 +50,13 @@ import {
   type DownloadsSnapshot,
   type PoppinDownloadsApi,
 } from '../shared/downloads';
+import {
+  POPPIN_PAD_CHANNELS,
+  type PoppinPadApi,
+  type PoppinPadCommand,
+  type PoppinPadCommandResult,
+  type PoppinPadSnapshot,
+} from '../shared/poppin-pad';
 
 const api: PoppinBrowserApi = {
   getSnapshot: () => ipcRenderer.invoke(BROWSER_CHANNELS.getSnapshot) as Promise<BrowserSnapshot>,
@@ -153,3 +160,15 @@ const downloadsApi: PoppinDownloadsApi = {
 };
 
 contextBridge.exposeInMainWorld('poppinDownloads', downloadsApi);
+
+const poppinPadApi: PoppinPadApi = {
+  getSnapshot: () => ipcRenderer.invoke(POPPIN_PAD_CHANNELS.getSnapshot) as Promise<PoppinPadSnapshot>,
+  command: (command: PoppinPadCommand) => ipcRenderer.invoke(POPPIN_PAD_CHANNELS.command, command) as Promise<PoppinPadCommandResult>,
+  subscribe: (listener) => {
+    const handler = (_event: Electron.IpcRendererEvent, snapshot: PoppinPadSnapshot) => listener(snapshot);
+    ipcRenderer.on(POPPIN_PAD_CHANNELS.snapshot, handler);
+    return () => ipcRenderer.removeListener(POPPIN_PAD_CHANNELS.snapshot, handler);
+  },
+};
+
+contextBridge.exposeInMainWorld('poppinPad', poppinPadApi);

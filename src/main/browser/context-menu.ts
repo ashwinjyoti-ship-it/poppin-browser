@@ -15,6 +15,9 @@ interface PageContextActions {
   onReload: () => void;
   onOpenLink: (url: string, disposition: 'current' | 'new-tab') => void;
   onSearchSelection: (selection: string) => void;
+  onAddSelectionToPad?: (selection: string) => void;
+  onAddLinkToPad?: (url: string, label: string) => void;
+  onAddImageToPad?: (srcUrl: string) => void;
 }
 
 export function showPageContextMenu(
@@ -31,6 +34,14 @@ export function showPageContextMenu(
       { label: 'Open Link in New Tab', click: () => actions.onOpenLink(params.linkURL, 'new-tab') },
       { label: 'Open Link in Current Tab', click: () => actions.onOpenLink(params.linkURL, 'current') },
       { label: 'Copy Link Address', click: () => clipboard.writeText(params.linkURL) },
+      ...(actions.onAddLinkToPad ? [{ label: 'Add link to Poppin Pad', click: () => actions.onAddLinkToPad?.(params.linkURL, selection || params.linkURL) }] : []),
+      { type: 'separator' },
+    );
+  }
+
+  if (params.mediaType === 'image' && params.srcURL && actions.onAddImageToPad) {
+    template.push(
+      { label: 'Add image to Poppin Pad', click: () => actions.onAddImageToPad?.(params.srcURL) },
       { type: 'separator' },
     );
   }
@@ -44,6 +55,7 @@ export function showPageContextMenu(
         label: `Search for “${truncate(selection, 36)}”`,
         click: () => actions.onSearchSelection(selection),
       },
+      ...(actions.onAddSelectionToPad ? [{ label: 'Add selection to Poppin Pad', click: () => actions.onAddSelectionToPad?.(selection) }] : []),
       { type: 'separator' },
       { label: 'Select All', enabled: params.editFlags.canSelectAll, click: () => contents.selectAll() },
     );

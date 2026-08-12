@@ -4,21 +4,25 @@ import { ChevronDown, ChevronUp, Send, Square } from 'lucide-react';
 import type { AgentHarnessId } from '../../shared/agent';
 import type { TaskCommand, TaskCommandResult, TaskSnapshot } from '../../shared/task';
 import type { WorkspaceSnapshot } from '../../shared/workspace';
+import type { PoppinPadCommand, PoppinPadCommandResult, PoppinPadSnapshot } from '../../shared/poppin-pad';
+import { PAD_ATTACHMENT_MIME } from '../../shared/poppin-pad';
 import { inferTaskRequirements, type TaskRequirements } from '../../shared/task-requirements';
 import { Brand } from './Brand';
 
 interface CommandBarProps {
   snapshot: TaskSnapshot;
   workspace: WorkspaceSnapshot;
+  pad: PoppinPadSnapshot;
   collapsed: boolean;
   onCollapseChange: (collapsed: boolean) => void;
   onCommand: (command: TaskCommand) => Promise<TaskCommandResult>;
+  onPadCommand: (command: PoppinPadCommand) => Promise<PoppinPadCommandResult>;
   onOverlayHeightChange?: (height: number) => void;
 }
 
 const PREFLIGHT_MIN_HEIGHT = 160;
 
-export function CommandBar({ snapshot, workspace, collapsed, onCollapseChange, onCommand, onOverlayHeightChange }: CommandBarProps) {
+export function CommandBar({ snapshot, workspace, pad, collapsed, onCollapseChange, onCommand, onPadCommand, onOverlayHeightChange }: CommandBarProps) {
   const [prompt, setPrompt] = useState('');
   const [modelId, setModelId] = useState('');
   const [effort, setEffort] = useState('');
@@ -39,9 +43,9 @@ export function CommandBar({ snapshot, workspace, collapsed, onCollapseChange, o
   const selectedAgentId = snapshot.connection.agent?.id ?? agents[0]?.id ?? '';
   const controls = snapshot.connection.controls ?? { model: true, reasoning: true };
   const canSend = canContinue
-    ? Boolean(prompt.trim() && !sending && !isBlocking && snapshot.connection.state === 'ready')
+    ? Boolean((prompt.trim() || pad.pendingAttachments.length > 0) && !sending && !isBlocking && snapshot.connection.state === 'ready')
     : Boolean(
-      prompt.trim()
+      (prompt.trim() || pad.pendingAttachments.length > 0)
       && selectedModelId
       && (!controls.reasoning || selectedEffort)
       && !sending
@@ -168,6 +172,32 @@ export function CommandBar({ snapshot, workspace, collapsed, onCollapseChange, o
           </select>
         </label>
       ) : null}
+      <div
+        className={`command-attachments ${pad.pendingAttachments.length ? 'command-attachments-active' : ''}`}
+        onDragOver={(event) => {
+          if (event.dataTransfer.types.includes(PAD_ATTACHMENT_MIME)) {
+            event.preventDefault();
+            event.dataTransfer.dropEffect = 'copy';
+          }
+        }}
+        onDrop={(event) => {
+          event.preventDefault();
+          const objectId = event.dataTransfer.getData(PAD_ATTACHMENT_MIME);
+          if (objectId) void onPadCommand({ type: 'queueAttachment', objectId });
+        }}
+      >
+        {pad.pendingAttachments.length ? pad.pendingAttachments.map((attachment) => (
+          <button
+            key={attachment.objectId}
+            type="button"
+            className="command-attachment-chip"
+            onClick={() => { void onPadCommand({ type: 'removeAttachment', objectId: attachment.objectId }); }}
+            title={`Remove ${attachment.title}`}
+          >
+            {attachment.title}
+          </button>
+        )) : <span className="command-attachment-hint">Drop Poppin Pad cards here</span>}
+      </div>
       <label className="command-prompt">
         <span className="sr-only">Prompt</span>
         <input

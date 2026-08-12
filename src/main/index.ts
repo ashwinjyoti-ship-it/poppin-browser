@@ -48,6 +48,9 @@ import {
   type DownloadsCommand,
 } from '../shared/downloads';
 import { DownloadManager } from './browser/downloads';
+import { POPPIN_PAD_CHANNELS, EMPTY_POPPIN_PAD_SNAPSHOT, type PoppinPadCommand } from '../shared/poppin-pad';
+import { PoppinPadStore } from './poppin-pad/poppin-pad-store';
+import { PoppinPadEngine } from './poppin-pad/poppin-pad-engine';
 
 registerInternalScheme();
 
@@ -64,6 +67,8 @@ let browserAgentEngine: BrowserAgentEngine | null = null;
 let previewEngine: PreviewEngine | null = null;
 let tandemEngine: TandemEngine | null = null;
 let tandemCredentials: TandemCredentialStore | null = null;
+let poppinPadStore: PoppinPadStore | null = null;
+let poppinPadEngine: PoppinPadEngine | null = null;
 let settingsOverlay: SettingsOverlayController | null = null;
 let profileStore: ProfileStore | null = null;
 let continuityEngine: ContinuityEngine | null = null;
@@ -171,6 +176,22 @@ async function createWindow(): Promise<void> {
   });
   if (!pagesStore) throw new Error('Pages storage is not ready.');
   pagesEngine = new PagesEngine(mainWindow, pagesStore, () => workspaceEngine?.refreshPageContexts());
+  if (!poppinPadStore) throw new Error('Poppin Pad storage is not ready.');
+  poppinPadEngine = new PoppinPadEngine(mainWindow, poppinPadStore, {
+    exportToTandem: async ({ title, markdown }) => {
+      const provider = tandemEngine?.getProvider();
+      if (!provider) throw new Error('Tandem is not connected. Connect Tandem in Settings first.');
+      const workspaceId = tandemEngine?.getActiveWorkspaceId();
+      if (!workspaceId) throw new Error('Pick an active Tandem workspace before exporting.');
+      const page = await provider.createPage(workspaceId, title, null, 'canvas');
+      await provider.writeMarkdown(page.id, markdown);
+      tandemEngine?.openWorldForPage(page.id);
+      return { pageId: page.id, opened: true };
+    },
+  });
+  browserEngine.setPadIngestHandler((payload) => {
+    poppinPadEngine?.ingestBrowserSelection(payload);
+  });
   browserAgentEngine = new BrowserAgentEngine(mainWindow, browserEngine, (tabId, content) => {
     workspaceEngine?.updateTabContextFromAgent(tabId, content);
   }, new BrowserAgentStateStore(dataRootPath ?? app.getPath('userData')));
@@ -276,6 +297,8 @@ async function createWindow(): Promise<void> {
       tandemEngine?.openWorldForPage(page.id);
       return { pageId: page.id, opened: true };
     },
+    getPadAttachments: () => poppinPadEngine?.getAttachmentPayloads() ?? [],
+    clearPadAttachments: () => poppinPadEngine?.clearAttachments(),
   });
   browserEngine.restore(persisted);
   void tandemEngine.initialize();
@@ -305,6 +328,7 @@ async function createWindow(): Promise<void> {
     pagesEngine = null;
     taskEngine = null;
     browserAgentEngine = null;
+    poppinPadEngine = null;
     void previewEngine?.stop();
     previewEngine = null;
     tandemEngine = null;
@@ -380,6 +404,7 @@ app.whenReady().then(async () => {
     encrypt: (text) => safeStorage.encryptString(text),
     decrypt: (value) => safeStorage.decryptString(value),
   });
+  poppinPadStore = new PoppinPadStore(sqlitePath);
   ipcMain.handle(BROWSER_CHANNELS.getSnapshot, (event) => {
     if (!isTrustedShellSender(event.sender)) throw new Error('Untrusted browser snapshot request.');
     return browserEngine?.getSnapshot();
@@ -501,6 +526,14 @@ app.whenReady().then(async () => {
       ? { ok: false, message: 'Browser control changed before the pending action could run.' }
       : result);
     return result;
+  });
+  ipcMain.handle(POPPIN_PAD_CHANNELS.getSnapshot, (event) => {
+    if (!isTrustedShellSender(event.sender)) throw new Error('Untrusted Poppin Pad snapshot request.');
+    return poppinPadEngine?.getSnapshot() ?? EMPTY_POPPIN_PAD_SNAPSHOT;
+  });
+  ipcMain.handle(POPPIN_PAD_CHANNELS.command, async (event, command: PoppinPadCommand) => {
+    if (!isTrustedShellSender(event.sender)) throw new Error('Untrusted Poppin Pad command.');
+    return poppinPadEngine?.execute(command) ?? { ok: false, message: 'Poppin Pad is not ready.' };
   });
 
   const browsingSession = session.fromPartition('persist:poppin-browser');

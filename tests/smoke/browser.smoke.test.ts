@@ -151,9 +151,9 @@ describe('packaged browser workflow', () => {
     await expect.poll(() => newTabPage!.getByRole('heading', { name: /where would you like to go/i }).isVisible()).toBe(true);
 
     const address = shell.getByLabel('Address and search');
-    await expect.poll(() => shell.getByRole('button', { name: 'Open workspace' }).isVisible()).toBe(true);
-    await shell.getByRole('button', { name: 'Open workspace' }).click();
-    const workspaceDivider = shell.getByRole('separator', { name: 'Resize workspace pane' });
+    await expect.poll(() => shell.getByRole('button', { name: 'Open Poppin Context' }).isVisible()).toBe(true);
+    await shell.getByRole('button', { name: 'Open Poppin Context' }).click();
+    const workspaceDivider = shell.getByRole('separator', { name: 'Resize Poppin Context pane' });
     const initialWorkspaceWidth = Number(await workspaceDivider.getAttribute('aria-valuenow'));
     const chromeHeight = await shell.locator('.app-shell').evaluate((element) => Number.parseInt(getComputedStyle(element).getPropertyValue('--chrome-height'), 10));
     const initialBrowserBounds = await activeBrowserViewBounds(application);
@@ -275,7 +275,7 @@ describe('packaged browser workflow', () => {
     await address.press('Enter');
     await expect.poll(() => exactPageInfo(application!, `${origin}/`)).toMatchObject({ title: 'Local fixture' });
 
-    const workspace = shell.getByRole('complementary', { name: 'Workspace' });
+    const workspace = shell.getByRole('complementary', { name: 'Poppin Context' });
     await workspace.getByLabel('Workspace name').fill('Launch workspace');
     await workspace.getByRole('button', { name: 'Create workspace' }).click();
     await expect.poll(() => workspace.getByRole('heading', { name: 'Launch workspace' }).isVisible()).toBe(true);
@@ -444,9 +444,9 @@ describe('packaged browser workflow', () => {
 
     ({ app: application, shell } = await launch(userDataPath));
     await expect.poll(() => shell.getByRole('tab').count()).toBe(2);
-    await shell.getByRole('button', { name: 'Open workspace' }).click();
-    await expect.poll(() => shell.getByRole('separator', { name: 'Resize workspace pane' }).getAttribute('aria-valuenow')).toBe(String(resizedWorkspaceWidth));
-    await expect.poll(() => shell.getByLabel('Workspace').getByRole('heading', { name: 'Launch workspace' }).isVisible()).toBe(true);
+    await shell.getByRole('button', { name: 'Open Poppin Context' }).click();
+    await expect.poll(() => shell.getByRole('separator', { name: 'Resize Poppin Context pane' }).getAttribute('aria-valuenow')).toBe(String(resizedWorkspaceWidth));
+    await expect.poll(() => shell.getByLabel('Poppin Context').getByRole('heading', { name: 'Launch workspace' }).isVisible()).toBe(true);
     const cookies = await application.evaluate(async ({ session }, fixtureOrigin) => {
       return session.fromPartition('persist:poppin-browser').cookies.get({ url: fixtureOrigin });
     }, origin);
