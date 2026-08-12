@@ -139,7 +139,7 @@ export class AcpAgentAdapter extends EventEmitter<AgentAdapterEvents> implements
       this.connection = null;
       this.emit('exit', error);
     });
-    connection.start();
+    await connection.start();
     this.connection = connection;
 
     const response = await connection.request<AcpInitializeResponse>(ACP_METHODS.initialize, {
