@@ -7,12 +7,17 @@ import {
   clampResizedRightPaneWidth,
   DEFAULT_LEFT_PANE_WIDTH,
   DEFAULT_RIGHT_PANE_WIDTH,
+  getFocusedRightPaneWidth,
+  getMaxRightPaneWidth,
   loadLeftPaneWidth,
+  loadRightPaneWidth,
   MAX_RIGHT_PANE_WIDTH,
+  MAX_RIGHT_PANE_WIDTH_CEILING,
   normalizeLeftPaneWidth,
   normalizeRightPaneWidth,
   PANE_BROWSER_GUTTER,
   saveLeftPaneWidth,
+  saveRightPaneWidth,
 } from '../src/renderer/ui/pane-layout';
 
 describe('resizable left pane layout', () => {
@@ -61,5 +66,30 @@ describe('resizable Poppin Pad layout', () => {
   it('lets the pad grow to its max without being clipped by the prior 520px inset ceiling', () => {
     expect(browserRightInset(MAX_RIGHT_PANE_WIDTH)).toBeGreaterThan(520);
     expect(clampResizedRightPaneWidth(900, 1600, DEFAULT_LEFT_PANE_WIDTH, true)).toBe(MAX_RIGHT_PANE_WIDTH);
+  });
+
+  it('scales the pad expand limit with larger screens', () => {
+    expect(getMaxRightPaneWidth(1440)).toBe(MAX_RIGHT_PANE_WIDTH);
+    expect(getMaxRightPaneWidth(1600)).toBe(MAX_RIGHT_PANE_WIDTH);
+    expect(getMaxRightPaneWidth(1920)).toBe(720);
+    expect(getMaxRightPaneWidth(2560)).toBe(1040);
+    expect(getMaxRightPaneWidth(3200)).toBe(MAX_RIGHT_PANE_WIDTH_CEILING);
+    expect(clampResizedRightPaneWidth(900, 1920, DEFAULT_LEFT_PANE_WIDTH, true)).toBe(720);
+    expect(clampResizedRightPaneWidth(900, 2560, DEFAULT_LEFT_PANE_WIDTH, true)).toBe(900);
+    expect(normalizeRightPaneWidth(800, 1920, DEFAULT_LEFT_PANE_WIDTH, true)).toBe(720);
+  });
+
+  it('expands focus mode up to the screen-aware pad surface', () => {
+    expect(getFocusedRightPaneWidth(1920, DEFAULT_LEFT_PANE_WIDTH, true)).toBe(720);
+    expect(getFocusedRightPaneWidth(2560, DEFAULT_LEFT_PANE_WIDTH, true)).toBe(1040);
+    expect(getFocusedRightPaneWidth(1280, DEFAULT_LEFT_PANE_WIDTH, true)).toBeLessThanOrEqual(MAX_RIGHT_PANE_WIDTH);
+  });
+
+  it('loads a wide stored pad width and lets live normalize clamp to the screen', () => {
+    expect(loadRightPaneWidth({ getItem: () => JSON.stringify(900) })).toBe(900);
+    expect(normalizeRightPaneWidth(900, 1440, DEFAULT_LEFT_PANE_WIDTH, true)).toBe(MAX_RIGHT_PANE_WIDTH);
+    const setItem = vi.fn();
+    saveRightPaneWidth({ setItem }, 720);
+    expect(setItem).toHaveBeenCalledWith('poppin:pad-width:v1', '720');
   });
 });

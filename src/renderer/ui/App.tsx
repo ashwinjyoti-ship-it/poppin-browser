@@ -123,12 +123,15 @@ export function App() {
   const leftPaneWidth = normalizeLeftPaneWidth(preferredLeftPaneWidth, viewport.width);
   const padCollapsed = padSnapshot.pad.collapsed;
   const padActive = padSnapshot.pad.active;
-  const rightPaneWidth = normalizeRightPaneWidth(
-    preferredRightPaneWidth,
-    viewport.width,
-    leftPaneWidth,
-    workspaceCollapsed,
-  );
+  // Focus mode expands to the screen-aware pad surface; otherwise honor the resized preference.
+  const rightPaneWidth = padActive
+    ? getFocusedRightPaneWidth(viewport.width, leftPaneWidth, workspaceCollapsed)
+    : normalizeRightPaneWidth(
+      preferredRightPaneWidth,
+      viewport.width,
+      leftPaneWidth,
+      workspaceCollapsed,
+    );
   const effectiveRightPaneWidth = padCollapsed ? COLLAPSED_RAIL_WIDTH : rightPaneWidth;
   const dockPresentation = getAgentDockPresentation({
     taskSnapshot,
