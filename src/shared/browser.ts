@@ -71,7 +71,7 @@ export const DEFAULT_BROWSER_SETTINGS: BrowserSettings = {
   linkOpening: 'new-tab',
   focusNewTabs: true,
   startup: 'restore',
-  newTabPosition: 'next-to-active',
+  newTabPosition: 'end',
   warnBeforeClosingMultipleTabs: false,
   searchEngine: 'duckduckgo',
 };

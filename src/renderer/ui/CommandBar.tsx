@@ -54,8 +54,14 @@ export function CommandBar({ snapshot, workspace, pad, collapsed, onCollapseChan
     );
 
   useLayoutEffect(() => {
-    if (!preflight && !browserQuestion) {
+    if (!preflight && !browserQuestion && !error) {
       onOverlayHeightChange?.(0);
+      return;
+    }
+    if (error && !preflight && !browserQuestion) {
+      // Keep ACP/command errors in the reserved bottom gutter so the native
+      // BrowserView cannot cover the dismissible toast.
+      onOverlayHeightChange?.(56);
       return;
     }
     const updateHeight = () => {
@@ -67,7 +73,7 @@ export function CommandBar({ snapshot, workspace, pad, collapsed, onCollapseChan
     const observer = new ResizeObserver(updateHeight);
     observer.observe(preflightRef.current);
     return () => observer.disconnect();
-  }, [browserQuestion, onOverlayHeightChange, preflight]);
+  }, [browserQuestion, error, onOverlayHeightChange, preflight]);
 
   if (collapsed) {
     return (
@@ -206,7 +212,14 @@ export function CommandBar({ snapshot, workspace, pad, collapsed, onCollapseChan
           placeholder={snapshot.connection.state === 'ready' ? (canContinue ? 'Ask a follow-up in the same Codex conversation…' : 'Ask Poppin to summarize, research, draft, or change code…') : snapshot.connection.message}
           disabled={snapshot.connection.state !== 'ready' || isBlocking}
         />
-        {error ? <span className="command-error">{error}</span> : null}
+        {error ? (
+          <span className="command-error" role="alert">
+            <span>{error}</span>
+            <button type="button" className="command-error-dismiss" aria-label="Dismiss error" title="Dismiss" onClick={() => setError('')}>
+              ×
+            </button>
+          </span>
+        ) : null}
         {canContinue ? (
           <button
             type="button"

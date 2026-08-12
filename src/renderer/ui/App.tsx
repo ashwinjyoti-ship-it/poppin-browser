@@ -277,17 +277,21 @@ export function App() {
   }, [tabSearchOpen]);
 
   useEffect(() => {
+    const topInset = chromeHeight + (urlOverlayOpen ? 280 : 0) + (tabSearchOpen ? TAB_SEARCH_RESULTS_INSET : 0);
+    const leftInset = browserLeftInset(leftPaneWidth, workspaceCollapsed);
+    const rightInset = browserRightInset(effectiveRightPaneWidth, downloadsOpen);
+    const bottomInset = commandCollapsed ? 64 : 94 + commandOverlayHeight + agentDockHeight;
     void window.poppinBrowser.command({
       type: 'setLayout',
       // The address suggestions dropdown spans near the full width under the
       // toolbar, so it needs the page pushed down to stay uncovered.
-      topInset: chromeHeight + (urlOverlayOpen ? 280 : 0) + (tabSearchOpen ? TAB_SEARCH_RESULTS_INSET : 0),
-      leftInset: browserLeftInset(leftPaneWidth, workspaceCollapsed),
-      rightInset: browserRightInset(effectiveRightPaneWidth, downloadsOpen),
+      topInset,
+      leftInset,
+      rightInset,
       // Keep a strip for the collapsed reopen control; native views paint above DOM otherwise.
-      bottomInset: commandCollapsed ? 64 : 94 + commandOverlayHeight + agentDockHeight,
+      bottomInset,
     });
-  }, [agentDockHeight, chromeHeight, commandCollapsed, commandOverlayHeight, downloadsOpen, effectiveRightPaneWidth, leftPaneWidth, tabSearchOpen, urlOverlayOpen, workspaceCollapsed]);
+  }, [agentDockHeight, chromeHeight, commandCollapsed, commandOverlayHeight, downloadsOpen, effectiveRightPaneWidth, leftPaneWidth, tabSearchOpen, urlOverlayOpen, workspaceCollapsed, padCollapsed, viewport]);
 
   const resizeLeftPane = (requestedWidth: number) => {
     setPreferredLeftPaneWidth(clampResizedLeftPaneWidth(requestedWidth, viewport.width));

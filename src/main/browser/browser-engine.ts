@@ -718,7 +718,7 @@ export class BrowserEngine {
   async execute(command: BrowserCommand): Promise<BrowserCommandResult> {
     switch (command.type) {
       case 'create':
-        this.createTab(command.input);
+        this.createTab(command.input, randomUUID(), true, undefined, true, 'end');
         return { ok: true };
       case 'activate':
         return this.activateTab(command.tabId);
@@ -837,7 +837,7 @@ export class BrowserEngine {
     }
     if (key === 't') {
       if (input.shift) return this.reopenClosedTab().ok;
-      this.createTab();
+      this.createTab('', randomUUID(), true, undefined, true, 'end');
       return true;
     }
     if (key === 'w') {
@@ -1029,7 +1029,19 @@ export class BrowserEngine {
       void contents.executeJavaScript(AUTOPLAY_GUARD_SCRIPT, true).catch(() => undefined);
     });
     contents.on('media-started-playing', () => {
-      if (tab.snapshot.taskSpaceId && this.mediaBlockedTaskSpaces.has(tab.snapshot.taskSpaceId)) this.pauseTaskOwnedMedia(tab);
+      if (tab.snapshot.taskSpaceId && this.mediaBlockedTaskSpaces.has(tab.snapshot.taskSpaceId)) {
+        this.pauseTaskOwnedMedia(tab);
+        return;
+      }
+      // Regular browsing: keep pausing autoplay until the page sees a real user gesture.
+      void contents.executeJavaScript(`(() => {
+        if (window.__poppinUserMediaInteracted) return false;
+        let paused = 0;
+        document.querySelectorAll('video').forEach((video) => {
+          if (!video.paused) { video.pause(); paused += 1; }
+        });
+        return paused;
+      })()`, true).catch(() => undefined);
     });
     contents.on('did-navigate', (_event, url) => this.handleNavigation(tab, url, true));
     contents.on('did-navigate-in-page', (_event, url) => this.handleNavigation(tab, url, false));
@@ -2172,10 +2184,19 @@ const AUTOPLAY_GUARD_SCRIPT = `(() => {
   const observer = new MutationObserver(scan);
   const markInteracted = () => {
     userInteracted = true;
+    window.__poppinUserMediaInteracted = true;
     observer.disconnect();
+    if (scanTimer) cancelAnimationFrame(scanTimer);
+  };
+  let scanTimer = 0;
+  const tick = () => {
+    if (userInteracted) return;
+    scan();
+    scanTimer = requestAnimationFrame(tick);
   };
   observer.observe(document.documentElement, { childList: true, subtree: true });
   scan();
+  tick();
   document.addEventListener('play', (event) => { if (event.target instanceof HTMLVideoElement) pauseIfAuto(event.target); }, true);
   document.addEventListener('playing', (event) => { if (event.target instanceof HTMLVideoElement) pauseIfAuto(event.target); }, true);
   document.addEventListener('pointerdown', markInteracted, true);
