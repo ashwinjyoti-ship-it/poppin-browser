@@ -105,9 +105,6 @@ export function CommandBar({ snapshot, workspace, pad, collapsed, onCollapseChan
       return;
     }
     setError(result.message ?? 'Poppin could not start that task.');
-    // #region agent log
-    fetch('http://127.0.0.1:7585/ingest/d4a7c3e7-ffba-4ada-a407-71795d29b25b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'f83ef7'},body:JSON.stringify({sessionId:'f83ef7',hypothesisId:'E',location:'CommandBar.tsx:start',message:'command error shown',data:{message:result.message??null,ok:result.ok,bottomInsetHint:'error floats above command bar into browser gutter'},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
   };
 
   const submit = async (event: FormEvent) => {
