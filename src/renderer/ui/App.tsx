@@ -22,7 +22,7 @@ import { PaneResizer } from './PaneResizer';
 import { NativePageView } from './NativePageView';
 import { NativeDatabaseView } from './NativeDatabaseView';
 import { TabSearchBar } from './TabSearchBar';
-import { getChromeLayout, getTitlebarLeftInset } from './chrome-layout';
+import { getChromeLayout, getTitlebarLeftInset, resolveChromeHeight, TAB_SEARCH_RESULTS_INSET } from './chrome-layout';
 import { issueForCommand, visibleAddressIssue, type AddressIssue } from './address-issue';
 import { browserApprovalAttentionKey, taskAttentionKey } from './task-attention';
 import { getAgentDockPresentation, getTaskTabStatus } from './task-surface';
@@ -117,7 +117,7 @@ export function App() {
   const address = isEditingAddress ? addressDraft : activeTab?.url ?? (activeNativeTab ? `${activeNativeTab.kind}://${activeNativeTab.pageId}` : '');
   const addressError = visibleAddressIssue(addressIssue, activeTab);
   const chromeLayout = getChromeLayout(viewport.width, viewport.height);
-  const chromeHeight = chromeLayout.height;
+  const chromeHeight = resolveChromeHeight(chromeLayout, tabSearchOpen);
   const leftPaneWidth = normalizeLeftPaneWidth(preferredLeftPaneWidth, viewport.width);
   const padCollapsed = padSnapshot.pad.collapsed;
   const padActive = padSnapshot.pad.active;
@@ -276,13 +276,13 @@ export function App() {
       type: 'setLayout',
       // The address suggestions dropdown spans near the full width under the
       // toolbar, so it needs the page pushed down to stay uncovered.
-      topInset: chromeHeight + (urlOverlayOpen ? 280 : 0),
+      topInset: chromeHeight + (urlOverlayOpen ? 280 : 0) + (tabSearchOpen ? TAB_SEARCH_RESULTS_INSET : 0),
       leftInset: workspaceCollapsed ? 46 : leftPaneWidth + 14,
       rightInset: Math.max(downloadsOpen ? 400 : 24, effectiveRightPaneWidth + 14),
       // Keep a strip for the collapsed reopen control; native views paint above DOM otherwise.
       bottomInset: commandCollapsed ? 64 : 94 + commandOverlayHeight + agentDockHeight,
     });
-  }, [agentDockHeight, chromeHeight, commandCollapsed, commandOverlayHeight, downloadsOpen, effectiveRightPaneWidth, leftPaneWidth, urlOverlayOpen, workspaceCollapsed]);
+  }, [agentDockHeight, chromeHeight, commandCollapsed, commandOverlayHeight, downloadsOpen, effectiveRightPaneWidth, leftPaneWidth, tabSearchOpen, urlOverlayOpen, workspaceCollapsed]);
 
   const resizeLeftPane = (requestedWidth: number) => {
     setPreferredLeftPaneWidth(clampResizedLeftPaneWidth(requestedWidth, viewport.width));
@@ -300,6 +300,11 @@ export function App() {
     } catch {
       return { ok: false, message: 'Poppin Pad could not complete that action.' };
     }
+  };
+
+  const togglePad = () => {
+    const nextCollapsed = !padCollapsed;
+    void sendPadCommand({ type: 'setCollapsed', collapsed: nextCollapsed });
   };
 
   const sendCommand = async (command: BrowserCommand): Promise<BrowserCommandResult> => {
@@ -452,6 +457,8 @@ export function App() {
             }}
             onOverlayOpenChange={setUrlOverlayOpen}
             onOpenTabSearch={() => setTabSearchOpen(true)}
+            padOpen={!padCollapsed}
+            onTogglePad={togglePad}
             onOpenTandemBeside={() => {
               // Tandem beside needs a live Tandem World tab to split against.
               // Rather than silently failing when one has never been opened,

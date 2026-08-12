@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowRight, BookOpenText, LockKeyhole, RefreshCw, RotateCcw, Search, Settings2, Unplug, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, BookOpenText, LayoutGrid, LockKeyhole, RefreshCw, RotateCcw, Search, Settings2, Unplug, X } from 'lucide-react';
 import { type FormEvent, type ReactNode, type RefObject, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { BrowserEnteredUrl, BrowserSettings, BrowserTabSnapshot } from '../../shared/browser';
@@ -32,6 +32,8 @@ interface BrowserToolbarProps {
    * Provided by the App so `BrowserToolbar` stays stateless.
    */
   downloadsSlot?: ReactNode;
+  padOpen?: boolean;
+  onTogglePad?: () => void;
 }
 
 const BACK_LONG_PRESS_MS = 450;
@@ -57,6 +59,8 @@ export function BrowserToolbar({
   onSubmit,
   onOverlayOpenChange,
   downloadsSlot,
+  padOpen = false,
+  onTogglePad,
 }: BrowserToolbarProps) {
   const [backMenuOpen, setBackMenuOpen] = useState(false);
   const [suggestionsOpen, setSuggestionsOpen] = useState(false);
@@ -237,6 +241,19 @@ export function BrowserToolbar({
             onClick={onOpenTandemBeside}
           >
             <BookOpenText size={17} />
+          </button>
+        ) : null}
+        {onTogglePad ? (
+          <button
+            type="button"
+            className={`settings-button pad-toggle-button pad-toggle-labeled ${padOpen ? 'pad-toggle-button-active' : ''}`}
+            aria-label={padOpen ? 'Collapse Poppin Pad' : 'Open Poppin Pad'}
+            title={padOpen ? 'Collapse Poppin Pad' : 'Open Poppin Pad canvas'}
+            aria-pressed={padOpen}
+            onClick={onTogglePad}
+          >
+            <LayoutGrid size={15} aria-hidden="true" />
+            <span>Pad</span>
           </button>
         ) : null}
         {downloadsSlot}
