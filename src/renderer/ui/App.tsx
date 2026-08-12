@@ -8,6 +8,7 @@ import type { BrowserAgentCommand, BrowserAgentCommandResult, BrowserAgentSnapsh
 import type { PagesCommand, PagesSnapshot } from '../../shared/pages';
 import { EMPTY_TANDEM_SNAPSHOT, type TandemCommand, type TandemSnapshot } from '../../shared/tandem';
 import { EMPTY_DOWNLOADS_SNAPSHOT, type DownloadsSnapshot } from '../../shared/downloads';
+import { EMPTY_POPPIN_PAD_SNAPSHOT, type PoppinPadCommand, type PoppinPadCommandResult, type PoppinPadSnapshot } from '../../shared/poppin-pad';
 import { Brand } from './Brand';
 import { BrowserToolbar } from './BrowserToolbar';
 import { TabStrip } from './TabStrip';
@@ -15,6 +16,7 @@ import { DownloadsPopover } from './DownloadsPopover';
 import { WorkspacePane } from './WorkspacePane';
 import { TaskTabView } from './TaskTabView';
 import { AgentDock } from './AgentDock';
+import { PoppinPadPane } from './PoppinPadPane';
 import { CommandBar } from './CommandBar';
 import { PaneResizer } from './PaneResizer';
 import { NativePageView } from './NativePageView';
@@ -26,10 +28,17 @@ import { browserApprovalAttentionKey, taskAttentionKey } from './task-attention'
 import { getAgentDockPresentation, getTaskTabStatus } from './task-surface';
 import {
   clampResizedLeftPaneWidth,
+  clampResizedRightPaneWidth,
+  COLLAPSED_RAIL_WIDTH,
+  getFocusedRightPaneWidth,
   getLeftPaneWidthRange,
+  getRightPaneWidthRange,
   loadLeftPaneWidth,
+  loadRightPaneWidth,
   normalizeLeftPaneWidth,
+  normalizeRightPaneWidth,
   saveLeftPaneWidth,
+  saveRightPaneWidth,
 } from './pane-layout';
 
 const EMPTY_SNAPSHOT: BrowserSnapshot = {
@@ -82,6 +91,8 @@ export function App() {
   const [urlOverlayOpen, setUrlOverlayOpen] = useState(false);
   const [tabSearchOpen, setTabSearchOpen] = useState(false);
   const [preferredLeftPaneWidth, setPreferredLeftPaneWidth] = useState(() => loadLeftPaneWidth(window.localStorage));
+  const [preferredRightPaneWidth, setPreferredRightPaneWidth] = useState(() => loadRightPaneWidth(window.localStorage));
+  const [padSnapshot, setPadSnapshot] = useState<PoppinPadSnapshot>(EMPTY_POPPIN_PAD_SNAPSHOT);
   const [viewport, setViewport] = useState(() => ({ width: window.innerWidth, height: window.innerHeight }));
   const addressInputRef = useRef<HTMLInputElement>(null);
 
@@ -108,6 +119,12 @@ export function App() {
   const chromeLayout = getChromeLayout(viewport.width, viewport.height);
   const chromeHeight = chromeLayout.height;
   const leftPaneWidth = normalizeLeftPaneWidth(preferredLeftPaneWidth, viewport.width);
+  const padCollapsed = padSnapshot.pad.collapsed;
+  const padActive = padSnapshot.pad.active;
+  const rightPaneWidth = padActive
+    ? getFocusedRightPaneWidth(viewport.width, leftPaneWidth, workspaceCollapsed)
+    : normalizeRightPaneWidth(preferredRightPaneWidth, viewport.width, leftPaneWidth);
+  const effectiveRightPaneWidth = padCollapsed ? COLLAPSED_RAIL_WIDTH : rightPaneWidth;
   const dockPresentation = getAgentDockPresentation({
     taskSnapshot,
     browserAgentSnapshot,
@@ -123,6 +140,7 @@ export function App() {
     '--chrome-height': `${chromeHeight}px`,
     '--titlebar-left-inset': `${getTitlebarLeftInset(chromeLayout.density, snapshot.isFullScreen)}px`,
     '--workspace-pane-width': `${leftPaneWidth}px`,
+    '--poppin-pad-width': `${effectiveRightPaneWidth}px`,
     '--command-overlay-height': `${commandOverlayHeight}px`,
     '--agent-dock-height': `${agentDockHeight}px`,
   } as CSSProperties;
@@ -191,6 +209,12 @@ export function App() {
     const unsubscribeDownloads = window.poppinDownloads.subscribe((nextSnapshot) => {
       if (mounted) setDownloadsSnapshot(nextSnapshot);
     });
+    void window.poppinPad.getSnapshot().then((initialSnapshot) => {
+      if (mounted) setPadSnapshot(initialSnapshot);
+    });
+    const unsubscribePad = window.poppinPad.subscribe((nextSnapshot) => {
+      if (mounted) setPadSnapshot(nextSnapshot);
+    });
     return () => {
       mounted = false;
       unsubscribeSnapshot();
@@ -202,6 +226,7 @@ export function App() {
       unsubscribeFocus();
       unsubscribeSettings();
       unsubscribeDownloads();
+      unsubscribePad();
     };
   }, []);
 
@@ -227,6 +252,14 @@ export function App() {
   }, [preferredLeftPaneWidth]);
 
   useEffect(() => {
+    saveRightPaneWidth(window.localStorage, preferredRightPaneWidth);
+  }, [preferredRightPaneWidth]);
+
+  useEffect(() => {
+    if (!padActive) void window.poppinPad.command({ type: 'setWidth', width: rightPaneWidth });
+  }, [padActive, rightPaneWidth]);
+
+  useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'f') {
         event.preventDefault();
@@ -245,16 +278,28 @@ export function App() {
       // toolbar, so it needs the page pushed down to stay uncovered.
       topInset: chromeHeight + (urlOverlayOpen ? 280 : 0),
       leftInset: workspaceCollapsed ? 46 : leftPaneWidth + 14,
-      // Downloads popover is right-anchored under its toolbar button; reserve
-      // a right-side strip for it instead of shoving the whole page down.
-      rightInset: downloadsOpen ? 400 : 24,
+      rightInset: Math.max(downloadsOpen ? 400 : 24, effectiveRightPaneWidth + 14),
       // Keep a strip for the collapsed reopen control; native views paint above DOM otherwise.
       bottomInset: commandCollapsed ? 64 : 94 + commandOverlayHeight + agentDockHeight,
     });
-  }, [agentDockHeight, chromeHeight, commandCollapsed, commandOverlayHeight, downloadsOpen, leftPaneWidth, urlOverlayOpen, workspaceCollapsed]);
+  }, [agentDockHeight, chromeHeight, commandCollapsed, commandOverlayHeight, downloadsOpen, effectiveRightPaneWidth, leftPaneWidth, urlOverlayOpen, workspaceCollapsed]);
 
   const resizeLeftPane = (requestedWidth: number) => {
     setPreferredLeftPaneWidth(clampResizedLeftPaneWidth(requestedWidth, viewport.width));
+  };
+
+  const resizeRightPane = (requestedWidth: number) => {
+    const width = clampResizedRightPaneWidth(requestedWidth, viewport.width, leftPaneWidth);
+    setPreferredRightPaneWidth(width);
+    void window.poppinPad.command({ type: 'setWidth', width });
+  };
+
+  const sendPadCommand = async (command: PoppinPadCommand): Promise<PoppinPadCommandResult> => {
+    try {
+      return await window.poppinPad.command(command);
+    } catch {
+      return { ok: false, message: 'Poppin Pad could not complete that action.' };
+    }
   };
 
   const sendCommand = async (command: BrowserCommand): Promise<BrowserCommandResult> => {
@@ -523,6 +568,19 @@ export function App() {
           onResize={resizeLeftPane}
         />
       ) : null}
+      {!padCollapsed ? (
+        <PaneResizer
+          side="right"
+          width={rightPaneWidth}
+          {...getRightPaneWidthRange(viewport.width, leftPaneWidth)}
+          onResize={resizeRightPane}
+        />
+      ) : null}
+      <PoppinPadPane
+        snapshot={padSnapshot}
+        onCollapseChange={() => undefined}
+        onCommand={sendPadCommand}
+      />
       {taskTabActive ? (
         <div className={`task-stage ${workspaceCollapsed ? 'workspace-collapsed' : ''}`}>
           <TaskTabView
@@ -550,7 +608,7 @@ export function App() {
           onOpenTaskTab={() => setTaskTabActive(true)}
         />
       ) : null}
-      <CommandBar snapshot={taskSnapshot} workspace={workspaceSnapshot} collapsed={commandCollapsed} onCollapseChange={setCommandCollapsed} onCommand={sendTaskCommand} onOverlayHeightChange={setCommandOverlayHeight} />
+      <CommandBar snapshot={taskSnapshot} workspace={workspaceSnapshot} pad={padSnapshot} collapsed={commandCollapsed} onCollapseChange={setCommandCollapsed} onCommand={sendTaskCommand} onPadCommand={sendPadCommand} onOverlayHeightChange={setCommandOverlayHeight} />
     </main>
   );
 }

@@ -1,6 +1,6 @@
 import { type KeyboardEvent, type PointerEvent, useEffect, useRef, useState } from 'react';
 
-import { DEFAULT_LEFT_PANE_WIDTH, type PaneSide } from './pane-layout';
+import { DEFAULT_LEFT_PANE_WIDTH, DEFAULT_RIGHT_PANE_WIDTH, type PaneSide } from './pane-layout';
 
 interface PaneResizerProps {
   side: PaneSide;
@@ -13,7 +13,7 @@ interface PaneResizerProps {
 export function PaneResizer({ side, width, minimum, maximum, onResize }: PaneResizerProps) {
   const drag = useRef<{ pointerId: number; startX: number; startWidth: number } | null>(null);
   const [isDragging, setIsDragging] = useState(false);
-  const label = side === 'left' ? 'Resize workspace pane' : 'Resize context and task pane';
+  const label = side === 'left' ? 'Resize Poppin Context pane' : 'Resize Poppin Pad pane';
 
   useEffect(() => () => {
     document.body.classList.remove('pane-is-resizing');
@@ -55,7 +55,7 @@ export function PaneResizer({ side, width, minimum, maximum, onResize }: PaneRes
       aria-valuemax={maximum}
       aria-valuenow={width}
       title={`${label}. Drag, use arrow keys, or double-click to reset.`}
-      onDoubleClick={() => onResize(DEFAULT_LEFT_PANE_WIDTH)}
+      onDoubleClick={() => onResize(side === 'left' ? DEFAULT_LEFT_PANE_WIDTH : DEFAULT_RIGHT_PANE_WIDTH)}
       onKeyDown={handleKeyDown}
       onPointerDown={(event) => {
         if (event.button !== 0) return;

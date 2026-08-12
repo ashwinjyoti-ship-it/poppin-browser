@@ -41,6 +41,7 @@ textarea:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
 .app-shell {
   --chrome-height: 103px;
   --workspace-pane-width: 286px;
+  --poppin-pad-width: 34px;
   position: relative;
   width: 100%;
   height: 100%;
@@ -651,11 +652,12 @@ textarea:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
 .task-stage {
   position: absolute;
   z-index: 1;
-  inset: var(--chrome-height) 24px calc(104px + var(--command-overlay-height, 0px) + var(--agent-dock-height, 0px)) calc(var(--workspace-pane-width) + 24px);
+  inset: var(--chrome-height) calc(var(--poppin-pad-width) + 24px) calc(104px + var(--command-overlay-height, 0px) + var(--agent-dock-height, 0px)) calc(var(--workspace-pane-width) + 24px);
   border: 1px solid rgba(226, 216, 204, .9);
   border-radius: 20px;
   background: var(--surface);
   box-shadow: 0 14px 42px rgba(65, 44, 20, .075), 0 2px 8px rgba(65, 44, 20, .035);
+  transition: inset 160ms ease, left 160ms ease, right 160ms ease;
 }
 
 .native-stage, .task-stage { z-index: 2; overflow: hidden; -webkit-app-region: no-drag; }
@@ -681,6 +683,30 @@ textarea:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
   padding: 20px;
   border-radius: 18px;
   overflow: hidden;
+  transition: width 160ms ease;
+}
+
+.poppin-pad-pane {
+  right: 12px;
+  width: var(--poppin-pad-width);
+  padding: 16px;
+  border-radius: 18px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transition: width 160ms ease;
+}
+
+.side-rail-right {
+  right: 12px;
+  width: 34px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 0;
+  border-radius: 14px;
 }
 
 .side-rail-left {
@@ -712,6 +738,7 @@ textarea:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
   touch-action: none;
 }
 .pane-resizer-left { left: calc(12px + var(--workspace-pane-width) - 6px); }
+.pane-resizer-right { right: calc(12px + var(--poppin-pad-width) - 6px); }
 .command-is-collapsed .pane-resizer { bottom: 24px; }
 .pane-resizer::before {
   content: '';
@@ -1450,3 +1477,147 @@ body.pane-is-resizing * { cursor: col-resize !important; user-select: none !impo
 .dock-actions { display: flex; gap: 6px; }
 .dock-btn { display: flex; align-items: center; justify-content: center; gap: 4px; flex: 1; height: 28px; padding: 0 8px; border: 1px solid var(--border); border-radius: 8px; color: #6f5b43; background: var(--surface); font-size: 10px; font-weight: 650; }
 .dock-btn-primary { border-color: transparent; color: #fff; background: var(--amber-strong); }
+
+.poppin-pad-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.poppin-pad-tool {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid rgba(226, 216, 204, .92);
+  border-radius: 8px;
+  color: #6f5b43;
+  background: rgba(255, 253, 249, .96);
+}
+.poppin-pad-tool-active { border-color: color-mix(in srgb, var(--amber-strong) 40%, transparent); color: #7a4b0f; background: #fff6ea; }
+.poppin-pad-export {
+  margin-left: auto;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid rgba(226, 216, 204, .92);
+  border-radius: 8px;
+  color: #6f5b43;
+  background: rgba(255, 253, 249, .96);
+  font-size: 10px;
+  font-weight: 650;
+}
+.poppin-pad-canvas {
+  position: relative;
+  flex: 1;
+  min-height: 240px;
+  overflow: auto;
+  border: 1px solid rgba(226, 216, 204, .92);
+  border-radius: 14px;
+  background-color: #fffdf9;
+  background-image: radial-gradient(circle, rgba(112, 83, 48, .14) 1px, transparent 1px);
+  background-size: 18px 18px;
+}
+.poppin-pad-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.poppin-pad-card,
+.poppin-pad-text,
+.poppin-pad-sticky {
+  position: absolute;
+  -webkit-app-region: no-drag;
+}
+.poppin-pad-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid rgba(226, 216, 204, .96);
+  border-radius: 12px;
+  background: rgba(255, 253, 249, .98);
+  box-shadow: 0 8px 20px rgba(65, 44, 20, .08);
+  overflow: hidden;
+}
+.poppin-pad-card-selected { outline: 2px solid color-mix(in srgb, var(--amber-strong) 50%, transparent); }
+.poppin-pad-card-header { display: flex; flex-direction: column; gap: 4px; font-size: 11px; }
+.poppin-pad-card-tag {
+  align-self: flex-start;
+  padding: 1px 6px;
+  border-radius: 999px;
+  color: #7a4b0f;
+  background: #fff2df;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.poppin-pad-card-body { font-size: 11px; line-height: 1.35; overflow: auto; }
+.poppin-pad-card-body img { max-width: 100%; border-radius: 8px; }
+.poppin-pad-card-body p { margin: 0; white-space: pre-wrap; word-break: break-word; }
+.poppin-pad-card-body a { color: #7a4b0f; font-size: 10px; word-break: break-all; }
+.poppin-pad-card-code .poppin-pad-card-body { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.poppin-pad-card-resize {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  width: 12px;
+  height: 12px;
+  border: 0;
+  border-radius: 3px;
+  background: linear-gradient(135deg, transparent 50%, rgba(112, 83, 48, .35) 50%);
+}
+.poppin-pad-sticky {
+  padding: 10px;
+  border-radius: 10px;
+  box-shadow: 0 8px 18px rgba(65, 44, 20, .08);
+  font-size: 12px;
+  line-height: 1.35;
+  white-space: pre-wrap;
+}
+.poppin-pad-text {
+  padding: 4px 8px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, .82);
+  box-shadow: 0 4px 12px rgba(65, 44, 20, .06);
+  white-space: pre-wrap;
+}
+.poppin-pad-message {
+  margin: 0;
+  color: #6f5b43;
+  font-size: 11px;
+}
+.command-attachments {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-height: 28px;
+  padding: 6px 8px;
+  border: 1px dashed rgba(226, 216, 204, .92);
+  border-radius: 10px;
+  background: rgba(255, 253, 249, .72);
+}
+.command-attachments-active { border-style: solid; }
+.command-attachment-chip {
+  height: 24px;
+  padding: 0 10px;
+  border: 1px solid rgba(226, 216, 204, .92);
+  border-radius: 999px;
+  color: #6f5b43;
+  background: #fff;
+  font-size: 10px;
+  font-weight: 650;
+}
+.command-attachment-hint {
+  color: #9a8d7d;
+  font-size: 10px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .browser-stage, .native-stage, .task-stage, .workspace-pane, .poppin-pad-pane { transition: none; }
+}
+@media (max-width: 1280px) {
+  .poppin-pad-export { width: 100%; margin-left: 0; }
+}
+
