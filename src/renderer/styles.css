@@ -1734,18 +1734,24 @@ body.pane-is-resizing .poppin-pad-pane {
   color: #6f5b43;
   font-size: 11px;
 }
+/* Sit above the single-row command bar. A full-width grid row inside the
+   fixed 78px bar shoved send/collapse below the chrome (and under the page). */
 .command-attachments {
-  grid-column: 1 / -1;
+  position: absolute;
+  z-index: 7;
+  left: 12px;
+  right: 12px;
+  bottom: calc(100% + 8px);
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
   min-height: 28px;
   padding: 6px 8px;
-  border: 1px dashed rgba(226, 216, 204, .92);
+  border: 1px solid rgba(226, 216, 204, .92);
   border-radius: 10px;
-  background: rgba(255, 253, 249, .72);
+  background: rgba(255, 253, 249, .97);
+  box-shadow: 0 10px 24px rgba(65, 44, 20, .08);
 }
-.command-attachments-active { border-style: solid; }
 .command-attachment-chip {
   height: 24px;
   padding: 0 10px;
@@ -1755,10 +1761,6 @@ body.pane-is-resizing .poppin-pad-pane {
   background: #fff;
   font-size: 10px;
   font-weight: 650;
-}
-.command-attachment-hint {
-  color: #9a8d7d;
-  font-size: 10px;
 }
 @media (prefers-reduced-motion: reduce) {
   .browser-stage, .native-stage, .task-stage, .workspace-pane, .poppin-pad-pane { transition: none; }

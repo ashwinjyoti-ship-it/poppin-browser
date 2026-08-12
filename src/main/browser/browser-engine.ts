@@ -1985,11 +1985,15 @@ export function isAuthenticationPopup(value: string, openerValue: string): boole
     const target = new URL(value);
     const localTarget = isLocalhostUrl(value);
     if (target.protocol !== 'https:' && !(localOpener && localTarget)) return false;
+    // Known identity hosts (Google Accounts, Microsoft, Apple, …) must be
+    // allowed even for paths like /gsi/select that omit oauth/login keywords.
+    // Restricting those to Claude alone blocked ordinary Sign in with Google.
     const knownHost = AUTHENTICATION_HOSTS.has(target.hostname)
       || target.hostname.endsWith('.anthropic.com');
+    if (knownHost) return true;
     const sameOrigin = target.origin === opener.origin;
     const authSignal = /(?:^|[/?#&_.-])(auth|oauth|login|sign[-_]?in|authorize|consent|callback)(?:$|[/?#&_.=-])/i.test(`${target.hostname}${target.pathname}${target.search}`);
-    return (authSignal && (knownHost || sameOrigin)) || (knownHost && opener.hostname === 'claude.ai');
+    return authSignal && sameOrigin;
   } catch {
     return false;
   }
