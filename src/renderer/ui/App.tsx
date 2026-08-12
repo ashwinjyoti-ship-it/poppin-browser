@@ -123,7 +123,7 @@ export function App() {
   const leftPaneWidth = normalizeLeftPaneWidth(preferredLeftPaneWidth, viewport.width);
   const padCollapsed = padSnapshot.pad.collapsed;
   const padActive = padSnapshot.pad.active;
-  // Focus mode expands to the screen-aware pad surface; otherwise honor the resized preference.
+  // Focus mode expands into leftover window space; otherwise honor the resized preference.
   const rightPaneWidth = padActive
     ? getFocusedRightPaneWidth(viewport.width, leftPaneWidth, workspaceCollapsed)
     : normalizeRightPaneWidth(
@@ -311,8 +311,11 @@ export function App() {
     try {
       if (command.type === 'setActive' && command.active) {
         const focused = getFocusedRightPaneWidth(viewport.width, leftPaneWidth, workspaceCollapsed);
-        setPreferredRightPaneWidth(focused);
+        // Keep preferred width so exiting Focus restores the user's resized size.
         await window.poppinPad.command({ type: 'setWidth', width: focused });
+      } else if (command.type === 'setActive' && !command.active) {
+        const restored = normalizeRightPaneWidth(preferredRightPaneWidth, viewport.width, leftPaneWidth, workspaceCollapsed);
+        await window.poppinPad.command({ type: 'setWidth', width: restored });
       }
       return await window.poppinPad.command(command);
     } catch {

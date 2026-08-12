@@ -1,4 +1,4 @@
-import type { BrowserWindow } from 'electron';
+import { dialog, type BrowserWindow } from 'electron';
 
 import {
   POPPIN_PAD_CHANNELS,
@@ -7,6 +7,7 @@ import {
   type PoppinPadCommandResult,
   type PoppinPadSnapshot,
 } from '../../shared/poppin-pad';
+import { exportPadToPdf } from './pad-pdf-export';
 import { exportPadToMarkdown } from './pad-tandem-export';
 import { PoppinPadStore } from './poppin-pad-store';
 
@@ -66,9 +67,22 @@ export class PoppinPadEngine {
         case 'deleteObject':
           this.store.deleteObject(command.objectId);
           break;
-        case 'clearCanvas':
+        case 'clearCanvas': {
+          // Renderer window.confirm is unreliable in Electron; use a native dialog.
+          const { response } = await dialog.showMessageBox(this.window, {
+            type: 'question',
+            buttons: ['Cancel', 'Clear'],
+            defaultId: 1,
+            cancelId: 0,
+            message: 'Clear drawings and cards from Poppin Pad?',
+            detail: 'This removes shapes, text, stickies, and cards from the pad.',
+          });
+          if (response !== 1) {
+            return { ok: false, message: 'Clear canceled.' };
+          }
           this.store.clearCanvas(command.scope);
           break;
+        }
         case 'ingestDrop':
           this.store.ingestDrop(command.payload, command.x, command.y);
           this.store.setCollapsed(false);
@@ -79,6 +93,16 @@ export class PoppinPadEngine {
           break;
         case 'exportToTandem':
           return await this.exportToTandem(command.title);
+        case 'exportToPdf':
+          return await this.exportToPdf(command.title);
+        case 'focusShell':
+          // Return keyboard focus to the React shell so pad textareas can receive typing.
+          // Native BrowserViews otherwise keep stealing keys after a canvas click.
+          if (!this.window.isDestroyed()) {
+            this.window.focus();
+            if (!this.window.webContents.isDestroyed()) this.window.webContents.focus();
+          }
+          return { ok: true };
         case 'queueAttachment':
           this.store.queueAttachment(command.objectId);
           break;
@@ -107,6 +131,14 @@ export class PoppinPadEngine {
     const markdown = exportPadToMarkdown(snapshot, exportTitle);
     const result = await this.options.exportToTandem({ title: exportTitle, markdown });
     return { ok: true, message: 'Exported to Tandem.', pageId: result.pageId };
+  }
+
+  private async exportToPdf(title?: string): Promise<PoppinPadCommandResult> {
+    const snapshot = this.store.getSnapshot();
+    const exportTitle = title ?? `Poppin Pad — ${new Date().toLocaleString()}`;
+    const filePath = await exportPadToPdf(this.window, snapshot, exportTitle);
+    if (!filePath) return { ok: false, message: 'PDF export canceled.' };
+    return { ok: true, message: `Saved PDF to ${filePath}` };
   }
 
   private emitSnapshot(): void {
