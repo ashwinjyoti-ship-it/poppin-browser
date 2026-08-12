@@ -1,4 +1,7 @@
 import { execFile } from 'node:child_process';
+import { readdir } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import path from 'node:path';
 
 /**
  * GUI apps launched from Finder/Dock/Spotlight (or an equivalent desktop
@@ -27,7 +30,7 @@ function resolveShellPathDirs(): Promise<string[]> {
     // Login shells (`-l`) can print MOTD/nvm/etc banners on stdout before
     // running the command, so the PATH is wrapped in markers to pull it out
     // of whatever else the shell decided to print.
-    execFile(shell, ['-ilc', `echo "${PATH_START}$PATH${PATH_END}"`], { timeout: 5_000 }, (error, stdout) => {
+    execFile(shell, ['-ilc', `echo "${PATH_START}$PATH${PATH_END}"`], { timeout: 8_000 }, (error, stdout) => {
       if (error || !stdout) {
         resolve([]);
         return;
@@ -41,4 +44,33 @@ function resolveShellPathDirs(): Promise<string[]> {
 /** Merges `PATH`-like directory lists, de-duplicated, preferring earlier entries. */
 export function mergePathDirs(...lists: string[][]): string[] {
   return [...new Set(lists.flat().filter(Boolean))];
+}
+
+let cachedVersionManagerDirs: Promise<string[]> | null = null;
+
+/**
+ * Bin directories for the most common Node version managers, found by
+ * reading the filesystem directly rather than relying on a shell profile
+ * having sourced them. This covers installs the login-shell PATH probe
+ * above can miss — e.g. nvm's init line living in a startup file the shell
+ * invocation flags used here don't happen to source.
+ */
+export function versionManagerBinDirs(): Promise<string[]> {
+  if (!cachedVersionManagerDirs) cachedVersionManagerDirs = resolveVersionManagerBinDirs();
+  return cachedVersionManagerDirs;
+}
+
+async function resolveVersionManagerBinDirs(): Promise<string[]> {
+  const home = homedir();
+  const dirs = [path.join(home, '.volta', 'bin'), path.join(home, '.asdf', 'shims')];
+  const nvmNodeDir = path.join(home, '.nvm', 'versions', 'node');
+  try {
+    const entries = await readdir(nvmNodeDir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.isDirectory()) dirs.push(path.join(nvmNodeDir, entry.name, 'bin'));
+    }
+  } catch {
+    // nvm not installed, or no versions under it yet — nothing to add.
+  }
+  return dirs;
 }

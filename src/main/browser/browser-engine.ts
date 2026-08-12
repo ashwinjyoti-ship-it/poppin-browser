@@ -2111,27 +2111,39 @@ const CURSOR_AUTOHIDE_SCRIPT = `(() => {
 
 /**
  * Pages should not start playing video on their own. This pauses any video
- * already playing (or that starts playing, e.g. via the `autoplay`
- * attribute or a page's own load-time script) for a short window right
- * after the page loads, then stops interfering so a later, user-initiated
- * play works normally.
+ * already playing (or that starts playing, e.g. via the \`autoplay\`
+ * attribute or a page's own load-time script), and keeps re-pausing new
+ * autoplay attempts, until the user does something on the page — a click,
+ * a key press, a touch. From then on it gets out of the way entirely so
+ * user-initiated playback works normally.
+ *
+ * A fixed timeout was tried first, but heavy players (YouTube's chief among
+ * them) often don't attach or start their <video> until well after ads and
+ * config finish loading, so a short window loses the race and the video
+ * plays anyway. Watching indefinitely — but only until real user input —
+ * avoids that race without ever blocking playback the user actually asked for.
  */
 const AUTOPLAY_GUARD_SCRIPT = `(() => {
   if (window.__poppinAutoplayGuard) return;
   window.__poppinAutoplayGuard = true;
-  const GUARD_MS = 1500;
-  const guardUntil = Date.now() + GUARD_MS;
-  const pauseIfWithinGuard = (video) => {
-    if (Date.now() > guardUntil || video.paused) return;
+  let userInteracted = false;
+  const pauseIfAuto = (video) => {
+    if (userInteracted || video.paused) return;
     video.pause();
   };
-  document.querySelectorAll('video').forEach(pauseIfWithinGuard);
-  document.addEventListener('play', (event) => {
-    if (event.target instanceof HTMLVideoElement) pauseIfWithinGuard(event.target);
-  }, true);
-  const observer = new MutationObserver(() => document.querySelectorAll('video').forEach(pauseIfWithinGuard));
+  const scan = () => document.querySelectorAll('video').forEach(pauseIfAuto);
+  const observer = new MutationObserver(scan);
+  const markInteracted = () => {
+    userInteracted = true;
+    observer.disconnect();
+  };
   observer.observe(document.documentElement, { childList: true, subtree: true });
-  setTimeout(() => observer.disconnect(), GUARD_MS);
+  scan();
+  document.addEventListener('play', (event) => { if (event.target instanceof HTMLVideoElement) pauseIfAuto(event.target); }, true);
+  document.addEventListener('playing', (event) => { if (event.target instanceof HTMLVideoElement) pauseIfAuto(event.target); }, true);
+  document.addEventListener('pointerdown', markInteracted, true);
+  document.addEventListener('keydown', markInteracted, true);
+  document.addEventListener('touchstart', markInteracted, true);
 })()`;
 
 const READ_VISIBLE_PAGE_SCRIPT = `(() => {
