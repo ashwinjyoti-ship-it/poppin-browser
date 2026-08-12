@@ -1,4 +1,4 @@
-import { type FormEvent, useLayoutEffect, useRef, useState } from 'react';
+import { type DragEvent, type FormEvent, useLayoutEffect, useRef, useState } from 'react';
 import { ChevronDown, ChevronUp, Send, Square } from 'lucide-react';
 
 import type { AgentHarnessId } from '../../shared/agent';
@@ -54,26 +54,33 @@ export function CommandBar({ snapshot, workspace, pad, collapsed, onCollapseChan
     );
 
   useLayoutEffect(() => {
-    if (!preflight && !browserQuestion && !error) {
+    // Collapsing must clear the reserved gutter; otherwise the BrowserView
+    // keeps a tall bottom inset while the reopen control is only ~48px.
+    if (collapsed) {
       onOverlayHeightChange?.(0);
+      return;
+    }
+    const attachmentReserve = pad.pendingAttachments.length > 0 ? 44 : 0;
+    if (!preflight && !browserQuestion && !error) {
+      onOverlayHeightChange?.(attachmentReserve);
       return;
     }
     if (error && !preflight && !browserQuestion) {
       // Keep ACP/command errors in the reserved bottom gutter so the native
       // BrowserView cannot cover the dismissible toast.
-      onOverlayHeightChange?.(56);
+      onOverlayHeightChange?.(56 + attachmentReserve);
       return;
     }
     const updateHeight = () => {
       const measuredHeight = Math.ceil(preflightRef.current?.getBoundingClientRect().height ?? 0);
-      onOverlayHeightChange?.(Math.max(PREFLIGHT_MIN_HEIGHT, measuredHeight));
+      onOverlayHeightChange?.(Math.max(PREFLIGHT_MIN_HEIGHT, measuredHeight) + attachmentReserve);
     };
     updateHeight();
     if (!preflightRef.current || typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver(updateHeight);
     observer.observe(preflightRef.current);
     return () => observer.disconnect();
-  }, [browserQuestion, error, onOverlayHeightChange, preflight]);
+  }, [browserQuestion, collapsed, error, onOverlayHeightChange, pad.pendingAttachments.length, preflight]);
 
   if (collapsed) {
     return (
@@ -130,8 +137,24 @@ export function CommandBar({ snapshot, workspace, pad, collapsed, onCollapseChan
     await start(preflight?.kind ?? requirements.kind);
   };
 
+  const acceptPadAttachment = (event: DragEvent) => {
+    if (!event.dataTransfer.types.includes(PAD_ATTACHMENT_MIME)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+  };
+
   return (
-    <form className="command-bar" onSubmit={(event) => { void submit(event); }} aria-label="Send a task to Codex">
+    <form
+      className="command-bar"
+      onSubmit={(event) => { void submit(event); }}
+      aria-label="Send a task to Codex"
+      onDragOver={acceptPadAttachment}
+      onDrop={(event) => {
+        event.preventDefault();
+        const objectId = event.dataTransfer.getData(PAD_ATTACHMENT_MIME);
+        if (objectId) void onPadCommand({ type: 'queueAttachment', objectId });
+      }}
+    >
       <div className={`command-activity ${snapshot.task?.state === 'Running' ? 'command-activity-running' : ''}`} aria-hidden="true">
         <Brand compact />
       </div>
@@ -178,32 +201,21 @@ export function CommandBar({ snapshot, workspace, pad, collapsed, onCollapseChan
           </select>
         </label>
       ) : null}
-      <div
-        className={`command-attachments ${pad.pendingAttachments.length ? 'command-attachments-active' : ''}`}
-        onDragOver={(event) => {
-          if (event.dataTransfer.types.includes(PAD_ATTACHMENT_MIME)) {
-            event.preventDefault();
-            event.dataTransfer.dropEffect = 'copy';
-          }
-        }}
-        onDrop={(event) => {
-          event.preventDefault();
-          const objectId = event.dataTransfer.getData(PAD_ATTACHMENT_MIME);
-          if (objectId) void onPadCommand({ type: 'queueAttachment', objectId });
-        }}
-      >
-        {pad.pendingAttachments.length ? pad.pendingAttachments.map((attachment) => (
-          <button
-            key={attachment.objectId}
-            type="button"
-            className="command-attachment-chip"
-            onClick={() => { void onPadCommand({ type: 'removeAttachment', objectId: attachment.objectId }); }}
-            title={`Remove ${attachment.title}`}
-          >
-            {attachment.title}
-          </button>
-        )) : <span className="command-attachment-hint">Drop Poppin Pad cards here</span>}
-      </div>
+      {pad.pendingAttachments.length > 0 ? (
+        <div className="command-attachments" aria-label="Queued Poppin Pad attachments">
+          {pad.pendingAttachments.map((attachment) => (
+            <button
+              key={attachment.objectId}
+              type="button"
+              className="command-attachment-chip"
+              onClick={() => { void onPadCommand({ type: 'removeAttachment', objectId: attachment.objectId }); }}
+              title={`Remove ${attachment.title}`}
+            >
+              {attachment.title}
+            </button>
+          ))}
+        </div>
+      ) : null}
       <label className="command-prompt">
         <span className="sr-only">Prompt</span>
         <input

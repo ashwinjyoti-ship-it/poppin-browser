@@ -50,6 +50,13 @@ describe('authentication popup policy', () => {
     expect(isAuthenticationPopup('https://accounts.google.com/login', 'http://example.com/')).toBe(false);
   });
 
+  it('allows Google Accounts and GSI popups from ordinary relying parties', () => {
+    expect(isAuthenticationPopup('https://accounts.google.com/gsi/select?client_id=fixture', 'https://example.com/login')).toBe(true);
+    expect(isAuthenticationPopup('https://accounts.google.com/o/oauth2/v2/auth?client_id=fixture', 'https://chatgpt.com/')).toBe(true);
+    expect(isAuthenticationPopup('https://accounts.google.com/v3/signin/identifier', 'https://mail.google.com/')).toBe(true);
+    expect(isAuthenticationPopup('https://login.microsoftonline.com/common/oauth2/v2.0/authorize', 'https://example.com/')).toBe(true);
+  });
+
   it('keeps the sign-in dialog smaller than the parent with a visible top Cancel strip', () => {
     const bounds = authenticationDialogBounds({ x: 100, y: 40, width: 1280, height: 800 });
     expect(bounds.width).toBeLessThanOrEqual(720);
