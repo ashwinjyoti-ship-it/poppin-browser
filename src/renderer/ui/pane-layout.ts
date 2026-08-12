@@ -14,7 +14,14 @@ export const MAX_LEFT_PANE_WIDTH = 480;
 
 export const DEFAULT_RIGHT_PANE_WIDTH = 320;
 export const MIN_RIGHT_PANE_WIDTH = 240;
+/** Classic pad ceiling on laptop-sized windows; larger displays grow past this. */
 export const MAX_RIGHT_PANE_WIDTH = 560;
+/** Absolute pad ceiling so ultra-wide windows do not swallow the browser. */
+export const MAX_RIGHT_PANE_WIDTH_CEILING = 1100;
+/** Window width at which the pad max starts scaling above {@link MAX_RIGHT_PANE_WIDTH}. */
+const PAD_MAX_SCALE_VIEWPORT = 1600;
+/** Extra pad pixels unlocked per pixel of viewport above {@link PAD_MAX_SCALE_VIEWPORT}. */
+const PAD_MAX_SCALE_FACTOR = 0.5;
 export const COLLAPSED_RAIL_WIDTH = 34;
 /** Gap between the native browser edge and the Poppin Pad (keeps the resizer clickable). */
 export const PANE_BROWSER_GUTTER = 18;
@@ -23,6 +30,17 @@ const MIN_BROWSER_WIDTH = 320;
 const FIXED_HORIZONTAL_SPACE = 52;
 const LEFT_PANE_WIDTH_STORAGE_KEY = 'poppin:pane-width:v2';
 const RIGHT_PANE_WIDTH_STORAGE_KEY = 'poppin:pad-width:v1';
+
+/**
+ * Screen-aware expand limit for Poppin Pad.
+ * Holds 560px through ~1600px windows, then grows with the display up to the ceiling.
+ */
+export function getMaxRightPaneWidth(viewportWidth: number): number {
+  const width = Math.round(viewportWidth);
+  if (!Number.isFinite(width) || width <= 0) return MAX_RIGHT_PANE_WIDTH;
+  const scaled = Math.round(MAX_RIGHT_PANE_WIDTH + Math.max(0, width - PAD_MAX_SCALE_VIEWPORT) * PAD_MAX_SCALE_FACTOR);
+  return Math.min(MAX_RIGHT_PANE_WIDTH_CEILING, Math.max(MAX_RIGHT_PANE_WIDTH, scaled));
+}
 
 export function normalizeLeftPaneWidth(width: number, viewportWidth: number): number {
   const { minimum, maximum } = getLeftPaneWidthRange(viewportWidth);
@@ -54,15 +72,18 @@ export function getRightPaneWidthRange(
 ): { minimum: number; maximum: number } {
   const leftFootprint = workspaceCollapsed ? COLLAPSED_RAIL_WIDTH + 18 : leftPaneWidth;
   const available = Math.round(viewportWidth) - FIXED_HORIZONTAL_SPACE - MIN_BROWSER_WIDTH - leftFootprint;
+  const screenMax = getMaxRightPaneWidth(viewportWidth);
   return {
     minimum: MIN_RIGHT_PANE_WIDTH,
-    maximum: Math.max(MIN_RIGHT_PANE_WIDTH, Math.min(MAX_RIGHT_PANE_WIDTH, available)),
+    maximum: Math.max(MIN_RIGHT_PANE_WIDTH, Math.min(screenMax, available)),
   };
 }
 
 export function getFocusedRightPaneWidth(viewportWidth: number, leftPaneWidth: number, workspaceCollapsed: boolean): number {
   const left = workspaceCollapsed ? COLLAPSED_RAIL_WIDTH + 18 : leftPaneWidth + 14;
-  return Math.max(MIN_RIGHT_PANE_WIDTH, Math.round(viewportWidth) - left - MIN_BROWSER_WIDTH - 24);
+  const available = Math.max(MIN_RIGHT_PANE_WIDTH, Math.round(viewportWidth) - left - MIN_BROWSER_WIDTH - 24);
+  // Focus mode may open wider than a prior preference, but still respects the screen-aware ceiling.
+  return Math.min(getMaxRightPaneWidth(viewportWidth), available);
 }
 
 /** Native BrowserView right inset so the view stops before the pad + resize gutter. */
@@ -95,7 +116,8 @@ export function loadLeftPaneWidth(storage: StorageReader): number {
 }
 
 export function loadRightPaneWidth(storage: StorageReader): number {
-  return loadStoredWidth(storage, RIGHT_PANE_WIDTH_STORAGE_KEY, DEFAULT_RIGHT_PANE_WIDTH, MIN_RIGHT_PANE_WIDTH, MAX_RIGHT_PANE_WIDTH);
+  // Persist up to the absolute ceiling; live normalize clamps to the current screen max.
+  return loadStoredWidth(storage, RIGHT_PANE_WIDTH_STORAGE_KEY, DEFAULT_RIGHT_PANE_WIDTH, MIN_RIGHT_PANE_WIDTH, MAX_RIGHT_PANE_WIDTH_CEILING);
 }
 
 export function saveLeftPaneWidth(storage: StorageWriter, width: number): void {
