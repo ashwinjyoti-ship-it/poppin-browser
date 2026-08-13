@@ -20,6 +20,8 @@ export interface TandemEngineOptions {
   closeWorld?: () => void;
   /** Notifies the workspace that explicit context changed. */
   onContextChanged?: () => void;
+  /** Notifies the browser when Tandem connects or disconnects (for tab reconciliation). */
+  onConnectionChanged?: (baseUrl: string | null) => void;
   createProvider?: CreateTandemProvider;
 }
 
@@ -133,6 +135,7 @@ export class TandemEngine {
     this.provider = null;
     this.snapshot = { ...EMPTY_TANDEM_SNAPSHOT };
     this.emit();
+    this.notifyConnectionChanged();
     this.options.onContextChanged?.();
     return { ok: true };
   }
@@ -167,6 +170,7 @@ export class TandemEngine {
       this.snapshot.activeWorkspaceId = workspaceId;
       await this.loadWorkspace();
       this.emit();
+      this.notifyConnectionChanged();
       return { ok: true };
     } catch (error) {
       this.provider = null;
@@ -318,6 +322,11 @@ export class TandemEngine {
   private emit(): void {
     if (this.window.isDestroyed() || this.window.webContents.isDestroyed()) return;
     this.window.webContents.send(TANDEM_CHANNELS.snapshot, this.getSnapshot());
+  }
+
+  private notifyConnectionChanged(): void {
+    const baseUrl = this.snapshot.connection.state === 'ready' ? this.snapshot.connection.baseUrl : null;
+    this.options.onConnectionChanged?.(baseUrl);
   }
 }
 

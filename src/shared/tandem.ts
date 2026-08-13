@@ -140,13 +140,22 @@ export function tandemWorldUrl(baseUrl: string, pageId?: string): string {
 }
 
 /** True when a browser tab is hosting Tandem World, including restored tabs that lost `surface`. */
-export function isTandemWorldBrowserUrl(url: string): boolean {
+export function isTandemWorldBrowserUrl(url: string, baseUrl?: string | null): boolean {
   try {
     const parsed = new URL(url);
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
-    if (parsed.searchParams.get(TANDEM_HOST_PARAM) !== TANDEM_HOST_VALUE) return false;
-    return parsed.pathname === '/' || parsed.pathname.startsWith('/page/');
+    if (!isTandemWorldPath(parsed.pathname)) return false;
+    if (parsed.searchParams.get(TANDEM_HOST_PARAM) === TANDEM_HOST_VALUE) return true;
+    if (!baseUrl) return false;
+    const base = new URL(baseUrl);
+    return parsed.origin === base.origin;
   } catch {
     return false;
   }
+}
+
+function isTandemWorldPath(pathname: string): boolean {
+  return pathname === '/'
+    || pathname.startsWith('/page/')
+    || pathname.startsWith('/workspace/');
 }

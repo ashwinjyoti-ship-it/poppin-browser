@@ -23,6 +23,7 @@ interface TabStripProps {
   /** Tandem World is always reachable as a pinned launcher, not a right-pane button. */
   tandemReady?: boolean;
   tandemMessage?: string;
+  tandemWorldOpen?: boolean;
   onOpenTandemWorld?: () => void;
 }
 
@@ -59,6 +60,7 @@ export function TabStrip({
   onWatchAgentTabs,
   tandemReady,
   tandemMessage,
+  tandemWorldOpen,
   onOpenTandemWorld,
 }: TabStripProps) {
   const groupsById = useMemo(() => new Map(groups.map((group) => [group.id, group])), [groups]);
@@ -167,7 +169,7 @@ export function TabStrip({
         onDragOver={(event) => event.preventDefault()}
         onDrop={(event) => dropTab(event, null, onReorder)}
       >
-        {onOpenTandemWorld && !hasTandemWorldTab ? (
+        {onOpenTandemWorld && !hasTandemWorldTab && !tandemWorldOpen ? (
           <button
             type="button"
             className="tab tab-tandem-world"
