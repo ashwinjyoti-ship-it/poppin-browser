@@ -138,3 +138,15 @@ export function tandemWorldUrl(baseUrl: string, pageId?: string): string {
   url.searchParams.set(TANDEM_HOST_PARAM, TANDEM_HOST_VALUE);
   return url.toString();
 }
+
+/** True when a browser tab is hosting Tandem World, including restored tabs that lost `surface`. */
+export function isTandemWorldBrowserUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
+    if (parsed.searchParams.get(TANDEM_HOST_PARAM) !== TANDEM_HOST_VALUE) return false;
+    return parsed.pathname === '/' || parsed.pathname.startsWith('/page/');
+  } catch {
+    return false;
+  }
+}

@@ -10,7 +10,7 @@ import { TandemClient } from '../src/main/tandem/tandem-client';
 import { TandemCredentialStore, normalizeTandemBaseUrl } from '../src/main/tandem/tandem-credentials';
 import { TandemEngine } from '../src/main/tandem/tandem-engine';
 import { executeTandemCapability, TANDEM_CAPABILITY_TOOL } from '../src/main/tandem/tandem-capability';
-import { tandemWorldUrl, ensureTandemHostParam, TANDEM_HOST_THEME_SCRIPT } from '../src/shared/tandem';
+import { tandemWorldUrl, ensureTandemHostParam, isTandemWorldBrowserUrl, TANDEM_HOST_THEME_SCRIPT } from '../src/shared/tandem';
 
 interface Call { method: string; url: string; body: unknown; apiKey: string | null }
 
@@ -59,6 +59,14 @@ describe('Tandem base URL', () => {
     expect(ensureTandemHostParam('poppin://new-tab/')).toBe('poppin://new-tab/');
     expect(TANDEM_HOST_THEME_SCRIPT).toContain('host-poppin');
     expect(TANDEM_HOST_THEME_SCRIPT).toContain('udm.host');
+  });
+
+  it('recognises restored Tandem World browser URLs that lost surface metadata', () => {
+    expect(isTandemWorldBrowserUrl('https://ash-doc.pages.dev/?host=poppin')).toBe(true);
+    expect(isTandemWorldBrowserUrl('https://ash-doc.pages.dev/page/abc?host=poppin')).toBe(true);
+    expect(isTandemWorldBrowserUrl('https://ash-doc.pages.dev/page/abc')).toBe(false);
+    expect(isTandemWorldBrowserUrl('https://example.com/?host=poppin')).toBe(true);
+    expect(isTandemWorldBrowserUrl('https://mail.google.com/')).toBe(false);
   });
 });
 
