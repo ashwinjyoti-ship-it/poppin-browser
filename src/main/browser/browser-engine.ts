@@ -174,7 +174,8 @@ export class BrowserEngine {
       ? state.tabs
       : [{ id: randomUUID(), url: NEW_TAB_URL, pinned: false, groupId: null }];
     for (const tab of tabs) {
-      const url = tab.surface === 'tandem-world' ? ensureTandemHostParam(tab.url) : tab.url;
+      const rawUrl = tab.surface === 'tandem-world' ? ensureTandemHostParam(tab.url) : tab.url;
+      const url = recoverMailUrlFromGoogleWidget(rawUrl) ?? rawUrl;
       this.createTab(url, tab.id, false, { ...tab, url }, false, 'end');
       if (tab.surface === 'tandem-world') this.tandemWorldTabId = tab.id;
     }
@@ -813,7 +814,7 @@ export class BrowserEngine {
         const tab = this.tabs.get(id);
         return tab ? [{
           id: tab.snapshot.id,
-          url: tab.lastExternalUrl || NEW_TAB_URL,
+          url: (recoverMailUrlFromGoogleWidget(tab.lastExternalUrl) ?? tab.lastExternalUrl) || NEW_TAB_URL,
           pinned: tab.snapshot.pinned,
           groupId: tab.snapshot.groupId,
           taskSpaceId: tab.snapshot.taskSpaceId,
@@ -934,6 +935,9 @@ export class BrowserEngine {
         contents.downloadURL(url);
         return { action: 'deny' };
       }
+      if (isGoogleWidgetMainFrameUrl(url)) {
+        return { action: 'deny' };
+      }
       if (tab.snapshot.taskSpaceId || this.settings.linkOpening === 'same-tab') {
         void contents.loadURL(url).catch(() => undefined);
       } else {
@@ -959,6 +963,7 @@ export class BrowserEngine {
         onForward: () => contents.navigationHistory.goForward(),
         onReload: () => this.reload(tab.snapshot.id),
         onOpenLink: (url, disposition) => {
+          if (isGoogleWidgetMainFrameUrl(url)) return;
           if (disposition === 'current' || tab.snapshot.taskSpaceId) void contents.loadURL(url).catch(() => undefined);
           else {
             const id = randomUUID();
@@ -1003,6 +1008,14 @@ export class BrowserEngine {
       const protocol = safeProtocol(url);
       if (protocol !== 'http:' && protocol !== 'https:' && protocol !== 'poppin:') {
         event.preventDefault();
+        return;
+      }
+      if (isGoogleWidgetMainFrameUrl(url)) {
+        event.preventDefault();
+        const recovered = recoverMailUrlFromGoogleWidget(url);
+        if (recovered && safeOrigin(contents.getURL()) === 'https://mail.google.com') {
+          void contents.loadURL(recovered).catch(() => undefined);
+        }
       }
     });
     contents.on('before-input-event', (event, input) => {
@@ -1161,6 +1174,11 @@ export class BrowserEngine {
 
   private handleNavigation(tab: BrowserTabRecord, url: string, resetFavicon: boolean): void {
     if (url.startsWith('poppin://error')) return;
+    const recovered = recoverMailUrlFromGoogleWidget(url);
+    if (recovered) {
+      void tab.view.webContents.loadURL(recovered).catch(() => undefined);
+      return;
+    }
     if (resetFavicon) {
       tab.documentGeneration += 1;
       for (const [id, record] of this.semanticReferences) if (record.tabId === tab.snapshot.id) this.semanticReferences.delete(id);
@@ -1321,6 +1339,12 @@ export class BrowserEngine {
   private reload(tabId: string): BrowserCommandResult {
     const tab = this.tabs.get(tabId);
     if (!tab) return { ok: false };
+    const current = tab.view.webContents.getURL();
+    const recovered = recoverMailUrlFromGoogleWidget(current);
+    if (recovered) {
+      void tab.view.webContents.loadURL(recovered).catch(() => undefined);
+      return { ok: true };
+    }
     if (tab.snapshot.failure) {
       void tab.view.webContents.loadURL(tab.lastExternalUrl);
     } else {
@@ -1345,7 +1369,8 @@ export class BrowserEngine {
     const tab = this.closedTabs.pop();
     if (!tab) return { ok: false, message: 'There are no recently closed tabs.' };
     if (tab.groupId && !this.groups.has(tab.groupId)) tab.groupId = null;
-    this.createTab(tab.url, tab.id, false, tab);
+    const url = recoverMailUrlFromGoogleWidget(tab.url) ?? tab.url;
+    this.createTab(url, tab.id, false, { ...tab, url });
     return { ok: true };
   }
 
@@ -1970,6 +1995,32 @@ function sanitizeBrowserSettings(settings: BrowserSettings): BrowserSettings {
     warnBeforeClosingMultipleTabs: Boolean(settings.warnBeforeClosingMultipleTabs),
     searchEngine: settings.searchEngine === 'google' ? 'google' : 'duckduckgo',
   };
+}
+
+/** Google embeds contact hovercards as /widget/ popups; they must not become a tab's main document. */
+export function isGoogleWidgetMainFrameUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    if (url.hostname === 'contacts.google.com' && url.pathname.startsWith('/widget/')) return true;
+    return url.pathname.includes('/widget/')
+      && url.searchParams.get('origin')?.includes('mail.google.com') === true;
+  } catch {
+    return false;
+  }
+}
+
+/** Rewrites a persisted or in-flight Gmail widget URL back to the inbox. */
+export function recoverMailUrlFromGoogleWidget(value: string): string | null {
+  if (!isGoogleWidgetMainFrameUrl(value)) return null;
+  try {
+    const origin = new URL(value).searchParams.get('origin');
+    if (!origin) return 'https://mail.google.com/mail/u/0/#inbox';
+    const mail = new URL(origin);
+    if (mail.hostname === 'mail.google.com') return 'https://mail.google.com/mail/u/0/#inbox';
+    return `${mail.origin}/`;
+  } catch {
+    return 'https://mail.google.com/mail/u/0/#inbox';
+  }
 }
 
 export function isAuthenticationPopup(value: string, openerValue: string): boolean {
