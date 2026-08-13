@@ -6,7 +6,7 @@ import path from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { authenticationDialogBounds, isAuthenticationPopup, isExternalLinkPreview, isLocalhostUrl } from '../src/main/browser/browser-engine';
+import { authenticationDialogBounds, isAuthenticationPopup, isExternalLinkPreview, isGoogleWidgetMainFrameUrl, isLocalhostUrl, recoverMailUrlFromGoogleWidget } from '../src/main/browser/browser-engine';
 import { WorkspaceStore } from '../src/main/workspace/workspace-store';
 import type { VisualSelectionSnapshot } from '../src/shared/workspace';
 
@@ -77,4 +77,19 @@ describe('Arc-style link preview policy', () => {
     expect(isExternalLinkPreview('javascript:alert(1)', 'https://example.com/')).toBe(false);
   });
 
+});
+
+describe('Gmail widget navigation policy', () => {
+  const hovercard = 'https://contacts.google.com/widget/hovercard/v/2?hl=en-GB&origin=https%3A%2F%2Fmail.google.com&usegapi=1';
+
+  it('detects Google contact hovercards that must not replace Gmail as the main frame', () => {
+    expect(isGoogleWidgetMainFrameUrl(hovercard)).toBe(true);
+    expect(isGoogleWidgetMainFrameUrl('https://mail.google.com/mail/u/0/#inbox')).toBe(false);
+    expect(isGoogleWidgetMainFrameUrl('https://example.com/widget/hovercard')).toBe(false);
+  });
+
+  it('recovers the Gmail inbox from a persisted hovercard URL', () => {
+    expect(recoverMailUrlFromGoogleWidget(hovercard)).toBe('https://mail.google.com/mail/u/0/#inbox');
+    expect(recoverMailUrlFromGoogleWidget('https://mail.google.com/mail/u/0/#inbox')).toBeNull();
+  });
 });
