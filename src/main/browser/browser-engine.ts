@@ -33,7 +33,7 @@ import {
 import { errorPageUrl } from './internal-pages';
 import { BrowserStateStore } from './state-store';
 import { normalizeTabOrder } from './tab-model';
-import { ensureTandemHostParam, TANDEM_HOST_THEME_SCRIPT } from '../../shared/tandem';
+import { ensureTandemHostParam, isTandemWorldBrowserUrl, TANDEM_HOST_THEME_SCRIPT } from '../../shared/tandem';
 import { displayUrl, NEW_TAB_URL, normalizeAddressInput, normalizeTabInput } from './url-input';
 import type { CapturedTabContext } from '../../shared/workspace';
 import type { VisualSelectionSnapshot } from '../../shared/workspace';
@@ -184,6 +184,15 @@ export class BrowserEngine {
       ? requestedActive.snapshot.id
       : tabs.find((tab) => !tab.taskSpaceId)?.id ?? tabs[0]!.id;
     this.activateTab(safeActiveId);
+    if (!this.tandemWorldTabId) {
+      const orphan = this.findTandemWorldTabRecord();
+      if (orphan) {
+        this.adoptTandemWorldTab(orphan);
+        this.dedupeTandemWorldTabs(orphan.snapshot.id);
+        this.emitSnapshot();
+        this.scheduleSave();
+      }
+    }
   }
 
   getSnapshot(): BrowserSnapshot {
@@ -233,6 +242,16 @@ export class BrowserEngine {
       this.activateTab(existing.snapshot.id);
       return;
     }
+    const orphan = this.findTandemWorldTabRecord();
+    if (orphan && !orphan.view.webContents.isDestroyed()) {
+      this.adoptTandemWorldTab(orphan);
+      this.dedupeTandemWorldTabs(orphan.snapshot.id);
+      void orphan.view.webContents.loadURL(hostedUrl).catch(() => undefined);
+      this.activateTab(orphan.snapshot.id);
+      this.emitSnapshot();
+      this.scheduleSave();
+      return;
+    }
     const id = randomUUID();
     this.tandemWorldTabId = id;
     this.createTab(hostedUrl, id, false, { id, url: hostedUrl, pinned: false, groupId: null, surface: 'tandem-world' }, true, 'end');
@@ -251,6 +270,33 @@ export class BrowserEngine {
 
   isTandemWorldTab(tabId: string): boolean {
     return this.tandemWorldTabId === tabId;
+  }
+
+  private findTandemWorldTabRecord(): BrowserTabRecord | undefined {
+    for (const id of this.tabOrder) {
+      const tab = this.tabs.get(id);
+      if (!tab || tab.snapshot.taskSpaceId) continue;
+      if (tab.snapshot.surface === 'tandem-world' || isTandemWorldBrowserUrl(tab.lastExternalUrl)) return tab;
+    }
+    return undefined;
+  }
+
+  private adoptTandemWorldTab(tab: BrowserTabRecord): void {
+    this.tandemWorldTabId = tab.snapshot.id;
+    tab.snapshot.surface = 'tandem-world';
+    tab.snapshot.pinned = false;
+    if (!tab.snapshot.title || tab.snapshot.title === 'Untitled') tab.snapshot.title = 'Tandem World';
+  }
+
+  private dedupeTandemWorldTabs(keepTabId: string): void {
+    for (const id of [...this.tabOrder]) {
+      if (id === keepTabId) continue;
+      const tab = this.tabs.get(id);
+      if (!tab || tab.snapshot.taskSpaceId) continue;
+      if (tab.snapshot.surface === 'tandem-world' || isTandemWorldBrowserUrl(tab.lastExternalUrl)) {
+        void this.closeTab(id, false);
+      }
+    }
   }
 
   hasTab(tabId: string): boolean {
@@ -1185,7 +1231,9 @@ export class BrowserEngine {
     }
     const isNewTab = url.startsWith('poppin://new-tab');
     const previousOrigin = safeOrigin(tab.lastExternalUrl);
-    const remembered = !isNewTab && tab.snapshot.surface === 'tandem-world' ? ensureTandemHostParam(url) : url;
+    const remembered = !isNewTab && (tab.snapshot.surface === 'tandem-world' || isTandemWorldBrowserUrl(url))
+      ? ensureTandemHostParam(url)
+      : url;
     tab.lastExternalUrl = isNewTab ? NEW_TAB_URL : remembered;
     this.syncNavigationState(tab);
     const nextOrigin = safeOrigin(url);

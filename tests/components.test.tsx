@@ -363,6 +363,28 @@ describe('browser chrome', () => {
     expect(onClose).toHaveBeenCalledWith('tandem-world');
   });
 
+  it('hides the Tandem launcher and keeps a close control for an orphaned Tandem World tab', async () => {
+    render(
+      <TabStrip
+        tabs={[{ ...TAB, id: 'orphan-tandem', title: 'Project notes', pinned: true, kind: 'tandem' }]}
+        groups={[]}
+        activeTabId="orphan-tandem"
+        onActivate={vi.fn()}
+        onClose={vi.fn()}
+        onCreate={vi.fn()}
+        onReorder={vi.fn()}
+        onShowTabMenu={vi.fn()}
+        onToggleGroup={vi.fn()}
+        onRenameGroup={vi.fn()}
+        onShowGroupMenu={vi.fn()}
+        tandemReady
+        onOpenTandemWorld={vi.fn()}
+      />,
+    );
+    expect(screen.queryByRole('button', { name: /open tandem world/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /close project notes/i })).toBeInTheDocument();
+  });
+
   it('offers an explicit Tandem World action in the connected workspace section', async () => {
     const user = userEvent.setup();
     const onCommand = vi.fn().mockResolvedValue(null);

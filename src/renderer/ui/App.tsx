@@ -6,7 +6,7 @@ import type { WorkspaceCommand, WorkspaceCommandResult, WorkspaceSnapshot } from
 import type { TaskCommand, TaskCommandResult, TaskSnapshot } from '../../shared/task';
 import type { BrowserAgentCommand, BrowserAgentCommandResult, BrowserAgentSnapshot } from '../../shared/browser-agent';
 import type { PagesCommand, PagesSnapshot } from '../../shared/pages';
-import { EMPTY_TANDEM_SNAPSHOT, type TandemCommand, type TandemSnapshot } from '../../shared/tandem';
+import { EMPTY_TANDEM_SNAPSHOT, type TandemCommand, type TandemSnapshot, isTandemWorldBrowserUrl } from '../../shared/tandem';
 import { EMPTY_DOWNLOADS_SNAPSHOT, type DownloadsSnapshot } from '../../shared/downloads';
 import { EMPTY_POPPIN_PAD_SNAPSHOT, type PoppinPadCommand, type PoppinPadCommandResult, type PoppinPadSnapshot } from '../../shared/poppin-pad';
 import { Brand } from './Brand';
@@ -109,7 +109,10 @@ export function App() {
   const activeTab = activeNativeTab || taskTabActive || mailActive ? null : browserActiveTab;
   const browserTabs = snapshot.tabs.filter((tab) => !tab.taskSpaceId || (browserAgentSnapshot.watching && tab.taskSpaceId === browserAgentSnapshot.taskSpace?.id));
   const visibleTabs = [
-    ...browserTabs.map((tab) => ({ ...tab, kind: tab.surface === 'tandem-world' ? 'tandem' as const : 'browser' as const })),
+    ...browserTabs.map((tab) => ({
+      ...tab,
+      kind: tab.surface === 'tandem-world' || isTandemWorldBrowserUrl(tab.url) ? 'tandem' as const : 'browser' as const,
+    })),
     ...(taskSnapshot.task ? [{
       id: TASK_TAB_ID,
       title: taskSnapshot.task.kind === 'code' ? 'Review' : 'Reply',
@@ -562,7 +565,7 @@ export function App() {
               return;
             }
             const tab = snapshot.tabs.find((candidate) => candidate.id === tabId);
-            if (tab?.surface === 'tandem-world') setWorkspaceCollapsed(true);
+            if (tab && (tab.surface === 'tandem-world' || isTandemWorldBrowserUrl(tab.url))) setWorkspaceCollapsed(true);
             if (browserAgentSnapshot.watching && !tab?.taskSpaceId) void sendBrowserAgentCommand({ type: 'leaveWatch' });
             void sendPagesCommand({ type: 'deactivateTabs' });
             void sendCommand({ type: 'activate', tabId });
@@ -570,7 +573,7 @@ export function App() {
           onClose={(tabId) => {
             if (tabId === TASK_TAB_ID) { setTaskTabActive(false); return; }
             if (pagesSnapshot.tabs.some((tab) => tab.id === tabId)) void sendPagesCommand({ type: 'closeTab', tabId });
-            else if (snapshot.tabs.find((tab) => tab.id === tabId)?.surface === 'tandem-world') void sendTandemCommand({ type: 'closeWorld' });
+            else if (snapshot.tabs.some((tab) => tab.id === tabId && (tab.surface === 'tandem-world' || isTandemWorldBrowserUrl(tab.url)))) void sendTandemCommand({ type: 'closeWorld' });
             else void sendCommand({ type: 'close', tabId });
           }}
           onCreate={() => { void sendPagesCommand({ type: 'deactivateTabs' }); void sendCommand({ type: 'create' }); }}
