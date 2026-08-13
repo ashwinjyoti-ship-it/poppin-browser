@@ -59,6 +59,10 @@ const AUTHENTICATION_HOSTS = new Set([
   'accounts.google.com', 'appleid.apple.com', 'auth.openai.com', 'chatgpt.com',
   'login.microsoftonline.com', 'claude.ai', 'auth.anthropic.com',
 ]);
+const IDENTITY_PROVIDER_HOSTS = new Set([
+  'accounts.google.com', 'appleid.apple.com', 'auth.openai.com',
+  'login.microsoftonline.com', 'auth.anthropic.com',
+]);
 
 interface BrowserTabRecord {
   view: WebContentsView;
@@ -92,6 +96,8 @@ export class BrowserEngine {
   private closeConfirmed = false;
   private authenticationWindow: BrowserWindow | null = null;
   private readonly authenticationWindows = new Set<BrowserWindow>();
+  private authenticationOpenerTabId: string | null = null;
+  private authenticationOpenerUrl = '';
   private overlayKind: 'authentication' | 'preview' | null = null;
   private contentVisible = true;
   /** The single reusable Tandem World surface, if it is open. */
@@ -999,6 +1005,8 @@ export class BrowserEngine {
         return;
       }
       this.closeAuthenticationWindows();
+      this.authenticationOpenerTabId = tab.snapshot.id;
+      this.authenticationOpenerUrl = contents.getURL();
       this.registerAuthenticationWindow(popup);
     });
     contents.on('context-menu', (_event, params) => {
@@ -1173,6 +1181,12 @@ export class BrowserEngine {
       const protocol = safeProtocol(url);
       if (protocol !== 'http:' && protocol !== 'https:' && protocol !== 'about:') event.preventDefault();
     });
+    popup.webContents.on('did-navigate', (_event, url) => {
+      this.maybeCompleteAuthentication(url);
+    });
+    popup.webContents.on('did-navigate-in-page', (_event, url) => {
+      this.maybeCompleteAuthentication(url);
+    });
     // Google can continue its consent flow through another window. Preserve
     // only authentication-scoped children and keep every child sandboxed in
     // the same browser session; arbitrary popup creation remains denied.
@@ -1216,6 +1230,26 @@ export class BrowserEngine {
     for (const popup of Array.from(this.authenticationWindows)) {
       if (!popup.isDestroyed()) popup.close();
     }
+    this.authenticationOpenerTabId = null;
+    this.authenticationOpenerUrl = '';
+  }
+
+  private maybeCompleteAuthentication(url: string): void {
+    if (!this.authenticationOpenerTabId || !this.authenticationOpenerUrl) return;
+    if (!isAuthenticationCompletionUrl(url, this.authenticationOpenerUrl)) return;
+    const tabId = this.authenticationOpenerTabId;
+    this.authenticationOpenerTabId = null;
+    this.authenticationOpenerUrl = '';
+    const tab = this.tabs.get(tabId);
+    if (tab && !tab.view.webContents.isDestroyed()) {
+      void tab.view.webContents.loadURL(url).catch(() => undefined);
+      this.activateTab(tabId);
+    }
+    for (const popup of Array.from(this.authenticationWindows)) {
+      if (!popup.isDestroyed()) popup.close();
+    }
+    this.emitSnapshot();
+    this.scheduleSave();
   }
 
   private handleNavigation(tab: BrowserTabRecord, url: string, resetFavicon: boolean): void {
@@ -2068,6 +2102,38 @@ export function recoverMailUrlFromGoogleWidget(value: string): string | null {
     return `${mail.origin}/`;
   } catch {
     return 'https://mail.google.com/mail/u/0/#inbox';
+  }
+}
+
+export function isIdentityProviderHost(hostname: string): boolean {
+  return IDENTITY_PROVIDER_HOSTS.has(hostname) || hostname.endsWith('.anthropic.com');
+}
+
+/** True when an auth popup has returned to the opener origin and should hand off to the tab. */
+export function isAuthenticationCompletionUrl(value: string, openerValue: string): boolean {
+  try {
+    const opener = new URL(openerValue);
+    const target = new URL(value);
+    const localOpener = isLocalhostUrl(openerValue);
+    const localTarget = isLocalhostUrl(value);
+    if (target.protocol === 'about:') return false;
+    if (target.protocol !== 'https:' && !(localOpener && localTarget)) return false;
+    if (isIdentityProviderHost(target.hostname)) return false;
+    if (target.origin !== opener.origin) return false;
+    return !isAuthenticationInterstitialUrl(value);
+  } catch {
+    return false;
+  }
+}
+
+function isAuthenticationInterstitialUrl(value: string): boolean {
+  try {
+    const target = new URL(value);
+    if (isIdentityProviderHost(target.hostname)) return true;
+    return /(?:^|[/?#&_.-])(?:oauth[-/]?popup|sign[-_]?in|log[-_]?in|authorize|consent|identifier|select|challenge)(?:$|[/?#&_.=-])/i
+      .test(`${target.pathname}${target.search}${target.hash}`);
+  } catch {
+    return true;
   }
 }
 

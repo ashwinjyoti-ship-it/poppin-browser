@@ -6,7 +6,7 @@ import path from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { authenticationDialogBounds, isAuthenticationPopup, isExternalLinkPreview, isGoogleWidgetMainFrameUrl, isLocalhostUrl, recoverMailUrlFromGoogleWidget } from '../src/main/browser/browser-engine';
+import { authenticationDialogBounds, isAuthenticationCompletionUrl, isAuthenticationPopup, isExternalLinkPreview, isGoogleWidgetMainFrameUrl, isIdentityProviderHost, isLocalhostUrl, recoverMailUrlFromGoogleWidget } from '../src/main/browser/browser-engine';
 import { WorkspaceStore } from '../src/main/workspace/workspace-store';
 import type { VisualSelectionSnapshot } from '../src/shared/workspace';
 
@@ -65,6 +65,23 @@ describe('authentication popup policy', () => {
     expect(bounds.height).toBeLessThan(800 * 0.85);
     expect(bounds.y).toBeGreaterThanOrEqual(40 + 76);
     expect(bounds.x).toBeGreaterThanOrEqual(100);
+  });
+
+  it('detects identity providers and post-auth return URLs for opener handoff', () => {
+    expect(isIdentityProviderHost('accounts.google.com')).toBe(true);
+    expect(isIdentityProviderHost('login.microsoftonline.com')).toBe(true);
+    expect(isIdentityProviderHost('chatgpt.com')).toBe(false);
+    expect(isIdentityProviderHost('claude.ai')).toBe(false);
+
+    expect(isAuthenticationCompletionUrl('https://accounts.google.com/o/oauth2/v2/auth', 'https://chatgpt.com/')).toBe(false);
+    expect(isAuthenticationCompletionUrl('https://chatgpt.com/', 'https://chatgpt.com/auth/login')).toBe(true);
+    expect(isAuthenticationCompletionUrl('https://chatgpt.com/', 'https://chatgpt.com/')).toBe(true);
+    expect(isAuthenticationCompletionUrl('https://mail.google.com/mail/u/0/#inbox', 'https://mail.google.com/')).toBe(true);
+    expect(isAuthenticationCompletionUrl('https://chatgpt.com/api/auth/callback?code=fixture', 'https://chatgpt.com/')).toBe(true);
+    expect(isAuthenticationCompletionUrl('http://127.0.0.1:3000/oauth-popup', 'http://127.0.0.1:3000/login')).toBe(false);
+    expect(isAuthenticationCompletionUrl('http://127.0.0.1:3000/oauth-consent', 'http://127.0.0.1:3000/login')).toBe(false);
+    expect(isAuthenticationCompletionUrl('http://127.0.0.1:3000/', 'http://127.0.0.1:3000/login')).toBe(true);
+    expect(isAuthenticationCompletionUrl('https://example.com/', 'https://duckduckgo.com/')).toBe(false);
   });
 });
 
