@@ -14,6 +14,7 @@ import {
   type ContinuityPayloadV1,
   type ContinuityProfileSnapshot,
 } from '../../shared/continuity';
+import type { MailSkillSnapshot } from '../../shared/mail';
 import type {
   BrowserSessionSnapshot,
   ContextPackSnapshot,
@@ -32,6 +33,8 @@ export interface ContinuityBuildInput {
   tabContexts: TabContextSnapshot[];
   tandemPages: TandemContextSnapshot[];
   memorySelected: boolean;
+  mailInboxUrl?: string | null;
+  mailSkills?: MailSkillSnapshot[];
   now?: string;
 }
 
@@ -89,6 +92,12 @@ export function buildContinuityPayload(input: ContinuityBuildInput): ContinuityP
       tabSelections: input.tabContexts.map((context) => ({ url: context.url, title: context.title })),
       tandemPages: input.tandemPages.map((page) => ({ pageId: page.pageId, title: page.title })),
       memorySelected: input.memorySelected,
+      mailInboxUrl: input.mailInboxUrl ?? null,
+      mailSkills: (input.mailSkills ?? []).map((skill) => ({
+        name: skill.name,
+        rule: skill.rule,
+        enabled: skill.enabled,
+      })),
     },
   };
 
@@ -168,6 +177,8 @@ export function continuityWorkspaceApplyPlan(payload: ContinuityPayloadV1, now =
   tabContexts: TabContextSnapshot[];
   /** Informational only — Tandem pages require a live Tandem connection to re-select. */
   tandemPages: ContinuityPayloadV1['workspace']['tandemPages'];
+  mailInboxUrl: string | null;
+  mailSkills: MailSkillSnapshot[];
 } {
   return {
     workspaceName: payload.workspace.name,
@@ -205,6 +216,15 @@ export function continuityWorkspaceApplyPlan(payload: ContinuityPayloadV1, now =
       capturedAt: now,
     })),
     tandemPages: payload.workspace.tandemPages,
+    mailInboxUrl: payload.workspace.mailInboxUrl ?? null,
+    mailSkills: (payload.workspace.mailSkills ?? []).map((skill) => ({
+      id: randomUUID(),
+      name: skill.name,
+      rule: skill.rule,
+      enabled: skill.enabled,
+      createdAt: now,
+      updatedAt: now,
+    })),
   };
 }
 

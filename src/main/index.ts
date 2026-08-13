@@ -262,6 +262,11 @@ async function createWindow(): Promise<void> {
       if (!tab || tab.taskSpaceId || !/^https?:\/\//i.test(tab.url)) return null;
       return tab.id;
     },
+    getBrowsableTabs: () => (browserEngine?.getSnapshot().tabs ?? []).map((tab) => ({
+      id: tab.id,
+      url: tab.url,
+      taskSpaceId: tab.taskSpaceId,
+    })),
     querySelectedDatabase: (databaseId, limit) => {
       if (!pagesStore) throw new Error('Pages storage is not ready.');
       return querySelectedDatabase(pagesStore, databaseId, limit);
@@ -439,6 +444,8 @@ app.whenReady().then(async () => {
       memoryBrief: null,
       browserSessions: [],
       recipes: [],
+      mailInboxUrl: null,
+      mailSkills: [],
     };
   });
   ipcMain.handle(WORKSPACE_CHANNELS.command, (event, command: WorkspaceCommand) => {

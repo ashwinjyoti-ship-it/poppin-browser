@@ -262,4 +262,69 @@ describe('profile store and workspace continuity apply', () => {
     await writeFile(path.join(directory, 'marker.txt'), 'ok', 'utf8');
     expect(await readFile(path.join(directory, 'marker.txt'), 'utf8')).toBe('ok');
   });
+
+  it('round-trips mail inbox URL and skills through continuity apply', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'poppin-mail-continuity-'));
+    const store = new WorkspaceStore(path.join(directory, 'poppin.sqlite'));
+    store.createWorkspace('Home');
+    store.setMailInboxUrl('https://mail.google.com/');
+    store.insertMailSkill({
+      id: 'skill-old',
+      name: 'Old skill',
+      rule: 'Ignore this.',
+      enabled: true,
+      createdAt: '2026-08-11T12:00:00.000Z',
+      updatedAt: '2026-08-11T12:00:00.000Z',
+    });
+
+    const payload = buildContinuityPayload({
+      profile: { id: 'profile-1', name: 'Work', createdAt: '2026-08-11T12:00:00.000Z' },
+      browser: {
+        tabs: [{
+          id: 'tab-1',
+          url: 'https://example.com/',
+          title: 'Example',
+          faviconUrls: [],
+          pinned: false,
+          groupId: null,
+          isLoading: false,
+          canGoBack: false,
+          canGoForward: false,
+          historyIndex: 0,
+          history: [],
+          failure: null,
+        }],
+        groups: [],
+        activeTabId: 'tab-1',
+        isFullScreen: false,
+        canReopenClosedTab: false,
+        settings: DEFAULT_BROWSER_SETTINGS,
+        enteredUrls: [],
+        authenticationPopup: null,
+        linkPreview: null,
+        split: null,
+      },
+      workspaceName: 'Imported',
+      contextPacks: [],
+      browserSessions: [],
+      recipes: [],
+      tabContexts: [],
+      tandemPages: [],
+      memorySelected: false,
+      mailInboxUrl: 'https://outlook.live.com/mail/',
+      mailSkills: [{
+        id: 'skill-1',
+        name: 'Quotes',
+        rule: 'Draft replies to RFQs in the inbox.',
+        enabled: true,
+        createdAt: '2026-08-11T12:00:00.000Z',
+        updatedAt: '2026-08-11T12:00:00.000Z',
+      }],
+    });
+
+    store.replaceContinuityData(continuityWorkspaceApplyPlan(payload));
+    expect(store.getMailInboxUrl()).toBe('https://outlook.live.com/mail/');
+    expect(store.listMailSkills().map((skill) => skill.name)).toEqual(['Quotes']);
+    store.close();
+  });
 });

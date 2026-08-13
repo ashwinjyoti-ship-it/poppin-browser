@@ -113,6 +113,8 @@ export class ContinuityEngine {
       tabContexts: workspaceStore.listTabContexts(),
       tandemPages: this.getTandemEngine()?.getSelectedContext() ?? [],
       memorySelected: workspaceStore.isMemorySelected(),
+      mailInboxUrl: workspace.mailInboxUrl ?? null,
+      mailSkills: workspace.mailSkills ?? [],
     });
 
     const sealed = sealContinuityPayload(JSON.stringify(payload), passphrase);

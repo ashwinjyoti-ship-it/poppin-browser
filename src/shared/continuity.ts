@@ -67,6 +67,12 @@ export interface ContinuityRecipeRef {
   enabled: boolean;
 }
 
+export interface ContinuityMailSkillRef {
+  name: string;
+  rule: string;
+  enabled: boolean;
+}
+
 /** Versioned plaintext payload sealed inside a `.poppin-continuity` file. */
 export interface ContinuityPayloadV1 {
   version: typeof CONTINUITY_PACKAGE_VERSION;
@@ -87,6 +93,9 @@ export interface ContinuityPayloadV1 {
     tabSelections: ContinuityTabSelectionRef[];
     tandemPages: ContinuityTandemPageRef[];
     memorySelected: boolean;
+    /** Optional for packages exported before Mail shipped; import treats missing as empty. */
+    mailInboxUrl?: string | null;
+    mailSkills?: ContinuityMailSkillRef[];
   };
 }
 

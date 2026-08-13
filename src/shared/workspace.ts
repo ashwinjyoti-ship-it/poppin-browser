@@ -12,8 +12,10 @@ export interface WorkspaceRecordSnapshot {
 
 import type { TandemContextSnapshot } from './tandem';
 import type { RecipeSnapshot, RecipeStepSnapshot } from './recipes';
+import type { MailSkillSnapshot } from './mail';
 
 export type { RecipeSnapshot, RecipeStepSnapshot } from './recipes';
+export type { MailSkillSnapshot } from './mail';
 
 export interface WorkspaceSnapshot {
   workspace: WorkspaceRecordSnapshot | null;
@@ -34,6 +36,10 @@ export interface WorkspaceSnapshot {
   browserSessions?: BrowserSessionSnapshot[];
   /** Phase 13 transparent site recipes saved from successful verified runs. */
   recipes?: RecipeSnapshot[];
+  /** User's https webmail URL. Login stays in the persistent browser partition. */
+  mailInboxUrl?: string | null;
+  /** Natural-language mailbox skills the active harness follows for mail work. */
+  mailSkills?: MailSkillSnapshot[];
 }
 
 /**
@@ -173,7 +179,13 @@ export type WorkspaceCommand =
     }
   | { type: 'renameRecipe'; recipeId: string; name: string }
   | { type: 'setRecipeEnabled'; recipeId: string; enabled: boolean }
-  | { type: 'deleteRecipe'; recipeId: string };
+  | { type: 'deleteRecipe'; recipeId: string }
+  /** Saves the https webmail URL used by the Mail section. */
+  | { type: 'setMailInboxUrl'; url: string }
+  | { type: 'createMailSkill'; name: string; rule: string }
+  | { type: 'updateMailSkill'; skillId: string; name?: string; rule?: string }
+  | { type: 'setMailSkillEnabled'; skillId: string; enabled: boolean }
+  | { type: 'deleteMailSkill'; skillId: string };
 
 export interface WorkspaceCommandResult {
   ok: boolean;

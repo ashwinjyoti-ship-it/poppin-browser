@@ -74,6 +74,18 @@ describe('capability router', () => {
     }
   });
 
+  it('provisions browsing for mailbox work without a magic phrase', () => {
+    for (const prompt of [
+      'Check my inbox for unread requests.',
+      'Summarise new Gmail threads.',
+      'Draft a reply to the quote request in my mailbox.',
+    ]) {
+      const plan = route(prompt);
+      expect(plan.browser, prompt).toBe('exploration');
+      expect(plan.confirmation, prompt).toBeNull();
+    }
+  });
+
   it('treats navigation commands and bare website names as browser requests', () => {
     for (const prompt of [
       'Go to amazon and find wireless earbuds under 2000.',

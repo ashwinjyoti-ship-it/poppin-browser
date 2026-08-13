@@ -8,6 +8,7 @@ import { CommandBar } from '../src/renderer/ui/CommandBar';
 import { TaskTabView } from '../src/renderer/ui/TaskTabView';
 import { TandemSection } from '../src/renderer/ui/TandemSection';
 import { ProjectSection } from '../src/renderer/ui/ProjectSection';
+import { MailSection } from '../src/renderer/ui/MailSection';
 import { PaneResizer } from '../src/renderer/ui/PaneResizer';
 import { DEFAULT_BROWSER_SETTINGS, type BrowserTabSnapshot } from '../src/shared/browser';
 import type { BrowserAgentSnapshot } from '../src/shared/browser-agent';
@@ -622,6 +623,7 @@ describe('Codex controls', () => {
       },
     };
     render(<TaskTabView taskSnapshot={snapshot} workspace={EMPTY_WORKSPACE} onTaskCommand={onCommand} />);
+    expect(screen.getByRole('dialog', { name: /agent approval required/i })).toBeVisible();
     expect(screen.getByText('npm test', { exact: false })).toBeVisible();
     await user.click(screen.getByRole('button', { name: /allow once/i }));
     expect(onCommand).toHaveBeenCalledWith({ type: 'respondApproval', decision: 'accept' });
@@ -698,5 +700,54 @@ describe('Codex controls', () => {
     expect(screen.queryByText(/agent thinking/i)).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: /new task/i }));
     expect(onCommand).toHaveBeenCalledWith({ type: 'finishTask' });
+  });
+});
+
+describe('Poppin Mail section', () => {
+  it('saves a natural-language mail skill and opens the inbox', async () => {
+    const user = userEvent.setup();
+    const onCommand = vi.fn().mockResolvedValue({ ok: true, message: 'Saved mail skill "Quotes".' });
+    const onOpenInbox = vi.fn();
+    const workspace: WorkspaceSnapshot = {
+      workspace: { id: 'primary', name: 'Mail', createdAt: '' },
+      documents: [],
+      tabContexts: [],
+      project: null,
+      visualSelection: null,
+      mailInboxUrl: 'https://mail.google.com/',
+      mailSkills: [],
+    };
+    render(<MailSection workspace={workspace} tabs={[]} onCommand={onCommand} onOpenInbox={onOpenInbox} />);
+
+    await user.type(screen.getByRole('textbox', { name: /mail skill name/i }), 'Quotes');
+    await user.type(screen.getByRole('textbox', { name: /mail skill rule/i }), 'Mails addressed to Ashwin with a request for quote get a draft reply.');
+    await user.click(screen.getByRole('button', { name: /save skill/i }));
+    expect(onCommand).toHaveBeenCalledWith({
+      type: 'createMailSkill',
+      name: 'Quotes',
+      rule: 'Mails addressed to Ashwin with a request for quote get a draft reply.',
+    });
+
+    await user.click(screen.getByRole('button', { name: /open inbox/i }));
+    expect(onOpenInbox).toHaveBeenCalledWith('https://mail.google.com/');
+  });
+
+  it('opens a persisted inbox when the draft has not synced yet', async () => {
+    const user = userEvent.setup();
+    const onCommand = vi.fn().mockResolvedValue({ ok: true });
+    const onOpenInbox = vi.fn();
+    const workspace: WorkspaceSnapshot = {
+      workspace: { id: 'primary', name: 'Mail', createdAt: '' },
+      documents: [],
+      tabContexts: [],
+      project: null,
+      visualSelection: null,
+      mailInboxUrl: 'https://mail.google.com/',
+      mailSkills: [],
+    };
+    const { rerender } = render(<MailSection workspace={{ ...workspace, mailInboxUrl: null }} tabs={[]} onCommand={onCommand} onOpenInbox={onOpenInbox} />);
+    rerender(<MailSection workspace={workspace} tabs={[]} onCommand={onCommand} onOpenInbox={onOpenInbox} />);
+    await user.click(screen.getByRole('button', { name: /open inbox/i }));
+    expect(onOpenInbox).toHaveBeenCalledWith('https://mail.google.com/');
   });
 });

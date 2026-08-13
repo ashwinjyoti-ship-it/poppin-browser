@@ -47,6 +47,7 @@ const LIVE_SIGNALS: Signal[] = [
   { pattern: WEB_DOMAIN, weight: 4, reason: 'the request names a website' },
   // "Go to X" is the plainest possible browser request.
   { pattern: /\b(?:go(?:es|ing)? to|goto|open(?: up)?|visit|navigate to|head (?:to|over to)|pull up|take me to)\s+(?:the\s+)?\S+/i, weight: 3, reason: 'the request asks to open a destination' },
+  { pattern: /\b(?:e-?mails?|inbox|unread|mailbox|webmail|gmail|outlook|fastmail)\b/i, weight: 4, reason: 'the request is mailbox work' },
   { pattern: /\bdraft\b[\s\S]{0,40}\b(?:e-?mail|mail|message|reply)\b/i, weight: 4, reason: 'drafting inside a web application' },
   { pattern: /\b(?:current|currently|latest|today|todays|today's|tonight|tomorrow|right now|this week(?:end)?|next week(?:end)?|live|real[- ]?time|up[- ]to[- ]date|trending|upcoming|near me|nearby)\b/i, weight: 3, reason: 'the answer changes over time' },
   { pattern: /\b(?:price|prices|pricing|cost|costs|deal|deals|discount|in stock|availability|available)\b/i, weight: 3, reason: 'prices or availability must be read live' },

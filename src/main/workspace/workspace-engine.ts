@@ -17,6 +17,8 @@ import {
   type WorkspaceSnapshot,
 } from '../../shared/workspace';
 import { recipeStartUrl, sanitizeRecipeSteps } from '../../shared/recipes';
+import { normalizeMailInboxUrl, sanitizeMailSkillName, sanitizeMailSkillRule } from '../../shared/mail';
+import type { MailSkillSnapshot } from '../../shared/mail';
 import { parseProjectSource, repositoryFolderName } from '../../shared/project-source';
 import { WorkspaceStore } from './workspace-store';
 import { BrowserEngine } from '../browser/browser-engine';
@@ -82,6 +84,8 @@ export class WorkspaceEngine {
       memoryBrief: this.pagesStore ? memoryBrief(this.pagesStore) : null,
       browserSessions: this.store.listBrowserSessions(),
       recipes: this.store.listRecipes(),
+      mailInboxUrl: this.store.getMailInboxUrl(),
+      mailSkills: this.store.listMailSkills(),
     };
   }
 
@@ -104,7 +108,12 @@ export class WorkspaceEngine {
       return this.changeWorkspaceName(command.type, command.name);
     }
 
-    if (!this.store.getWorkspace()) return { ok: false, message: 'Create the workspace first.' };
+    const isMailCommand = command.type === 'setMailInboxUrl'
+      || command.type === 'createMailSkill'
+      || command.type === 'updateMailSkill'
+      || command.type === 'setMailSkillEnabled'
+      || command.type === 'deleteMailSkill';
+    if (!this.store.getWorkspace() && !isMailCommand) return { ok: false, message: 'Create the workspace first.' };
     switch (command.type) {
       case 'chooseDocuments':
         return this.chooseDocuments();
@@ -158,6 +167,16 @@ export class WorkspaceEngine {
         return this.setRecipeEnabled(command.recipeId, command.enabled);
       case 'deleteRecipe':
         return this.deleteRecipe(command.recipeId);
+      case 'setMailInboxUrl':
+        return this.setMailInboxUrl(command.url);
+      case 'createMailSkill':
+        return this.createMailSkill(command.name, command.rule);
+      case 'updateMailSkill':
+        return this.updateMailSkill(command.skillId, command.name, command.rule);
+      case 'setMailSkillEnabled':
+        return this.setMailSkillEnabled(command.skillId, command.enabled);
+      case 'deleteMailSkill':
+        return this.deleteMailSkill(command.skillId);
     }
     this.emitSnapshot();
     return { ok: true };
@@ -344,6 +363,63 @@ export class WorkspaceEngine {
 
   private deleteRecipe(recipeId: string): WorkspaceCommandResult {
     if (!this.store.deleteRecipe(recipeId)) return { ok: false, message: 'That recipe is no longer available.' };
+    this.emitSnapshot();
+    return { ok: true };
+  }
+
+  private ensureWorkspace(): void {
+    if (!this.store.getWorkspace()) this.store.createWorkspace('Poppin');
+  }
+
+  private setMailInboxUrl(rawUrl: string): WorkspaceCommandResult {
+    this.ensureWorkspace();
+    const url = normalizeMailInboxUrl(rawUrl);
+    if (!url) return { ok: false, message: 'Use an https webmail address.' };
+    this.store.setMailInboxUrl(url);
+    this.emitSnapshot();
+    return { ok: true, message: 'Mail inbox saved.' };
+  }
+
+  private createMailSkill(rawName: string, rawRule: string): WorkspaceCommandResult {
+    this.ensureWorkspace();
+    const name = sanitizeMailSkillName(rawName);
+    const rule = sanitizeMailSkillRule(rawRule);
+    if (!name) return { ok: false, message: 'Give the mail skill a short name.' };
+    if (!rule) return { ok: false, message: 'Describe the mail skill in plain language, without passwords or secrets.' };
+    const now = new Date().toISOString();
+    const skill: MailSkillSnapshot = {
+      id: randomUUID(),
+      name,
+      rule,
+      enabled: true,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.store.insertMailSkill(skill);
+    this.emitSnapshot();
+    return { ok: true, message: `Saved mail skill "${skill.name}".` };
+  }
+
+  private updateMailSkill(skillId: string, rawName?: string, rawRule?: string): WorkspaceCommandResult {
+    const existing = this.store.getMailSkill(skillId);
+    if (!existing) return { ok: false, message: 'That mail skill is no longer available.' };
+    const name = rawName === undefined ? existing.name : sanitizeMailSkillName(rawName);
+    const rule = rawRule === undefined ? existing.rule : sanitizeMailSkillRule(rawRule);
+    if (!name) return { ok: false, message: 'Give the mail skill a short name.' };
+    if (!rule) return { ok: false, message: 'Describe the mail skill in plain language, without passwords or secrets.' };
+    if (!this.store.updateMailSkill(skillId, { name, rule })) return { ok: false, message: 'That mail skill is no longer available.' };
+    this.emitSnapshot();
+    return { ok: true };
+  }
+
+  private setMailSkillEnabled(skillId: string, enabled: boolean): WorkspaceCommandResult {
+    if (!this.store.setMailSkillEnabled(skillId, enabled)) return { ok: false, message: 'That mail skill is no longer available.' };
+    this.emitSnapshot();
+    return { ok: true };
+  }
+
+  private deleteMailSkill(skillId: string): WorkspaceCommandResult {
+    if (!this.store.deleteMailSkill(skillId)) return { ok: false, message: 'That mail skill is no longer available.' };
     this.emitSnapshot();
     return { ok: true };
   }
