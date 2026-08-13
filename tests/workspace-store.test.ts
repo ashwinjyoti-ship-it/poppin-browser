@@ -168,4 +168,36 @@ describe('workspace store', () => {
     expect(restored.getRecipe('recipe-one')).toBeNull();
     restored.close();
   });
+
+  it('persists the mail inbox URL and user-defined mail skills', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'poppin-workspace-mail-'));
+    const filePath = path.join(directory, 'poppin.sqlite');
+    const store = new WorkspaceStore(filePath);
+    store.createWorkspace('Mail workspace');
+    store.setMailInboxUrl('https://mail.google.com/');
+    store.insertMailSkill({
+      id: 'skill-one',
+      name: 'Meeting invites',
+      rule: 'Do not draft a reply to meeting invites or minutes.',
+      enabled: true,
+      createdAt: '2026-08-13T00:00:00.000Z',
+      updatedAt: '2026-08-13T00:00:00.000Z',
+    });
+    store.close();
+
+    const restored = new WorkspaceStore(filePath);
+    expect(restored.getMailInboxUrl()).toBe('https://mail.google.com/');
+    expect(restored.listMailSkills()).toEqual([expect.objectContaining({
+      id: 'skill-one',
+      name: 'Meeting invites',
+      enabled: true,
+    })]);
+    expect(restored.updateMailSkill('skill-one', { name: 'Meetings' })).toBe(true);
+    expect(restored.getMailSkill('skill-one')?.name).toBe('Meetings');
+    expect(restored.setMailSkillEnabled('skill-one', false)).toBe(true);
+    expect(restored.getMailSkill('skill-one')?.enabled).toBe(false);
+    expect(restored.deleteMailSkill('skill-one')).toBe(true);
+    expect(restored.listMailSkills()).toEqual([]);
+    restored.close();
+  });
 });

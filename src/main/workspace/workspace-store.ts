@@ -11,6 +11,7 @@ import type {
   WorkspaceProjectSnapshot,
   VisualSelectionSnapshot,
 } from '../../shared/workspace';
+import type { MailSkillSnapshot } from '../../shared/mail';
 
 interface WorkspaceRow {
   id: string;
@@ -113,6 +114,18 @@ export class WorkspaceStore {
         name TEXT NOT NULL,
         start_url TEXT,
         steps_json TEXT NOT NULL DEFAULT '[]',
+        enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      ) STRICT;
+      CREATE TABLE IF NOT EXISTS mail_settings (
+        id TEXT PRIMARY KEY CHECK (id = 'primary'),
+        inbox_url TEXT
+      ) STRICT;
+      CREATE TABLE IF NOT EXISTS mail_skills (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        rule TEXT NOT NULL,
         enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
@@ -435,6 +448,71 @@ export class WorkspaceStore {
     return result.changes > 0;
   }
 
+  getMailInboxUrl(): string | null {
+    const row = this.database.prepare(
+      'SELECT inbox_url FROM mail_settings WHERE id = ?',
+    ).get('primary') as { inbox_url: string | null } | undefined;
+    return row?.inbox_url ?? null;
+  }
+
+  setMailInboxUrl(url: string | null): void {
+    this.database.prepare(`
+      INSERT INTO mail_settings (id, inbox_url) VALUES (?, ?)
+      ON CONFLICT(id) DO UPDATE SET inbox_url = excluded.inbox_url
+    `).run('primary', url);
+  }
+
+  listMailSkills(): MailSkillSnapshot[] {
+    const rows = this.database.prepare(`
+      SELECT id, name, rule, enabled, created_at, updated_at
+      FROM mail_skills ORDER BY created_at
+    `).all() as Array<{
+      id: string; name: string; rule: string; enabled: number; created_at: string; updated_at: string;
+    }>;
+    return rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      rule: row.rule,
+      enabled: Boolean(row.enabled),
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    }));
+  }
+
+  insertMailSkill(skill: MailSkillSnapshot): void {
+    this.database.prepare(`
+      INSERT INTO mail_skills (id, name, rule, enabled, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(skill.id, skill.name, skill.rule, Number(skill.enabled), skill.createdAt, skill.updatedAt);
+  }
+
+  getMailSkill(skillId: string): MailSkillSnapshot | null {
+    return this.listMailSkills().find((skill) => skill.id === skillId) ?? null;
+  }
+
+  updateMailSkill(skillId: string, patch: { name?: string; rule?: string }): boolean {
+    const existing = this.getMailSkill(skillId);
+    if (!existing) return false;
+    const updatedAt = new Date().toISOString();
+    const result = this.database.prepare(
+      'UPDATE mail_skills SET name = ?, rule = ?, updated_at = ? WHERE id = ?',
+    ).run(patch.name ?? existing.name, patch.rule ?? existing.rule, updatedAt, skillId);
+    return result.changes > 0;
+  }
+
+  setMailSkillEnabled(skillId: string, enabled: boolean): boolean {
+    const updatedAt = new Date().toISOString();
+    const result = this.database.prepare(
+      'UPDATE mail_skills SET enabled = ?, updated_at = ? WHERE id = ?',
+    ).run(Number(enabled), updatedAt, skillId);
+    return result.changes > 0;
+  }
+
+  deleteMailSkill(skillId: string): boolean {
+    const result = this.database.prepare('DELETE FROM mail_skills WHERE id = ?').run(skillId);
+    return result.changes > 0;
+  }
+
   /**
    * Phase 14 continuity import: replace allowlisted workspace collections.
    * Does not touch project paths, Memory bodies, visual selection, or documents.
@@ -446,6 +524,8 @@ export class WorkspaceStore {
     browserSessions: BrowserSessionSnapshot[];
     recipes: RecipeSnapshot[];
     tabContexts: TabContextSnapshot[];
+    mailInboxUrl?: string | null;
+    mailSkills?: MailSkillSnapshot[];
   }): void {
     if (plan.workspaceName) {
       if (this.getWorkspace()) this.renameWorkspace(plan.workspaceName);
@@ -456,10 +536,15 @@ export class WorkspaceStore {
     this.database.prepare('DELETE FROM browser_sessions').run();
     this.database.prepare('DELETE FROM recipes').run();
     this.database.prepare('DELETE FROM tab_context').run();
+    this.database.prepare('DELETE FROM mail_skills').run();
     for (const pack of plan.contextPacks) this.insertContextPack(pack);
     for (const session of plan.browserSessions) this.insertBrowserSession(session);
     for (const recipe of plan.recipes) this.insertRecipe(recipe);
     for (const context of plan.tabContexts) this.upsertTabContext(context);
+    if (plan.mailInboxUrl !== undefined) this.setMailInboxUrl(plan.mailInboxUrl);
+    if (plan.mailSkills !== undefined) {
+      for (const skill of plan.mailSkills) this.insertMailSkill(skill);
+    }
   }
 
   close(): void {

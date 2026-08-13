@@ -1,4 +1,4 @@
-import { ExternalLink, Columns2, X } from 'lucide-react';
+import { ExternalLink, Columns2, Mail, X } from 'lucide-react';
 import { type CSSProperties, type FormEvent, useEffect, useRef, useState } from 'react';
 
 import { DEFAULT_BROWSER_SETTINGS, type BrowserCommand, type BrowserCommandResult, type BrowserSnapshot } from '../../shared/browser';
@@ -21,11 +21,13 @@ import { CommandBar } from './CommandBar';
 import { PaneResizer } from './PaneResizer';
 import { NativePageView } from './NativePageView';
 import { NativeDatabaseView } from './NativeDatabaseView';
+import { MailSection } from './MailSection';
 import { TabSearchBar } from './TabSearchBar';
 import { getChromeLayout, getTitlebarLeftInset, resolveChromeHeight, TAB_SEARCH_RESULTS_INSET } from './chrome-layout';
 import { issueForCommand, visibleAddressIssue, type AddressIssue } from './address-issue';
 import { browserApprovalAttentionKey, taskAttentionKey } from './task-attention';
 import { getAgentDockPresentation, getTaskTabStatus } from './task-surface';
+import { mailInboxTabId } from '../../shared/mail';
 import {
   browserLeftInset,
   browserRightInset,
@@ -62,6 +64,8 @@ const EMPTY_WORKSPACE: WorkspaceSnapshot = {
   memoryBrief: null,
   browserSessions: [],
   recipes: [],
+  mailInboxUrl: null,
+  mailSkills: [],
 };
 const EMPTY_TASK: TaskSnapshot = { connection: { state: 'checking', message: 'Connecting to Codex…', accountLabel: null, models: [] }, task: null };
 const EMPTY_BROWSER_AGENT: BrowserAgentSnapshot = { state: 'idle', taskId: null, taskSpace: null, watching: false, allowedTabIds: [], activeTabId: null, currentAction: null, pendingApproval: null, log: [] };
@@ -80,6 +84,7 @@ export function App() {
   // A fresh browser opens for browsing first. The workspace pane expands on demand.
   const [workspaceCollapsed, setWorkspaceCollapsed] = useState(true);
   const [taskTabActive, setTaskTabActive] = useState(false);
+  const [mailActive, setMailActive] = useState(false);
   const [taskSnapshot, setTaskSnapshot] = useState<TaskSnapshot>(EMPTY_TASK);
   const [browserAgentSnapshot, setBrowserAgentSnapshot] = useState<BrowserAgentSnapshot>(EMPTY_BROWSER_AGENT);
   const [pagesSnapshot, setPagesSnapshot] = useState<PagesSnapshot>(EMPTY_PAGES);
@@ -101,7 +106,7 @@ export function App() {
   const activeNativeTab = pagesSnapshot.tabs.find((tab) => tab.id === pagesSnapshot.activeTabId) ?? null;
   const activeNativeTabId = activeNativeTab?.id ?? null;
   const browserActiveTab = snapshot.tabs.find((tab) => tab.id === snapshot.activeTabId) ?? null;
-  const activeTab = activeNativeTab || taskTabActive ? null : browserActiveTab;
+  const activeTab = activeNativeTab || taskTabActive || mailActive ? null : browserActiveTab;
   const browserTabs = snapshot.tabs.filter((tab) => !tab.taskSpaceId || (browserAgentSnapshot.watching && tab.taskSpaceId === browserAgentSnapshot.taskSpace?.id));
   const visibleTabs = [
     ...browserTabs.map((tab) => ({ ...tab, kind: tab.surface === 'tandem-world' ? 'tandem' as const : 'browser' as const })),
@@ -115,7 +120,7 @@ export function App() {
     }] : []),
     ...pagesSnapshot.tabs.map((tab) => ({ id: tab.id, title: tab.title, kind: tab.kind })),
   ];
-  const activeTabId = taskTabActive ? TASK_TAB_ID : (activeNativeTab?.id ?? snapshot.activeTabId);
+  const activeTabId = taskTabActive ? TASK_TAB_ID : mailActive ? '' : (activeNativeTab?.id ?? snapshot.activeTabId);
   const address = isEditingAddress ? addressDraft : activeTab?.url ?? (activeNativeTab ? `${activeNativeTab.kind}://${activeNativeTab.pageId}` : '');
   const addressError = visibleAddressIssue(addressIssue, activeTab);
   const chromeLayout = getChromeLayout(viewport.width, viewport.height);
@@ -160,7 +165,10 @@ export function App() {
   // to a changed value") rather than in an effect avoids an extra render pass.
   if (attentionKey !== seenAttentionKey) {
     setSeenAttentionKey(attentionKey);
-    if (attentionKey) setTaskTabActive(true);
+    if (attentionKey) {
+      setMailActive(false);
+      setTaskTabActive(true);
+    }
   }
 
   useEffect(() => {
@@ -239,8 +247,8 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    void window.poppinBrowser.command({ type: 'setContentVisible', visible: activeNativeTabId === null && !taskTabActive });
-  }, [activeNativeTabId, taskTabActive]);
+    void window.poppinBrowser.command({ type: 'setContentVisible', visible: activeNativeTabId === null && !taskTabActive && !mailActive });
+  }, [activeNativeTabId, taskTabActive, mailActive]);
 
   useEffect(() => {
     if (browserAgentSnapshot.watching && pagesSnapshot.activeTabId) void window.poppinPages.command({ type: 'deactivateTabs' });
@@ -400,6 +408,10 @@ export function App() {
     try {
       const result = await window.poppinTask.command(command);
       if (result.ok && command.type === 'finishTask') setTaskTabActive(false);
+      if (result.ok && (command.type === 'startTask' || command.type === 'continueTask')) {
+        setMailActive(false);
+        setTaskTabActive(true);
+      }
       return result;
     } catch {
       return { ok: false, message: 'Poppin could not reach Codex.' };
@@ -445,6 +457,25 @@ export function App() {
       <header className="browser-chrome">
         <div className="top-row">
           <Brand />
+          <button
+            type="button"
+            className={`mail-chrome-button ${mailActive ? 'mail-chrome-button-active' : ''}`}
+            aria-label="Poppin Mail"
+            aria-pressed={mailActive}
+            title="Poppin Mail"
+            onClick={() => {
+              setMailActive((open) => {
+                const next = !open;
+                if (next) {
+                  setTaskTabActive(false);
+                  void sendPagesCommand({ type: 'deactivateTabs' });
+                }
+                return next;
+              });
+            }}
+          >
+            <Mail size={16} strokeWidth={1.8} />
+          </button>
           <BrowserToolbar
             activeTab={activeTab}
             enteredUrls={snapshot.enteredUrls}
@@ -518,9 +549,11 @@ export function App() {
           activeTabId={activeTabId}
           onActivate={(tabId) => {
             if (tabId === TASK_TAB_ID) {
+              setMailActive(false);
               setTaskTabActive(true);
               return;
             }
+            setMailActive(false);
             setTaskTabActive(false);
             const nativeTab = pagesSnapshot.tabs.find((candidate) => candidate.id === tabId);
             if (nativeTab) {
@@ -575,6 +608,7 @@ export function App() {
         onTandemCommand={sendTandemCommand}
         onOpenSettings={() => { void window.poppinSettings.command({ type: 'open' }); }}
         onRunRecipe={(prompt) => {
+          setMailActive(false);
           setTaskTabActive(true);
           const connection = taskSnapshot.connection;
           const model = connection.models[0]?.id ?? 'gpt-5';
@@ -609,7 +643,23 @@ export function App() {
         onCollapseChange={() => undefined}
         onCommand={sendPadCommand}
       />
-      {taskTabActive ? (
+      {mailActive ? (
+        <div className={`task-stage ${workspaceCollapsed ? 'workspace-collapsed' : ''}`}>
+          <MailSection
+            workspace={workspaceSnapshot}
+            tabs={snapshot.tabs}
+            onCommand={sendWorkspaceCommandResult}
+            onOpenInbox={(url) => {
+              const existingId = mailInboxTabId(snapshot.tabs, url);
+              setMailActive(false);
+              setTaskTabActive(false);
+              void sendPagesCommand({ type: 'deactivateTabs' });
+              if (existingId) void sendCommand({ type: 'activate', tabId: existingId });
+              else void sendCommand({ type: 'create', input: url });
+            }}
+          />
+        </div>
+      ) : taskTabActive ? (
         <div className={`task-stage ${workspaceCollapsed ? 'workspace-collapsed' : ''}`}>
           <TaskTabView
             taskSnapshot={taskSnapshot}
@@ -624,7 +674,7 @@ export function App() {
         <div className={`native-stage ${workspaceCollapsed ? 'workspace-collapsed' : ''}`}>
           {activeNativeTab.kind === 'database'
             ? <NativeDatabaseView pageId={activeNativeTab.pageId} revision={pagesRevision} onCommand={sendPagesCommand} />
-            : <NativePageView pageId={activeNativeTab.pageId} revision={pagesRevision} onCommand={sendPagesCommand} taskSnapshot={taskSnapshot} onTaskCommand={sendTaskCommand} onTaskStarted={() => setTaskTabActive(true)} />}
+            : <NativePageView pageId={activeNativeTab.pageId} revision={pagesRevision} onCommand={sendPagesCommand} taskSnapshot={taskSnapshot} onTaskCommand={sendTaskCommand} onTaskStarted={() => { setMailActive(false); setTaskTabActive(true); }} />}
         </div>
       ) : <div className={`browser-stage ${workspaceCollapsed ? 'workspace-collapsed' : ''}`} aria-hidden="true" />}
       {showAgentDock ? (
@@ -633,7 +683,7 @@ export function App() {
           browserAgentSnapshot={browserAgentSnapshot}
           onTaskCommand={sendTaskCommand}
           onBrowserAgentCommand={sendBrowserAgentCommand}
-          onOpenTaskTab={() => setTaskTabActive(true)}
+          onOpenTaskTab={() => { setMailActive(false); setTaskTabActive(true); }}
         />
       ) : null}
       <CommandBar snapshot={taskSnapshot} workspace={workspaceSnapshot} pad={padSnapshot} collapsed={commandCollapsed} onCollapseChange={setCommandCollapsed} onCommand={sendTaskCommand} onPadCommand={sendPadCommand} onOverlayHeightChange={setCommandOverlayHeight} />

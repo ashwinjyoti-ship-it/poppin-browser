@@ -78,6 +78,7 @@ Electron main process (src/main/index.ts)
 | `src/renderer/ui/TabStrip.tsx` | tab and group interaction UI |
 | `src/renderer/ui/WorkspacePane.tsx` | left-pane workspace UI |
 | `src/renderer/ui/TaskTabView.tsx` | task tab's live progress/approval, Work reply, and Code review UI |
+| `src/renderer/ui/MailSection.tsx` | dedicated Mail hub: https inbox, skill generator, and inspectable mailbox policies |
 | `src/renderer/ui/AgentDock.tsx` | blocking approvals on any non-task surface, plus running/browser controls while an Agent Tab is active |
 | `src/renderer/ui/CommandBar.tsx` | bottom task-entry and preflight UI |
 | `src/renderer/styles.css` | Poppin visual tokens, responsive browser chrome, pane and tab styling |
@@ -88,7 +89,7 @@ Electron main process (src/main/index.ts)
 | --- | --- | --- |
 | Browser tabs, groups, settings, active tab, window geometry | versioned JSON through `BrowserStateStore` | Current persisted format is version 2; task-owned tabs carry an optional task-space ID and integration surfaces carry a typed surface marker. |
 | Active Agent Tabs ownership and lifecycle | versioned JSON through `BrowserAgentStateStore` | Version 2 records browser-only/mixed mode and context/exploration roles. Interrupted work restores paused and user-controlled; automation never resumes on launch. |
-| Workspace, documents, selected context, project metadata, task state | SQLite through `WorkspaceStore` and `TaskStore` | Stored under Electron user data. |
+| Workspace, documents, selected context, project metadata, task state, mail inbox URL and mail skills | SQLite through `WorkspaceStore` and `TaskStore` | Stored under Electron user data. Mail skills are natural-language policies; they never store passwords. |
 | Browser cookies and login session | Electron partition `persist:poppin-browser` | Do not import sessions from another browser/app. |
 | Task exports | user-selected filesystem location | Never overwrite an attachment without explicit approval. |
 
@@ -116,7 +117,8 @@ These rules are non-negotiable:
 - An ordinary Work result is complete when Codex finishes. Its Reply tab becomes available automatically, while the prompt bar immediately accepts a follow-up in the same conversation. Result approval remains a Code review gate, not a per-turn conversation gate.
 - Assistant streaming is kept per Codex message item. A progress/preamble message can never be concatenated into the final document result.
 - A blocking task or browser approval takes precedence over the user's current tab/section preference until it is resolved.
-- A critical approval is the first, sticky card in the Task view. Browser-use Work tasks start directly; do not reintroduce a generic browser-access confirmation.
+- A critical approval is a centered overlay in the task tab. Browser-use Work tasks start directly; do not reintroduce a generic browser-access confirmation.
+- Poppin Mail is a dedicated chrome hub between the logo and Back. The user saves an https webmail URL and natural-language mail skills. Sign-in happens in the inbox tab using the persistent browser partition; Poppin never stores mailbox passwords. Mailbox Work always provisions Agent Tabs for every harness. Reading and drafts are ordinary browser actions; Send/Delete remain approval-gated. Ask only in the command bar — do not add mail prompt chips.
 - Codex receives browser operations as task-scoped dynamic tools. Page reads return sanitized AX/DOM semantic snapshots with generation-scoped refs; raw CDP and arbitrary page JavaScript are never exposed. Batches use a reviewed action vocabulary, stop at control/approval/staleness boundaries, and must end with read or assert verification.
 - Every Work thread registers dormant browser dynamic tools so a later browser-required follow-up can reuse the same persisted Codex conversation. Because Codex currently accepts dynamic tools only on `thread/start`, a browser-required continuation after an app-server restart transparently starts a replacement tool-enabled thread and injects the resumed user/assistant message history before the new turn; stale historical Agent Tabs identifiers are removed. TaskEngine activates tools only after creating current task-owned Agent Tabs, persists the browser requirement and run state, and refuses to complete a browser-required turn until a meaningful browser action succeeds. A zero-action completion retries once with an explicit browser instruction; a second zero-action completion remains failed/incomplete with its task tabs retained.
 - Mixed Agent Tabs contain URL-seeded copies of explicitly selected tabs plus one fresh exploration tab; browser-only Agent Tabs contain only the fresh exploration tab. The active task may create and close additional exploration tabs through the narrow task-space contract, capped at six. Source tabs are not moved or operated. Agent-controlled tabs are muted and repeatedly pause media starts; discovery work prefers sanitized structured metadata over opening candidates. Successful completion closes task tabs automatically unless the user selected Keep tabs before completion, while stopped, failed, takeover, and explicitly kept collections remain inspectable.

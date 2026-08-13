@@ -31,10 +31,11 @@ interface TaskTabViewProps {
  */
 export function TaskTabView({ taskSnapshot, workspace, browserAgentSnapshot, onTaskCommand, onBrowserAgentCommand, onWorkspaceCommand }: TaskTabViewProps) {
   const task = taskSnapshot.task;
-  const approvalRef = useRef<HTMLElement>(null);
+  const overlayRef = useRef<HTMLDivElement>(null);
+  const hasApproval = Boolean(task?.pendingApproval || (browserAgentSnapshot?.pendingApproval && onBrowserAgentCommand));
   useEffect(() => {
-    if (typeof approvalRef.current?.scrollIntoView === 'function') approvalRef.current.scrollIntoView({ block: 'start' });
-  }, [browserAgentSnapshot?.pendingApproval, task?.pendingApproval]);
+    if (hasApproval) overlayRef.current?.focus();
+  }, [hasApproval, browserAgentSnapshot?.pendingApproval, task?.pendingApproval]);
 
   if (!task) {
     return (
@@ -47,43 +48,48 @@ export function TaskTabView({ taskSnapshot, workspace, browserAgentSnapshot, onT
   const isLive = task.state === 'Running' || Boolean(task.pendingApproval);
 
   return (
-    <div className="task-tab-content">
-      <ApprovalCards approvalRef={approvalRef} task={task} browserAgent={browserAgentSnapshot} onTaskCommand={onTaskCommand} onBrowserAgentCommand={onBrowserAgentCommand} />
-      <div className="task-tab-heading">
-        <div><span className="eyebrow">{task.kind === 'code' ? 'Code task' : 'Work task thread'}</span><h2>{taskHeadline(task.turns?.[0]?.prompt ?? task.prompt)}</h2></div>
-        <div className="task-tab-actions">
-          <span className={`task-state task-state-${slug(task.state)}`}>{task.state}</span>
-          {['Completed', 'Failed', 'Cancelled'].includes(task.state) ? (
-            <button type="button" className="secondary-button task-new-button" onClick={() => { void onTaskCommand({ type: 'finishTask' }); }}><Plus size={13} /> New task</button>
-          ) : null}
+    <div className="task-tab-shell">
+      {hasApproval ? (
+        <div ref={overlayRef} className="approval-overlay" tabIndex={-1}>
+          <ApprovalCards task={task} browserAgent={browserAgentSnapshot} onTaskCommand={onTaskCommand} onBrowserAgentCommand={onBrowserAgentCommand} />
         </div>
+      ) : null}
+      <div className="task-tab-content">
+        <div className="task-tab-heading">
+          <div><span className="eyebrow">{task.kind === 'code' ? 'Code task' : 'Work task thread'}</span><h2>{taskHeadline(task.turns?.[0]?.prompt ?? task.prompt)}</h2></div>
+          <div className="task-tab-actions">
+            <span className={`task-state task-state-${slug(task.state)}`}>{task.state}</span>
+            {['Completed', 'Failed', 'Cancelled'].includes(task.state) ? (
+              <button type="button" className="secondary-button task-new-button" onClick={() => { void onTaskCommand({ type: 'finishTask' }); }}><Plus size={13} /> New task</button>
+            ) : null}
+          </div>
+        </div>
+        {taskSnapshot.connection.state !== 'ready' ? (
+          <p className="task-account">
+            {taskSnapshot.connection.message}
+            <button type="button" className="secondary-button" onClick={() => { void onTaskCommand({ type: 'refreshConnection' }); }}>Reconnect</button>
+          </p>
+        ) : null}
+        {task.kind === 'work' ? (
+          <WorkThread
+            task={task}
+            browserAgent={browserAgentSnapshot}
+            onCommand={onTaskCommand}
+            onWorkspaceCommand={onWorkspaceCommand}
+          />
+        ) : null}
+        {isLive
+          ? <LiveView task={task} browserAgent={browserAgentSnapshot} onBrowserAgentCommand={onBrowserAgentCommand} onTaskCommand={onTaskCommand} />
+          : task.kind === 'code'
+            ? <CodeReview task={task} workspace={workspace} onCommand={onTaskCommand} />
+            : null}
+        {task.error ? <p className="task-error">{task.error}</p> : null}
       </div>
-      {taskSnapshot.connection.state !== 'ready' ? (
-        <p className="task-account">
-          {taskSnapshot.connection.message}
-          <button type="button" className="secondary-button" onClick={() => { void onTaskCommand({ type: 'refreshConnection' }); }}>Reconnect</button>
-        </p>
-      ) : null}
-      {task.kind === 'work' ? (
-        <WorkThread
-          task={task}
-          browserAgent={browserAgentSnapshot}
-          onCommand={onTaskCommand}
-          onWorkspaceCommand={onWorkspaceCommand}
-        />
-      ) : null}
-      {isLive
-        ? <LiveView task={task} browserAgent={browserAgentSnapshot} onBrowserAgentCommand={onBrowserAgentCommand} onTaskCommand={onTaskCommand} />
-        : task.kind === 'code'
-          ? <CodeReview task={task} workspace={workspace} onCommand={onTaskCommand} />
-          : null}
-      {task.error ? <p className="task-error">{task.error}</p> : null}
     </div>
   );
 }
 
-function ApprovalCards({ approvalRef, task, browserAgent, onTaskCommand, onBrowserAgentCommand }: {
-  approvalRef: React.RefObject<HTMLElement | null>;
+function ApprovalCards({ task, browserAgent, onTaskCommand, onBrowserAgentCommand }: {
   task: NonNullable<TaskSnapshot['task']>;
   browserAgent?: BrowserAgentSnapshot;
   onTaskCommand: (command: TaskCommand) => Promise<TaskCommandResult>;
@@ -93,7 +99,7 @@ function ApprovalCards({ approvalRef, task, browserAgent, onTaskCommand, onBrows
   return (
     <>
       {task.pendingApproval ? (
-        <section ref={approvalRef} className="approval-card approval-card-prominent" aria-label="Agent approval required">
+        <section className="approval-card approval-card-prominent" role="dialog" aria-modal="true" aria-label="Agent approval required">
           <span className="eyebrow">Approval required</span>
           <h3>{task.pendingApproval.title}</h3>
           {task.pendingApproval.reason ? <p>{task.pendingApproval.reason}</p> : null}
@@ -112,7 +118,7 @@ function ApprovalCards({ approvalRef, task, browserAgent, onTaskCommand, onBrows
         </section>
       ) : null}
       {browserAgent?.pendingApproval && onBrowserAgentCommand ? (
-        <section ref={approvalRef} className="approval-card approval-card-prominent" aria-label="Browser action approval required">
+        <section className="approval-card approval-card-prominent" role="dialog" aria-modal="true" aria-label="Browser action approval required">
           <span className="eyebrow">Browser approval required</span>
           <h3>{browserAgent.pendingApproval.title}</h3>
           <p><strong>Target:</strong> {browserAgent.pendingApproval.target}</p>

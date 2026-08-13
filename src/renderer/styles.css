@@ -129,10 +129,29 @@ textarea:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
 
 .top-row {
   display: grid;
-  grid-template-columns: 178px minmax(460px, 1fr);
+  grid-template-columns: auto auto minmax(460px, 1fr);
   align-items: center;
   min-height: 50px;
-  gap: 22px;
+  gap: 14px;
+}
+
+.mail-chrome-button {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  color: #755b3d;
+  background: transparent;
+  -webkit-app-region: no-drag;
+}
+.mail-chrome-button:hover,
+.mail-chrome-button-active {
+  border-color: #e2d4c3;
+  color: #8d500d;
+  background: var(--amber-soft);
 }
 
 .brand {
@@ -691,7 +710,6 @@ textarea:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
 }
 
 .native-stage, .task-stage { z-index: 2; overflow: hidden; -webkit-app-region: no-drag; }
-.task-stage { overflow-y: auto; }
 .browser-stage.workspace-collapsed, .native-stage.workspace-collapsed, .task-stage.workspace-collapsed { left: 56px; }
 .command-is-collapsed .browser-stage, .command-is-collapsed .native-stage, .command-is-collapsed .task-stage { bottom: 10px; }
 
@@ -1201,8 +1219,28 @@ body.pane-is-resizing .poppin-pad-pane {
 .task-state-completed { color: #276b46; background: #e7f4eb; }
 .task-state-failed { color: #9c493e; background: #fff0ed; }
 .task-account { display: flex; align-items: center; gap: 8px; margin: 8px 0 14px; overflow: hidden; color: #938a80; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.approval-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 28px clamp(20px, 2.5vw, 36px);
+  background: rgba(43, 34, 24, .22);
+  backdrop-filter: blur(6px);
+  outline: 0;
+}
 .approval-card { margin: 12px 0; padding: 13px; border: 1px solid #e2c8a9; border-radius: 12px; background: #fff8ee; }
-.approval-card-prominent { position: sticky; z-index: 3; top: 0; margin-top: 0; box-shadow: 0 12px 28px rgba(84, 51, 16, .14); }
+.approval-card-prominent {
+  width: min(520px, 100%);
+  max-height: 100%;
+  margin: 0;
+  overflow: auto;
+  box-shadow: 0 18px 48px rgba(84, 51, 16, .22);
+}
 .approval-card h3 { margin: 3px 0 7px; font-size: 13px; }
 .approval-card p { margin: 0 0 8px; color: #7c6d5d; font-size: 10px; line-height: 1.45; }
 .approval-card pre { max-height: 110px; margin: 0; overflow: auto; color: #594b3e; font: 9px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; word-break: break-word; }
@@ -1379,7 +1417,8 @@ body.pane-is-resizing .poppin-pad-pane {
 }
 
 .chrome-compact .browser-chrome { padding: 7px 20px 0 var(--titlebar-left-inset, 80px); }
-.chrome-compact .top-row { grid-template-columns: 158px minmax(420px, 1fr); min-height: 41px; gap: 16px; }
+.chrome-compact .top-row { grid-template-columns: auto auto minmax(420px, 1fr); min-height: 41px; gap: 10px; }
+.chrome-compact .mail-chrome-button { width: 32px; height: 32px; }
 .chrome-compact .brand { gap: 6px; }
 .chrome-compact .brand-orbit { margin-right: -4px; transform: scale(.86); transform-origin: left center; }
 .chrome-compact .brand-name { font-size: 15px; }
@@ -1415,7 +1454,8 @@ body.pane-is-resizing .poppin-pad-pane {
 .chrome-compact .new-tab-button { width: 28px; height: 28px; margin-bottom: 1px; border-radius: 9px; }
 
 .chrome-dense .browser-chrome { padding: 6px 16px 0 var(--titlebar-left-inset, 76px); }
-.chrome-dense .top-row { grid-template-columns: 138px minmax(390px, 1fr); min-height: 37px; gap: 10px; }
+.chrome-dense .top-row { grid-template-columns: auto auto minmax(390px, 1fr); min-height: 37px; gap: 8px; }
+.chrome-dense .mail-chrome-button { width: 30px; height: 30px; }
 .chrome-dense .brand { gap: 3px; }
 .chrome-dense .brand-orbit { margin-right: -7px; transform: scale(.78); transform-origin: left center; }
 .chrome-dense .brand-name { font-size: 14px; }
@@ -1501,7 +1541,70 @@ body.pane-is-resizing .poppin-pad-pane {
 /* The task tab: one surface for a task's whole lifecycle (live progress,
    approvals, then the reply or the diff/delivery review). Full width, no
    side-pane chrome. */
-.task-tab-content { width: 100%; max-width: none; margin: 0; padding: 28px clamp(20px, 2.5vw, 36px) 64px; box-sizing: border-box; }
+.task-tab-shell { position: relative; height: 100%; }
+.task-tab-content { width: 100%; max-width: none; height: 100%; margin: 0; padding: 28px clamp(20px, 2.5vw, 36px) 64px; overflow-y: auto; box-sizing: border-box; }
+.mail-section {
+  width: 100%;
+  max-width: 720px;
+  height: 100%;
+  margin: 0 auto;
+  padding: 28px clamp(20px, 2.5vw, 36px) 64px;
+  overflow-y: auto;
+  box-sizing: border-box;
+}
+.mail-lede { margin: 0 0 18px; color: #746a60; font-size: 12px; line-height: 1.5; }
+.mail-card {
+  margin-bottom: 16px;
+  padding: 16px 16px 14px;
+  border: 1px solid var(--divider);
+  border-radius: 14px;
+  background: var(--surface);
+}
+.mail-card h3 { margin: 4px 0 8px; font-size: 14px; }
+.mail-hint { margin: 0 0 12px; color: #8a7b6a; font-size: 11px; line-height: 1.45; }
+.mail-field { display: flex; flex-direction: column; gap: 5px; margin-bottom: 10px; color: #746a60; font-size: 10px; font-weight: 650; }
+.mail-field input,
+.mail-field textarea {
+  width: 100%;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  outline: 0;
+  color: #554d45;
+  background: var(--surface-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.mail-field textarea { resize: vertical; font: inherit; }
+.mail-field input:focus,
+.mail-field textarea:focus { border-color: #dc9a4f; box-shadow: 0 0 0 3px rgba(232,130,11,.1); }
+.mail-presets { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.mail-inbox-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }
+.mail-inbox-actions .primary-button { display: inline-flex; align-items: center; gap: 6px; }
+.mail-skill-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px; }
+.mail-skill-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  padding: 10px 0;
+  border-top: 1px solid var(--divider);
+}
+.mail-skill-row:first-child { border-top: 0; padding-top: 0; }
+.mail-skill-row strong { display: block; font-size: 12px; }
+.mail-skill-row p { margin: 4px 0 0; color: #7c6d5d; font-size: 11px; line-height: 1.45; }
+.mail-skill-disabled { opacity: .62; }
+.mail-skill-actions { display: flex; align-items: flex-start; gap: 6px; }
+.mail-skill-actions button {
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: #6f5b43;
+  background: var(--surface);
+  font-size: 10px;
+  font-weight: 650;
+}
+.mail-skill-actions button:hover { background: var(--surface-muted); }
 .task-tab-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding-bottom: 18px; margin-bottom: 18px; border-bottom: 1px solid var(--divider); }
 .task-tab-heading h2 { margin: 4px 0 0; font-size: clamp(20px, 2.6vw, 26px); line-height: 1.25; text-wrap: balance; }
 .task-tab-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; }
