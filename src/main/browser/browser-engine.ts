@@ -102,6 +102,7 @@ export class BrowserEngine {
   private contentVisible = true;
   /** The single reusable Tandem World surface, if it is open. */
   private tandemWorldTabId: string | null = null;
+  private tandemBaseUrl: string | null = null;
   private split: BrowserSplitSnapshot | null = null;
 
   /** Optional workspace hook so tab menus can save a session via a dialog-free flow. */
@@ -278,11 +279,35 @@ export class BrowserEngine {
     return this.tandemWorldTabId === tabId;
   }
 
+  /** Called when Tandem connects so restored SPA URLs without `?host=poppin` can be recognised. */
+  setTandemBaseUrl(baseUrl: string | null): void {
+    this.tandemBaseUrl = baseUrl;
+    this.reconcileTandemWorldTabs();
+  }
+
+  reconcileTandemWorldTabs(): void {
+    if (this.tandemWorldTabId) {
+      const current = this.tabs.get(this.tandemWorldTabId);
+      if (current && !current.view.webContents.isDestroyed()) {
+        this.adoptTandemWorldTab(current);
+        this.dedupeTandemWorldTabs(current.snapshot.id);
+        return;
+      }
+      this.tandemWorldTabId = null;
+    }
+    const orphan = this.findTandemWorldTabRecord();
+    if (!orphan) return;
+    this.adoptTandemWorldTab(orphan);
+    this.dedupeTandemWorldTabs(orphan.snapshot.id);
+    this.emitSnapshot();
+    this.scheduleSave();
+  }
+
   private findTandemWorldTabRecord(): BrowserTabRecord | undefined {
     for (const id of this.tabOrder) {
       const tab = this.tabs.get(id);
       if (!tab || tab.snapshot.taskSpaceId) continue;
-      if (tab.snapshot.surface === 'tandem-world' || isTandemWorldBrowserUrl(tab.lastExternalUrl)) return tab;
+      if (tab.snapshot.surface === 'tandem-world' || isTandemWorldBrowserUrl(tab.lastExternalUrl, this.tandemBaseUrl)) return tab;
     }
     return undefined;
   }
@@ -299,7 +324,7 @@ export class BrowserEngine {
       if (id === keepTabId) continue;
       const tab = this.tabs.get(id);
       if (!tab || tab.snapshot.taskSpaceId) continue;
-      if (tab.snapshot.surface === 'tandem-world' || isTandemWorldBrowserUrl(tab.lastExternalUrl)) {
+      if (tab.snapshot.surface === 'tandem-world' || isTandemWorldBrowserUrl(tab.lastExternalUrl, this.tandemBaseUrl)) {
         void this.closeTab(id, false);
       }
     }
@@ -1265,7 +1290,7 @@ export class BrowserEngine {
     }
     const isNewTab = url.startsWith('poppin://new-tab');
     const previousOrigin = safeOrigin(tab.lastExternalUrl);
-    const remembered = !isNewTab && (tab.snapshot.surface === 'tandem-world' || isTandemWorldBrowserUrl(url))
+    const remembered = !isNewTab && (tab.snapshot.surface === 'tandem-world' || isTandemWorldBrowserUrl(url, this.tandemBaseUrl))
       ? ensureTandemHostParam(url)
       : url;
     tab.lastExternalUrl = isNewTab ? NEW_TAB_URL : remembered;

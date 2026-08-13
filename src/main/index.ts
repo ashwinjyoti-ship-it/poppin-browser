@@ -141,6 +141,7 @@ async function createWindow(): Promise<void> {
     openWorld: (url) => browserEngine?.openTandemWorld(url),
     closeWorld: () => browserEngine?.closeTandemWorld(),
     onContextChanged: () => workspaceEngine?.refreshTandemContexts(),
+    onConnectionChanged: (baseUrl) => browserEngine?.setTandemBaseUrl(baseUrl),
   });
   settingsOverlay = new SettingsOverlayController(
     mainWindow,
@@ -311,7 +312,9 @@ async function createWindow(): Promise<void> {
     clearPadAttachments: () => poppinPadEngine?.clearAttachments(),
   });
   browserEngine.restore(persisted);
-  void tandemEngine.initialize();
+  void tandemEngine.initialize().then(() => {
+    browserEngine?.setTandemBaseUrl(tandemEngine?.getSnapshot().connection.baseUrl ?? null);
+  });
   await browserAgentEngine.restore();
   for (const url of pendingExternalUrls.splice(0)) openExternalUrl(url);
 

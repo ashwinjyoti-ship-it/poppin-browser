@@ -62,10 +62,14 @@ describe('Tandem base URL', () => {
   });
 
   it('recognises restored Tandem World browser URLs that lost surface metadata', () => {
+    const base = 'https://ash-doc.pages.dev';
     expect(isTandemWorldBrowserUrl('https://ash-doc.pages.dev/?host=poppin')).toBe(true);
     expect(isTandemWorldBrowserUrl('https://ash-doc.pages.dev/page/abc?host=poppin')).toBe(true);
+    expect(isTandemWorldBrowserUrl('https://ash-doc.pages.dev/page/abc', base)).toBe(true);
+    expect(isTandemWorldBrowserUrl('https://ash-doc.pages.dev/workspace/ws-1/page/p1', base)).toBe(true);
     expect(isTandemWorldBrowserUrl('https://ash-doc.pages.dev/page/abc')).toBe(false);
     expect(isTandemWorldBrowserUrl('https://example.com/?host=poppin')).toBe(true);
+    expect(isTandemWorldBrowserUrl('https://example.com/docs', 'https://example.com')).toBe(false);
     expect(isTandemWorldBrowserUrl('https://mail.google.com/')).toBe(false);
   });
 });

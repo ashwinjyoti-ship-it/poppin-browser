@@ -111,7 +111,9 @@ export function App() {
   const visibleTabs = [
     ...browserTabs.map((tab) => ({
       ...tab,
-      kind: tab.surface === 'tandem-world' || isTandemWorldBrowserUrl(tab.url) ? 'tandem' as const : 'browser' as const,
+      kind: tab.surface === 'tandem-world' || isTandemWorldBrowserUrl(tab.url, tandemSnapshot.connection.baseUrl)
+        ? 'tandem' as const
+        : 'browser' as const,
     })),
     ...(taskSnapshot.task ? [{
       id: TASK_TAB_ID,
@@ -565,7 +567,7 @@ export function App() {
               return;
             }
             const tab = snapshot.tabs.find((candidate) => candidate.id === tabId);
-            if (tab && (tab.surface === 'tandem-world' || isTandemWorldBrowserUrl(tab.url))) setWorkspaceCollapsed(true);
+            if (tab && (tab.surface === 'tandem-world' || isTandemWorldBrowserUrl(tab.url, tandemSnapshot.connection.baseUrl))) setWorkspaceCollapsed(true);
             if (browserAgentSnapshot.watching && !tab?.taskSpaceId) void sendBrowserAgentCommand({ type: 'leaveWatch' });
             void sendPagesCommand({ type: 'deactivateTabs' });
             void sendCommand({ type: 'activate', tabId });
@@ -573,7 +575,7 @@ export function App() {
           onClose={(tabId) => {
             if (tabId === TASK_TAB_ID) { setTaskTabActive(false); return; }
             if (pagesSnapshot.tabs.some((tab) => tab.id === tabId)) void sendPagesCommand({ type: 'closeTab', tabId });
-            else if (snapshot.tabs.some((tab) => tab.id === tabId && (tab.surface === 'tandem-world' || isTandemWorldBrowserUrl(tab.url)))) void sendTandemCommand({ type: 'closeWorld' });
+            else if (snapshot.tabs.some((tab) => tab.id === tabId && (tab.surface === 'tandem-world' || isTandemWorldBrowserUrl(tab.url, tandemSnapshot.connection.baseUrl)))) void sendTandemCommand({ type: 'closeWorld' });
             else void sendCommand({ type: 'close', tabId });
           }}
           onCreate={() => { void sendPagesCommand({ type: 'deactivateTabs' }); void sendCommand({ type: 'create' }); }}
@@ -587,6 +589,7 @@ export function App() {
           onWatchAgentTabs={() => { void sendBrowserAgentCommand({ type: 'watch' }); }}
           tandemReady={tandemSnapshot.connection.state === 'ready'}
           tandemMessage={tandemSnapshot.connection.message}
+          tandemWorldOpen={tandemSnapshot.worldOpen}
           onOpenTandemWorld={() => {
             void sendTandemCommand({ type: 'openWorld' });
           }}
