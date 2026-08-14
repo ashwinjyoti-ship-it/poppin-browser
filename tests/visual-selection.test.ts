@@ -6,7 +6,7 @@ import path from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { authenticationDialogBounds, isAuthenticationCompletionUrl, isAuthenticationPopup, isExternalLinkPreview, isGoogleWidgetMainFrameUrl, isIdentityProviderHost, isLocalhostUrl, recoverMailUrlFromGoogleWidget } from '../src/main/browser/browser-engine';
+import { authenticationDialogBounds, isAuthenticationCompletionUrl, isAuthenticationPopup, isAuthenticationRedirectInterstitial, isExternalLinkPreview, isGoogleWidgetMainFrameUrl, isIdentityProviderHost, isLocalhostUrl, recoverMailInboxFromAuthRedirect, recoverMailUrlFromGoogleWidget } from '../src/main/browser/browser-engine';
 import { WorkspaceStore } from '../src/main/workspace/workspace-store';
 import type { VisualSelectionSnapshot } from '../src/shared/workspace';
 
@@ -82,6 +82,11 @@ describe('authentication popup policy', () => {
     expect(isAuthenticationCompletionUrl('http://127.0.0.1:3000/oauth-consent', 'http://127.0.0.1:3000/login')).toBe(false);
     expect(isAuthenticationCompletionUrl('http://127.0.0.1:3000/', 'http://127.0.0.1:3000/login')).toBe(true);
     expect(isAuthenticationCompletionUrl('https://example.com/', 'https://duckduckgo.com/')).toBe(false);
+
+    expect(isAuthenticationRedirectInterstitial('https://outlook.live.com/owa/authredirect.html?code=x')).toBe(true);
+    expect(isAuthenticationCompletionUrl('https://outlook.live.com/owa/authredirect.html?code=x', 'https://outlook.live.com/mail/')).toBe(false);
+    expect(isAuthenticationCompletionUrl('https://outlook.live.com/mail/u/0/', 'https://outlook.live.com/mail/')).toBe(true);
+    expect(recoverMailInboxFromAuthRedirect('https://outlook.live.com/owa/authredirect.html?code=x')).toBe('https://outlook.live.com/mail/');
   });
 });
 
