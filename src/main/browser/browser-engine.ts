@@ -57,11 +57,11 @@ const CLOSED_TAB_LIMIT = 12;
 const GROUP_COLORS: BrowserGroupColor[] = ['amber', 'blue', 'green', 'rose', 'violet'];
 const AUTHENTICATION_HOSTS = new Set([
   'accounts.google.com', 'appleid.apple.com', 'auth.openai.com', 'chatgpt.com',
-  'login.microsoftonline.com', 'claude.ai', 'auth.anthropic.com',
+  'login.microsoftonline.com', 'login.live.com', 'claude.ai', 'auth.anthropic.com',
 ]);
 const IDENTITY_PROVIDER_HOSTS = new Set([
   'accounts.google.com', 'appleid.apple.com', 'auth.openai.com',
-  'login.microsoftonline.com', 'auth.anthropic.com',
+  'login.microsoftonline.com', 'login.live.com', 'auth.anthropic.com',
 ]);
 
 interface BrowserTabRecord {
@@ -1095,6 +1095,12 @@ export class BrowserEngine {
         if (recovered && safeOrigin(contents.getURL()) === 'https://mail.google.com') {
           void contents.loadURL(recovered).catch(() => undefined);
         }
+        return;
+      }
+      if (isAuthenticationRedirectInterstitial(url)) {
+        event.preventDefault();
+        const recovered = recoverMailInboxFromAuthRedirect(url);
+        if (recovered) void contents.loadURL(recovered).catch(() => undefined);
       }
     });
     contents.on('before-input-event', (event, input) => {
@@ -2152,13 +2158,35 @@ export function isAuthenticationCompletionUrl(value: string, openerValue: string
 }
 
 function isAuthenticationInterstitialUrl(value: string): boolean {
+  return isAuthenticationRedirectInterstitial(value);
+}
+
+/** OAuth bridge pages that must finish inside the auth popup before handoff. */
+export function isAuthenticationRedirectInterstitial(value: string): boolean {
   try {
     const target = new URL(value);
     if (isIdentityProviderHost(target.hostname)) return true;
+    const path = `${target.pathname}${target.search}${target.hash}`;
+    if (/authredirect/i.test(path)) return true;
     return /(?:^|[/?#&_.-])(?:oauth[-/]?popup|sign[-_]?in|log[-_]?in|authorize|consent|identifier|select|challenge)(?:$|[/?#&_.=-])/i
-      .test(`${target.pathname}${target.search}${target.hash}`);
+      .test(path);
   } catch {
     return true;
+  }
+}
+
+/** When a tab lands on an OAuth bridge page, return a usable webmail inbox URL. */
+export function recoverMailInboxFromAuthRedirect(value: string): string | null {
+  try {
+    const target = new URL(value);
+    if (!/authredirect/i.test(`${target.pathname}${target.search}`)) return null;
+    if (target.hostname === 'outlook.live.com' || target.hostname.endsWith('.outlook.com')) {
+      return 'https://outlook.live.com/mail/';
+    }
+    if (target.hostname === 'mail.google.com') return 'https://mail.google.com/mail/u/0/#inbox';
+    return null;
+  } catch {
+    return null;
   }
 }
 
