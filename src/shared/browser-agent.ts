@@ -107,8 +107,18 @@ export interface BrowserAgentSnapshot {
   log: BrowserAgentLogEntry[];
 }
 
+const REUSABLE_AGENT_STATES = new Set<BrowserAgentState>(['running', 'paused', 'needs-approval', 'completed', 'stopped']);
+
+/** True when the current Agent Tabs can be resumed instead of calling start() again. */
+export function isReusableAgentSession(
+  agent: { state: string; taskSpace: { tabIds: string[] } | null } | null | undefined,
+): boolean {
+  if (!agent?.taskSpace || agent.taskSpace.tabIds.length === 0) return false;
+  return REUSABLE_AGENT_STATES.has(agent.state as BrowserAgentState);
+}
+
 export type BrowserAgentCommand =
-  | { type: 'start'; taskId: string; name?: string; mode: BrowserTaskSpaceMode; tabIds: string[] }
+  | { type: 'start'; taskId: string; name?: string; mode: BrowserTaskSpaceMode; tabIds: string[]; url?: string }
   | { type: 'pause' }
   | { type: 'resume' }
   | { type: 'stop' }

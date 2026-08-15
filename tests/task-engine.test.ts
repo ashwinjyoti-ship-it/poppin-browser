@@ -93,6 +93,7 @@ async function setup({ withProject = true, withBrowserAgent = false, withTabCont
   const onProjectUpdated = vi.fn();
   const querySelectedDatabase = vi.fn(() => 'Name\nGuitar');
   const applyPageComment = vi.fn(() => 'Applied comment');
+  const browsableTabs: Array<{ id: string; url: string; taskSpaceId?: string | null }> = [];
   const browserSnapshot: BrowserAgentSnapshot = {
     state: 'idle', taskId: null, taskSpace: null, watching: false, allowedTabIds: [], activeTabId: null, currentAction: null, pendingApproval: null, log: [],
   };
@@ -101,6 +102,7 @@ async function setup({ withProject = true, withBrowserAgent = false, withTabCont
       const explorationTabIds = ['exploration-tab'];
       const tabIds = [...command.tabIds, ...explorationTabIds];
       browserSnapshot.state = 'running';
+      browserSnapshot.watching = true;
       browserSnapshot.taskId = command.taskId;
       browserSnapshot.taskSpace = {
         id: 'space-1', taskId: command.taskId, name: command.name ?? 'Browser task', mode: command.mode,
@@ -110,6 +112,22 @@ async function setup({ withProject = true, withBrowserAgent = false, withTabCont
       browserSnapshot.allowedTabIds = tabIds;
       browserSnapshot.activeTabId = explorationTabIds[0]!;
       return { ok: true, data: JSON.stringify({ taskSpaceId: 'space-1', mode: command.mode, contextTabIds: command.tabIds, explorationTabIds }) };
+    }
+    if (command.type === 'resume') {
+      browserSnapshot.state = 'running';
+      if (browserSnapshot.taskSpace) {
+        browserSnapshot.taskSpace = { ...browserSnapshot.taskSpace, owner: 'agent', status: 'agent-controlling' };
+      }
+      return { ok: true };
+    }
+    if (command.type === 'watch') {
+      browserSnapshot.watching = true;
+      return { ok: true };
+    }
+    if (command.type === 'act' && command.action.type === 'navigate') {
+      const tab = browsableTabs.find((item) => item.id === command.tabId);
+      if (tab) tab.url = command.action.url;
+      return { ok: true };
     }
     return { ok: true, data: 'Visible browser action completed.' };
   });
@@ -133,11 +151,12 @@ async function setup({ withProject = true, withBrowserAgent = false, withTabCont
       ...(withBrowserAgent ? {
         getBrowserAgentSnapshot: () => browserSnapshot,
         executeBrowserAgentCommand: browserCommand,
+        getBrowsableTabs: () => browsableTabs,
       } : {}),
     },
   );
   await engine.initialize();
-  return { engine, fake, repositoryPath, taskStore, workspaceStore, onResultReady, onTaskEnded, directory, github, onOpenExternal, onProjectUpdated, browserSnapshot, browserCommand, querySelectedDatabase, applyPageComment };
+  return { engine, fake, repositoryPath, taskStore, workspaceStore, onResultReady, onTaskEnded, directory, github, onOpenExternal, onProjectUpdated, browserSnapshot, browserCommand, browsableTabs, querySelectedDatabase, applyPageComment };
 }
 
 describe('task engine', () => {
@@ -198,9 +217,177 @@ describe('task engine', () => {
     workspaceStore.close();
   });
 
+  it('reuses an open Mail Agent Tab and injects enabled mail skills without restating them', async () => {
+    const { engine, fake, browserCommand, browserSnapshot, browsableTabs, taskStore, workspaceStore } = await setup({
+      withProject: false, withBrowserAgent: true, withTabContext: false,
+    });
+    workspaceStore.setMailInboxUrl('https://mail.google.com/');
+    workspaceStore.insertMailSkill({
+      id: 'skill-1',
+      name: 'Quotes',
+      rule: 'Mails addressed to Ashwin with a request for quote get a draft reply.',
+      enabled: true,
+      createdAt: '2026-08-14T00:00:00Z',
+      updatedAt: '2026-08-14T00:00:00Z',
+    });
+    browsableTabs.push({ id: 'mail-agent', url: 'https://mail.google.com/mail/u/0/#inbox', taskSpaceId: 'space-mail' });
+    browserSnapshot.state = 'running';
+    browserSnapshot.taskId = 'mail-1';
+    browserSnapshot.watching = true;
+    browserSnapshot.allowedTabIds = ['mail-agent'];
+    browserSnapshot.activeTabId = 'mail-agent';
+    browserSnapshot.taskSpace = {
+      id: 'space-mail', taskId: 'mail-1', name: 'Mail', mode: 'browser-only',
+      owner: 'agent', status: 'agent-controlling', tabIds: ['mail-agent'], contextTabIds: [],
+      explorationTabIds: ['mail-agent'], activeTabId: 'mail-agent', createdAt: '', updatedAt: '', kept: false,
+    };
+    expect(await engine.execute({
+      type: 'startTask', prompt: 'Handle the quotes.', model: 'gpt-test', reasoningEffort: 'high', kind: 'work',
+    })).toEqual({ ok: true });
+    expect(browserCommand).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'start' }));
+    expect(fake.prompt).toContain('POPPIN MAIL POLICY');
+    expect(fake.prompt).toContain('Quotes:');
+    expect(fake.prompt).toContain('Mails addressed to Ashwin with a request for quote get a draft reply.');
+    expect(fake.prompt).toContain('Enabled mail skills are already in force');
+    const environment = JSON.parse(fake.prompt.split('POPPIN ENVIRONMENT (what you can actually read and control right now)\n')[1]!.split('\n\nPOPPIN MAIL POLICY')[0]!) as Record<string, unknown>;
+    expect(environment).toMatchObject({
+      browser: { state: 'agent_controlling', taskSpaceId: 'space-mail', mode: 'exploration' },
+    });
+    expect(fake.prompt).toContain('TASK-OWNED AGENT TABS');
+    await engine.close();
+    taskStore.close();
+    workspaceStore.close();
+  });
+
+  it('reuses a completed Outlook Agent Tab on follow-up instead of starting a new session', async () => {
+    const { engine, fake, browserCommand, browserSnapshot, browsableTabs, taskStore, workspaceStore } = await setup({
+      withProject: false, withBrowserAgent: true, withTabContext: false,
+    });
+    workspaceStore.setMailInboxUrl('https://outlook.live.com/mail/');
+    browsableTabs.push({ id: 'mail-agent', url: 'https://outlook.live.com/mail/u/0/', taskSpaceId: 'space-mail' });
+    browserSnapshot.state = 'running';
+    browserSnapshot.taskId = 'mail-1';
+    browserSnapshot.watching = true;
+    browserSnapshot.allowedTabIds = ['mail-agent'];
+    browserSnapshot.activeTabId = 'mail-agent';
+    browserSnapshot.taskSpace = {
+      id: 'space-mail', taskId: 'mail-1', name: 'Mail', mode: 'browser-only',
+      owner: 'agent', status: 'agent-controlling', tabIds: ['mail-agent'], contextTabIds: [],
+      explorationTabIds: ['mail-agent'], activeTabId: 'mail-agent', createdAt: '', updatedAt: '', kept: false,
+    };
+    expect(await engine.execute({
+      type: 'startTask', prompt: 'Check my Outlook inbox.', model: 'gpt-test', reasoningEffort: 'high', kind: 'work',
+    })).toEqual({ ok: true });
+    fake.emit('request', {
+      id: 71,
+      method: 'item/tool/call',
+      params: { threadId: 'thread-1', turnId: 'turn-1', callId: 'call-read', tool: 'poppin_browser_action', arguments: { taskSpaceId: 'space-mail', tabId: 'mail-agent', action: { type: 'navigate', url: 'https://outlook.live.com/mail/u/0/' } } },
+    });
+    await vi.waitFor(() => expect(engine.getSnapshot().task?.browserRun.successfulActionCount).toBe(1));
+    fake.emit('notification', { method: 'item/agentMessage/delta', params: { threadId: 'thread-1', turnId: 'turn-1', itemId: 'message-1', delta: 'Inbox summary.' } });
+    fake.emit('notification', { method: 'turn/completed', params: { threadId: 'thread-1', turn: { id: 'turn-1', status: 'completed', error: null } } });
+    await vi.waitFor(() => expect(engine.getSnapshot().task).toMatchObject({ state: 'Completed' }));
+    browserSnapshot.state = 'completed';
+    browserSnapshot.taskSpace = { ...browserSnapshot.taskSpace!, owner: 'user', status: 'completed' };
+
+    expect(await engine.execute({ type: 'continueTask', prompt: 'Draft a reply to the quote.' })).toEqual({ ok: true });
+    expect(browserCommand).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'start' }));
+    expect(browserCommand).toHaveBeenCalledWith({ type: 'resume' });
+    expect(engine.getSnapshot().task?.browserRun.taskSpaceId).toBe('space-mail');
+    expect(fake.prompt).toContain('"taskSpaceId": "space-mail"');
+    await engine.close();
+    taskStore.close();
+    workspaceStore.close();
+  });
+
+  it('fails with EXPLICIT_BROWSER_REQUEST_NOT_PROVISIONED when mail intent is recognized but Agent Tabs never appear', async () => {
+    const { engine, browserCommand, browserSnapshot, taskStore, workspaceStore } = await setup({
+      withProject: false, withBrowserAgent: true, withTabContext: false,
+    });
+    workspaceStore.setMailInboxUrl('https://outlook.live.com/mail/');
+    browserCommand.mockImplementation(async () => ({ ok: true }));
+    browserSnapshot.state = 'idle';
+    browserSnapshot.taskSpace = null;
+    const result = await engine.execute({
+      type: 'startTask', prompt: 'Check my Outlook inbox.', model: 'gpt-test', reasoningEffort: 'high', kind: 'work',
+    });
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain('EXPLICIT_BROWSER_REQUEST_NOT_PROVISIONED');
+    await engine.close();
+    taskStore.close();
+    workspaceStore.close();
+  });
+
+  it('does not clone unrelated selected tabs into a mailbox Agent Tabs session', async () => {
+    const { engine, browserCommand, taskStore, workspaceStore } = await setup({
+      withProject: false, withBrowserAgent: true, withTabContext: true,
+    });
+    workspaceStore.setMailInboxUrl('https://outlook.live.com/mail/');
+    expect(await engine.execute({
+      type: 'startTask', prompt: 'Check my Outlook inbox.', model: 'gpt-test', reasoningEffort: 'high', kind: 'work',
+    })).toEqual({ ok: true });
+    expect(browserCommand).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'start', mode: 'browser-only', tabIds: [], url: 'https://outlook.live.com/mail/',
+    }));
+    await engine.close();
+    taskStore.close();
+    workspaceStore.close();
+  });
+
+  it('clones a signed-in human tab when the agent needs that same site', async () => {
+    const { engine, fake, browserCommand, browsableTabs, taskStore, workspaceStore } = await setup({
+      withProject: false, withBrowserAgent: true, withTabContext: false,
+    });
+    browsableTabs.push({ id: 'linkedin', url: 'https://www.linkedin.com/feed/' });
+    browsableTabs.push({ id: 'other', url: 'https://news.ycombinator.com/' });
+    expect(await engine.execute({
+      type: 'startTask', prompt: 'Research my LinkedIn feed today.', model: 'gpt-test', reasoningEffort: 'high', kind: 'work',
+    })).toEqual({ ok: true });
+    expect(browserCommand).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'start', mode: 'mixed', tabIds: ['linkedin'],
+    }));
+    expect(fake.prompt).toContain('signedInHumanPages');
+    expect(fake.prompt).toContain('https://www.linkedin.com/feed/');
+    await engine.close();
+    taskStore.close();
+    workspaceStore.close();
+  });
+
+  it('does not clone an unrelated signed-in human tab into a new research task', async () => {
+    const { engine, browserCommand, browsableTabs, taskStore, workspaceStore } = await setup({
+      withProject: false, withBrowserAgent: true, withTabContext: false,
+    });
+    browsableTabs.push({ id: 'linkedin', url: 'https://www.linkedin.com/feed/' });
+    expect(await engine.execute({
+      type: 'startTask', prompt: 'Search for acoustic guitars under 10,000 and tell me where to buy them.', model: 'gpt-test', reasoningEffort: 'high', kind: 'work',
+    })).toEqual({ ok: true });
+    expect(browserCommand).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'start', mode: 'browser-only', tabIds: [],
+    }));
+    await engine.close();
+    taskStore.close();
+    workspaceStore.close();
+  });
+
+  it('seeds Mail Work Agent Tabs with the saved inbox when none are open', async () => {
+    const { engine, browserCommand, taskStore, workspaceStore } = await setup({
+      withProject: false, withBrowserAgent: true, withTabContext: false,
+    });
+    workspaceStore.setMailInboxUrl('https://mail.google.com/');
+    expect(await engine.execute({
+      type: 'startTask', prompt: 'Check my inbox for unread quotes.', model: 'gpt-test', reasoningEffort: 'high', kind: 'work',
+    })).toEqual({ ok: true });
+    expect(browserCommand).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'start', mode: 'browser-only', tabIds: [], url: 'https://mail.google.com/',
+    }));
+    await engine.close();
+    taskStore.close();
+    workspaceStore.close();
+  });
+
   it('offers task-scoped browser actions to Codex and completes ordinary actions without approval', async () => {
     const { engine, fake, browserCommand, taskStore, workspaceStore } = await setup({ withProject: false, withBrowserAgent: true });
-    await engine.execute({ type: 'startTask', prompt: 'Draft a reply and save the draft', model: 'gpt-test', reasoningEffort: 'high', kind: 'work' });
+    await engine.execute({ type: 'startTask', prompt: 'Fill in the selected form and save a draft', model: 'gpt-test', reasoningEffort: 'high', kind: 'work', useBrowser: true });
     expect(browserCommand).toHaveBeenCalledWith(expect.objectContaining({ type: 'start', mode: 'mixed', tabIds: ['tab-1'] }));
     expect(fake.dynamicTools).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'poppin_browser_action' })]));
     expect(fake.dynamicTools).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'poppin_browser_batch' })]));
@@ -393,7 +580,7 @@ describe('task engine', () => {
     workspaceStore.close();
   });
 
-  it('reopens a fresh browser task space for a short follow-up after completed browser work', async () => {
+  it('reuses the same Agent Tabs for a short follow-up after completed browser work', async () => {
     const { engine, fake, browserCommand, browserSnapshot, taskStore, workspaceStore } = await setup({
       withProject: false, withBrowserAgent: true, withTabContext: false,
     });
@@ -410,11 +597,15 @@ describe('task engine', () => {
     fake.emit('notification', { method: 'turn/completed', params: { threadId: 'thread-1', turn: { id: 'turn-1', status: 'completed', error: null } } });
     await vi.waitFor(() => expect(engine.getSnapshot().task).toMatchObject({ state: 'Completed' }));
     browserSnapshot.state = 'completed';
+    browserSnapshot.watching = false;
     browserSnapshot.taskSpace = { ...browserSnapshot.taskSpace!, owner: 'user', status: 'completed' };
+    browserCommand.mockClear();
 
     expect(await engine.execute({ type: 'continueTask', prompt: 'continue' })).toEqual({ ok: true });
     expect(fake.resumeCount).toBe(1);
-    expect(browserCommand).toHaveBeenCalledWith(expect.objectContaining({ type: 'start', mode: 'browser-only', tabIds: [] }));
+    expect(browserCommand).toHaveBeenCalledWith({ type: 'resume' });
+    expect(browserCommand).toHaveBeenCalledWith({ type: 'watch' });
+    expect(browserCommand).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'start' }));
     expect(fake.prompt).toContain('TASK-OWNED AGENT TABS');
     expect(fake.prompt).toContain('"explorationTabs"');
     expect(engine.getSnapshot().task?.browserRun).toMatchObject({ required: true, state: 'awaiting-action', successfulActionCount: 0 });

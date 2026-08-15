@@ -14,7 +14,7 @@ interface MailSectionProps {
   workspace: WorkspaceSnapshot;
   tabs: BrowserTabSnapshot[];
   onCommand: (command: WorkspaceCommand) => Promise<WorkspaceCommandResult>;
-  onOpenInbox: (url: string) => void;
+  onOpenInbox: (url: string) => void | Promise<{ ok: boolean; message?: string }>;
 }
 
 /**
@@ -72,8 +72,8 @@ export function MailSection({ workspace, tabs, onCommand, onOpenInbox }: MailSec
       </div>
 
       <p className="mail-lede">
-        Sign in inside the inbox tab. Poppin keeps that session in its own browser partition and never stores passwords.
-        Ask the command bar in plain language. Reading and drafts run in Agent Tabs; sending waits for approval.
+        Open inbox starts Agent Tabs on your saved webmail. Sign in there — Poppin keeps that session in its own browser partition and never stores passwords.
+        Enabled mail skills are handed to the agent automatically. Ask in the command bar; reading and drafts run in those Agent Tabs, and sending waits for approval.
       </p>
 
       <section className="mail-card" aria-label="Mail inbox">
@@ -118,7 +118,8 @@ export function MailSection({ workspace, tabs, onCommand, onOpenInbox }: MailSec
                   const result = await run({ type: 'setMailInboxUrl', url });
                   if (!result.ok) return;
                 }
-                onOpenInbox(url);
+                const opened = await Promise.resolve(onOpenInbox(url));
+                if (opened && opened.ok === false) setMessage(opened.message ?? 'Could not open Mail as Agent Tabs.');
               })();
             }}
           >
@@ -130,7 +131,7 @@ export function MailSection({ workspace, tabs, onCommand, onOpenInbox }: MailSec
       <section className="mail-card" aria-label="Mail skill generator">
         <span className="eyebrow">Skill generator</span>
         <h3>{editingId ? 'Edit mail skill' : 'New mail skill'}</h3>
-        <p className="mail-hint">Describe the behaviour in natural language. The active harness follows enabled skills during mailbox work.</p>
+        <p className="mail-hint">Describe the behaviour in natural language. Enabled skills are ingested into Mail Agent Tabs automatically — the harness follows them on the next command-bar request.</p>
         <label className="mail-field">
           <span>Name</span>
           <input value={skillName} onChange={(event) => setSkillName(event.target.value)} placeholder="Meeting invites" aria-label="Mail skill name" maxLength={80} />

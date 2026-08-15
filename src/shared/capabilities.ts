@@ -38,6 +38,7 @@ export const BROWSER_REASON_CODES = {
   authSubmitApprovalRequired: 'AUTH_SUBMIT_APPROVAL_REQUIRED',
   userTakeoverActive: 'USER_TAKEOVER_ACTIVE',
   browserNotProvisioned: 'BROWSER_NOT_PROVISIONED',
+  explicitBrowserRequestNotProvisioned: 'EXPLICIT_BROWSER_REQUEST_NOT_PROVISIONED',
   sourceTabStateNotTransferred: 'SOURCE_TAB_STATE_NOT_TRANSFERRED',
   taskTabExpired: 'TASK_TAB_EXPIRED',
   credentialAccessBlocked: 'CREDENTIAL_ACCESS_BLOCKED',

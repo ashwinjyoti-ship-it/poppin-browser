@@ -6,7 +6,7 @@ import path from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { authenticationDialogBounds, isAuthenticationCompletionUrl, isAuthenticationPopup, isAuthenticationRedirectInterstitial, isExternalLinkPreview, isGoogleWidgetMainFrameUrl, isIdentityProviderHost, isLocalhostUrl, recoverMailInboxFromAuthRedirect, recoverMailUrlFromGoogleWidget } from '../src/main/browser/browser-engine';
+import { authenticationDialogBounds, classifyInspectedControl, isAuthenticationCompletionUrl, isAuthenticationPopup, isAuthenticationRedirectInterstitial, isExternalLinkPreview, isGoogleWidgetMainFrameUrl, isIdentityProviderHost, isLocalhostUrl, isUsefulSemanticRole, recoverMailInboxFromAuthRedirect, recoverMailUrlFromGoogleWidget, SEMANTIC_ROLES } from '../src/main/browser/browser-engine';
 import { WorkspaceStore } from '../src/main/workspace/workspace-store';
 import type { VisualSelectionSnapshot } from '../src/shared/workspace';
 
@@ -113,5 +113,44 @@ describe('Gmail widget navigation policy', () => {
   it('recovers the Gmail inbox from a persisted hovercard URL', () => {
     expect(recoverMailUrlFromGoogleWidget(hovercard)).toBe('https://mail.google.com/mail/u/0/#inbox');
     expect(recoverMailUrlFromGoogleWidget('https://mail.google.com/mail/u/0/#inbox')).toBeNull();
+  });
+});
+
+describe('mailbox inspect and Outlook AX roles', () => {
+  it('exposes named Outlook folder and message roles as useful semantic refs', () => {
+    expect(SEMANTIC_ROLES.has('treeitem')).toBe(true);
+    expect(SEMANTIC_ROLES.has('row')).toBe(true);
+    expect(SEMANTIC_ROLES.has('gridcell')).toBe(true);
+    expect(isUsefulSemanticRole('treeitem', 'Inbox')).toBe(true);
+    expect(isUsefulSemanticRole('row', 'Quote from Acme')).toBe(true);
+    expect(isUsefulSemanticRole('gridcell', 'Request for quote')).toBe(true);
+    expect(isUsefulSemanticRole('listitem', 'Deleted Items')).toBe(true);
+    expect(isUsefulSemanticRole('treeitem', '')).toBe(false);
+    expect(isUsefulSemanticRole('statictext', '')).toBe(false);
+  });
+
+  it('gates only Send and Delete on a signed-in mailbox, leaving Search and leftover Sign in ordinary', () => {
+    const mailbox = (target: string) => classifyInspectedControl({ mailbox: true, mediaControl: false, target });
+    expect(mailbox('Search')).toMatchObject({ consequential: null, takeover: null });
+    expect(mailbox('Deleted Items')).toMatchObject({ consequential: null, takeover: null });
+    expect(mailbox('Sign in with a different account')).toMatchObject({ consequential: null, takeover: null });
+    expect(mailbox('Reply')).toMatchObject({ consequential: null, takeover: null });
+    expect(mailbox('Send')).toMatchObject({ consequential: 'This mailbox action needs approval.', takeover: null });
+    expect(mailbox('Delete')).toMatchObject({ consequential: 'This mailbox action needs approval.', takeover: null });
+    expect(classifyInspectedControl({
+      mailbox: false, mediaControl: false, target: 'Search', soup: 'search submit form',
+    })).toMatchObject({ consequential: null, takeover: null });
+    expect(classifyInspectedControl({
+      mailbox: false, mediaControl: false, target: 'Sign in', pageIsAuth: false,
+    })).toMatchObject({ consequential: null, takeover: null });
+    expect(classifyInspectedControl({
+      mailbox: false, mediaControl: false, target: 'Sign in with Microsoft', pageIsAuth: true,
+    }).takeover).toMatch(/Authentication/i);
+    expect(classifyInspectedControl({
+      mailbox: false, mediaControl: false, target: 'Sign in with Microsoft', pageIsAuth: true, humanSessionAvailable: true,
+    })).toMatchObject({ consequential: null, takeover: null });
+    expect(classifyInspectedControl({ mailbox: false, mediaControl: false, target: 'Buy now' }).consequential).toBeTruthy();
+    expect(classifyInspectedControl({ mailbox: false, mediaControl: false, target: 'Submit' }).consequential).toBeTruthy();
+    expect(classifyInspectedControl({ mailbox: false, mediaControl: false, target: 'Publish' }).consequential).toBeTruthy();
   });
 });
