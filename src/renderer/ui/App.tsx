@@ -27,7 +27,7 @@ import { getChromeLayout, getTitlebarLeftInset, resolveChromeHeight, TAB_SEARCH_
 import { issueForCommand, visibleAddressIssue, type AddressIssue } from './address-issue';
 import { browserApprovalAttentionKey, taskAttentionKey } from './task-attention';
 import { getAgentDockPresentation, getTaskTabStatus } from './task-surface';
-import { mailInboxTabId } from '../../shared/mail';
+import { isReusableMailAgentSession, mailInboxTabId } from '../../shared/mail';
 import {
   browserLeftInset,
   browserRightInset,
@@ -133,16 +133,22 @@ export function App() {
   const leftPaneWidth = normalizeLeftPaneWidth(preferredLeftPaneWidth, viewport.width);
   const padCollapsed = padSnapshot.pad.collapsed;
   const padActive = padSnapshot.pad.active;
+  const watchingAgentTabs = browserAgentSnapshot.watching;
+  const layoutWorkspaceCollapsed = watchingAgentTabs || workspaceCollapsed;
+  const layoutPadCollapsed = watchingAgentTabs || padCollapsed;
+  const padLayoutSnapshot = watchingAgentTabs
+    ? { ...padSnapshot, pad: { ...padSnapshot.pad, collapsed: true, active: false } }
+    : padSnapshot;
   // Focus mode expands into leftover window space; otherwise honor the resized preference.
-  const rightPaneWidth = padActive
-    ? getFocusedRightPaneWidth(viewport.width, leftPaneWidth, workspaceCollapsed)
+  const rightPaneWidth = padActive && !watchingAgentTabs
+    ? getFocusedRightPaneWidth(viewport.width, leftPaneWidth, layoutWorkspaceCollapsed)
     : normalizeRightPaneWidth(
       preferredRightPaneWidth,
       viewport.width,
       leftPaneWidth,
-      workspaceCollapsed,
+      layoutWorkspaceCollapsed,
     );
-  const effectiveRightPaneWidth = padCollapsed ? COLLAPSED_RAIL_WIDTH : rightPaneWidth;
+  const effectiveRightPaneWidth = layoutPadCollapsed ? COLLAPSED_RAIL_WIDTH : rightPaneWidth;
   const dockPresentation = getAgentDockPresentation({
     taskSnapshot,
     browserAgentSnapshot,
@@ -294,7 +300,7 @@ export function App() {
 
   useEffect(() => {
     const topInset = chromeHeight + (urlOverlayOpen ? 280 : 0) + (tabSearchOpen ? TAB_SEARCH_RESULTS_INSET : 0);
-    const leftInset = browserLeftInset(leftPaneWidth, workspaceCollapsed);
+    const leftInset = browserLeftInset(leftPaneWidth, layoutWorkspaceCollapsed);
     const rightInset = browserRightInset(effectiveRightPaneWidth, downloadsOpen);
     const bottomInset = commandCollapsed ? 64 : 94 + commandOverlayHeight + agentDockHeight;
     void window.poppinBrowser.command({
@@ -307,14 +313,14 @@ export function App() {
       // Keep a strip for the collapsed reopen control; native views paint above DOM otherwise.
       bottomInset,
     });
-  }, [agentDockHeight, chromeHeight, commandCollapsed, commandOverlayHeight, downloadsOpen, effectiveRightPaneWidth, leftPaneWidth, tabSearchOpen, urlOverlayOpen, workspaceCollapsed, padCollapsed, viewport]);
+  }, [agentDockHeight, chromeHeight, commandCollapsed, commandOverlayHeight, downloadsOpen, effectiveRightPaneWidth, leftPaneWidth, tabSearchOpen, urlOverlayOpen, layoutWorkspaceCollapsed, layoutPadCollapsed, viewport]);
 
   const resizeLeftPane = (requestedWidth: number) => {
     setPreferredLeftPaneWidth(clampResizedLeftPaneWidth(requestedWidth, viewport.width));
   };
 
   const resizeRightPane = (requestedWidth: number) => {
-    const width = clampResizedRightPaneWidth(requestedWidth, viewport.width, leftPaneWidth, workspaceCollapsed);
+    const width = clampResizedRightPaneWidth(requestedWidth, viewport.width, leftPaneWidth, layoutWorkspaceCollapsed);
     setPreferredRightPaneWidth(width);
     void window.poppinPad.command({ type: 'setWidth', width });
     if (padActive) void window.poppinPad.command({ type: 'setActive', active: false });
@@ -323,11 +329,11 @@ export function App() {
   const sendPadCommand = async (command: PoppinPadCommand): Promise<PoppinPadCommandResult> => {
     try {
       if (command.type === 'setActive' && command.active) {
-        const focused = getFocusedRightPaneWidth(viewport.width, leftPaneWidth, workspaceCollapsed);
+        const focused = getFocusedRightPaneWidth(viewport.width, leftPaneWidth, layoutWorkspaceCollapsed);
         // Keep preferred width so exiting Focus restores the user's resized size.
         await window.poppinPad.command({ type: 'setWidth', width: focused });
       } else if (command.type === 'setActive' && !command.active) {
-        const restored = normalizeRightPaneWidth(preferredRightPaneWidth, viewport.width, leftPaneWidth, workspaceCollapsed);
+        const restored = normalizeRightPaneWidth(preferredRightPaneWidth, viewport.width, leftPaneWidth, layoutWorkspaceCollapsed);
         await window.poppinPad.command({ type: 'setWidth', width: restored });
       }
       return await window.poppinPad.command(command);
@@ -596,7 +602,7 @@ export function App() {
         />
       </header>
       <WorkspacePane
-        collapsed={workspaceCollapsed}
+        collapsed={layoutWorkspaceCollapsed}
         snapshot={workspaceSnapshot}
         tabs={snapshot.tabs.filter((tab) => !tab.taskSpaceId)}
         activeTab={activeTab}
@@ -628,7 +634,7 @@ export function App() {
           void sendTaskCommand({ type: 'startTask', prompt, model, reasoningEffort: effort, kind: 'work', useBrowser: true });
         }}
       />
-      {!workspaceCollapsed ? (
+      {!layoutWorkspaceCollapsed ? (
         <PaneResizer
           side="left"
           width={leftPaneWidth}
@@ -636,37 +642,59 @@ export function App() {
           onResize={resizeLeftPane}
         />
       ) : null}
-      {!padCollapsed ? (
+      {!layoutPadCollapsed ? (
         <PaneResizer
           side="right"
           width={rightPaneWidth}
-          {...getRightPaneWidthRange(viewport.width, leftPaneWidth, workspaceCollapsed)}
+          {...getRightPaneWidthRange(viewport.width, leftPaneWidth, layoutWorkspaceCollapsed)}
           onResize={resizeRightPane}
         />
       ) : null}
       <PoppinPadPane
-        snapshot={padSnapshot}
+        snapshot={padLayoutSnapshot}
         onCollapseChange={() => undefined}
         onCommand={sendPadCommand}
       />
       {mailActive ? (
-        <div className={`task-stage ${workspaceCollapsed ? 'workspace-collapsed' : ''}`}>
+        <div className={`task-stage ${layoutWorkspaceCollapsed ? 'workspace-collapsed' : ''}`}>
           <MailSection
             workspace={workspaceSnapshot}
             tabs={snapshot.tabs}
             onCommand={sendWorkspaceCommandResult}
-            onOpenInbox={(url) => {
+            onOpenInbox={async (url) => {
               const existingId = mailInboxTabId(snapshot.tabs, url);
-              setMailActive(false);
-              setTaskTabActive(false);
-              void sendPagesCommand({ type: 'deactivateTabs' });
-              if (existingId) void sendCommand({ type: 'activate', tabId: existingId });
-              else void sendCommand({ type: 'create', input: url });
+              const existingTab = snapshot.tabs.find((tab) => tab.id === existingId);
+              const reusable = isReusableMailAgentSession(url, snapshot.tabs, browserAgentSnapshot)
+                && Boolean(existingTab?.taskSpaceId && browserAgentSnapshot.taskSpace?.tabIds.includes(existingTab.id));
+              if (reusable) {
+                setMailActive(false);
+                setTaskTabActive(false);
+                void sendPagesCommand({ type: 'deactivateTabs' });
+                if (browserAgentSnapshot.state === 'paused' || browserAgentSnapshot.state === 'completed' || browserAgentSnapshot.state === 'stopped') {
+                  const resumed = await sendBrowserAgentCommand({ type: 'resume' });
+                  if (!resumed.ok) return resumed;
+                }
+                return sendBrowserAgentCommand({ type: 'watch' });
+              }
+              const result = await sendBrowserAgentCommand({
+                type: 'start',
+                taskId: `mail-${crypto.randomUUID()}`,
+                name: 'Mail',
+                mode: 'browser-only',
+                tabIds: [],
+                url,
+              });
+              if (result.ok) {
+                setMailActive(false);
+                setTaskTabActive(false);
+                void sendPagesCommand({ type: 'deactivateTabs' });
+              }
+              return result.ok ? result : { ok: false, message: result.message ?? 'Could not open Mail as Agent Tabs.' };
             }}
           />
         </div>
       ) : taskTabActive ? (
-        <div className={`task-stage ${workspaceCollapsed ? 'workspace-collapsed' : ''}`}>
+        <div className={`task-stage ${layoutWorkspaceCollapsed ? 'workspace-collapsed' : ''}`}>
           <TaskTabView
             taskSnapshot={taskSnapshot}
             workspace={workspaceSnapshot}
@@ -677,12 +705,12 @@ export function App() {
           />
         </div>
       ) : activeNativeTab ? (
-        <div className={`native-stage ${workspaceCollapsed ? 'workspace-collapsed' : ''}`}>
+        <div className={`native-stage ${layoutWorkspaceCollapsed ? 'workspace-collapsed' : ''}`}>
           {activeNativeTab.kind === 'database'
             ? <NativeDatabaseView pageId={activeNativeTab.pageId} revision={pagesRevision} onCommand={sendPagesCommand} />
             : <NativePageView pageId={activeNativeTab.pageId} revision={pagesRevision} onCommand={sendPagesCommand} taskSnapshot={taskSnapshot} onTaskCommand={sendTaskCommand} onTaskStarted={() => { setMailActive(false); setTaskTabActive(true); }} />}
         </div>
-      ) : <div className={`browser-stage ${workspaceCollapsed ? 'workspace-collapsed' : ''}`} aria-hidden="true" />}
+      ) : <div className={`browser-stage ${layoutWorkspaceCollapsed ? 'workspace-collapsed' : ''}`} aria-hidden="true" />}
       {showAgentDock ? (
         <AgentDock
           taskSnapshot={taskSnapshot}

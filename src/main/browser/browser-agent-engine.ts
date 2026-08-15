@@ -12,11 +12,12 @@ import {
   type BrowserSemanticSnapshot,
   type BrowserTaskSpace,
 } from '../../shared/browser-agent';
+import { BROWSER_REASON_CODES } from '../../shared/capabilities';
+import { signedInHumanUrlFor } from '../../shared/signed-in-session';
 import { BrowserAgentStateStore } from './browser-agent-state-store';
 
 const MAX_LOG_ENTRIES = 300;
 const MAX_EXPLORATION_TABS = 6;
-import { BROWSER_REASON_CODES } from '../../shared/capabilities';
 
 const CREDENTIAL_SELECTOR = /password|passkey|credential|one[-_ ]?time|otp|verification[-_ ]?code/i;
 const AUTH_URL = /\b(sign[-_ ]?in|log[-_ ]?in|authenticate|oauth|passkey|password)\b/i;
@@ -24,6 +25,8 @@ const AUTH_URL = /\b(sign[-_ ]?in|log[-_ ]?in|authenticate|oauth|passkey|passwor
 export interface BrowserAgentPageController {
   hasTab(tabId: string): boolean;
   describeTab?(tabId: string): string;
+  tabUrl?(tabId: string): string | null;
+  listOrdinaryTabs?(): Array<{ id: string; url: string }>;
   createTaskSpaceTabs(taskSpaceId: string, sourceTabIds: string[]): string[];
   createTaskSpaceExplorationTab(taskSpaceId: string, url?: string): string | null;
   prepareTabForAgent(tabId: string, taskSpaceId: string): boolean;
@@ -130,7 +133,7 @@ export class BrowserAgentEngine {
   async execute(command: BrowserAgentCommand): Promise<BrowserAgentCommandResult> {
     try {
       switch (command.type) {
-        case 'start': return await this.start(command.taskId, command.name, command.mode, command.tabIds);
+        case 'start': return await this.start(command.taskId, command.name, command.mode, command.tabIds, command.url);
         case 'pause': return this.pause('Paused by the user.');
         case 'takeOver': return this.takeOver();
         case 'resume': return this.resume();
@@ -166,26 +169,25 @@ export class BrowserAgentEngine {
     this.latestSnapshotByTab.clear();
     const space = this.snapshot.taskSpace;
     if (!space) return;
-    if (!space.kept) {
-      this.pages.closeTaskSpaceTabs(space.id);
-      this.snapshot = emptySnapshot();
-      void this.persist();
-      this.emit();
-      return;
-    }
     this.pages.setTaskSpaceMediaBlocked(space.id, false);
     this.updateTaskSpace({ owner: 'user', status: 'completed' });
     // Completion hands the centre stage to the persistent Tandem result page.
     // Keeping `watching` true races the page snapshot in the renderer and can
-    // immediately deactivate the newly opened native tab.
+    // immediately deactivate the newly opened native tab. Tabs stay so a
+    // follow-up can resume the same Agent Tabs; finishTask / Stop still close
+    // them unless the user chose Keep.
     this.snapshot = { ...this.snapshot, state: 'completed', watching: false, currentAction: null, pendingApproval: null };
-    this.append(this.snapshot.activeTabId ?? '', 'Agent Tabs completed', '', 'completed', 'The user chose to keep this completed collection.');
+    this.append(this.snapshot.activeTabId ?? '', 'Agent Tabs completed', '', 'completed', space.kept
+      ? 'The user chose to keep this completed collection.'
+      : 'Agent Tabs were kept so the next turn can resume the same tabs.');
     void this.persist();
     this.emit();
   }
 
-  private async start(taskId: string, name: string | undefined, mode: BrowserTaskSpace['mode'], requestedTabIds: string[]): Promise<BrowserAgentCommandResult> {
+  private async start(taskId: string, name: string | undefined, mode: BrowserTaskSpace['mode'], requestedTabIds: string[], url?: string): Promise<BrowserAgentCommandResult> {
     if (!taskId.trim()) return { ok: false, message: 'Browser use requires the active task.' };
+    const seedUrl = normalizeAgentUrl(url);
+    if (url && !seedUrl) return { ok: false, message: 'Agent Tabs support only HTTP and HTTPS URLs.' };
     if (this.snapshot.taskSpace) {
       if (this.snapshot.taskSpace.kept) return { ok: false, message: 'Close the kept Agent Tabs before starting another browser-use task.' };
       if (['running', 'paused', 'needs-approval'].includes(this.snapshot.state)) return { ok: false, message: 'Finish or stop the current Agent Tabs session first.' };
@@ -194,7 +196,7 @@ export class BrowserAgentEngine {
     const sourceTabIds = [...new Set(requestedTabIds)].filter((tabId) => this.pages.hasTab(tabId));
     const id = randomUUID();
     const contextTabIds = this.pages.createTaskSpaceTabs(id, sourceTabIds);
-    const explorationTabId = this.pages.createTaskSpaceExplorationTab(id);
+    const explorationTabId = this.pages.createTaskSpaceExplorationTab(id, seedUrl);
     if (!explorationTabId) {
       this.pages.closeTaskSpaceTabs(id);
       return { ok: false, message: 'Poppin could not create a fresh task-owned exploration tab.' };
@@ -210,10 +212,11 @@ export class BrowserAgentEngine {
     this.latestSnapshotByTab.clear();
     const watching = this.pages.watchTaskSpace(id, explorationTabId);
     this.snapshot = { ...emptySnapshot(), state: 'running', taskId, taskSpace, watching, allowedTabIds: tabIds, activeTabId: explorationTabId };
-    this.append('', 'Agent Tabs started', tabIds.join(', '), 'completed', `${contextTabIds.length} context clone(s) and 1 fresh exploration tab created; source tabs were unchanged.`);
+    const seedDetail = seedUrl ? ` Exploration opened at ${seedUrl}.` : '';
+    this.append('', 'Agent Tabs started', tabIds.join(', '), 'completed', `${contextTabIds.length} context clone(s) and 1 fresh exploration tab created; source tabs were unchanged.${seedDetail}`);
     await this.persist();
     this.emit();
-    return { ok: true, data: JSON.stringify({ taskSpaceId: id, mode, contextTabIds, explorationTabIds }) };
+    return { ok: true, data: JSON.stringify({ taskSpaceId: id, mode, contextTabIds, explorationTabIds, url: seedUrl ?? null }) };
   }
 
   private pause(detail: string): BrowserAgentCommandResult {
@@ -230,8 +233,12 @@ export class BrowserAgentEngine {
   }
 
   private resume(): BrowserAgentCommandResult {
-    if (this.snapshot.state !== 'paused' || this.pendingAction) return { ok: false, message: 'Browser use cannot resume yet.' };
+    if (this.pendingAction) return { ok: false, message: 'Browser use cannot resume yet.' };
     if (!this.snapshot.taskSpace) return { ok: false, message: 'There is no Agent Tabs session.' };
+    if (this.snapshot.state === 'running' && this.snapshot.taskSpace.owner === 'agent') return { ok: true };
+    if (!['paused', 'completed', 'stopped'].includes(this.snapshot.state)) {
+      return { ok: false, message: 'Browser use cannot resume yet.' };
+    }
     this.controlEpoch += 1;
     this.pages.setTaskSpaceMediaBlocked(this.snapshot.taskSpace.id, true);
     this.snapshot.state = 'running';
@@ -297,7 +304,7 @@ export class BrowserAgentEngine {
   private setKeepTabs(keep: boolean): BrowserAgentCommandResult {
     if (!this.snapshot.taskSpace) return { ok: false, message: 'There are no Agent Tabs to update.' };
     this.updateTaskSpace({ kept: keep });
-    this.append('', keep ? 'Keep Agent Tabs after task' : 'Close Agent Tabs after task', this.snapshot.taskSpace.name, 'completed', keep ? 'The user chose to preserve this collection after successful completion.' : 'Successful completion will close this collection automatically.');
+    this.append('', keep ? 'Keep Agent Tabs after task' : 'Close Agent Tabs after task', this.snapshot.taskSpace.name, 'completed', keep ? 'The user chose to preserve this collection after New task or Stop.' : 'New task or Stop will close this collection unless Keep is chosen.');
     void this.persist();
     this.emit();
     return { ok: true };
@@ -342,7 +349,12 @@ export class BrowserAgentEngine {
       return { ok: false, message: `Poppin never types into or inspects credential fields (${BROWSER_REASON_CODES.credentialAccessBlocked}).` };
     }
     if (action.type === 'navigate' && AUTH_URL.test(action.url)) {
-      return this.requestTakeover(tabId, action.url, `Authentication must be completed by the user (${BROWSER_REASON_CODES.authSubmitApprovalRequired}).`);
+      const signedIn = this.signedInHumanUrl(action.url);
+      if (signedIn) {
+        action = { type: 'navigate', url: signedIn };
+      } else {
+        return this.requestTakeover(tabId, action.url, `Authentication must be completed by the user (${BROWSER_REASON_CODES.authSubmitApprovalRequired}).`);
+      }
     }
     const inspection = await this.pages.inspectAction(tabId, action);
     if (epoch !== this.controlEpoch || this.snapshot.state !== 'running' || this.snapshot.taskSpace?.owner !== 'agent') return { ok: false, message: `Browser control changed before the action could run (${BROWSER_REASON_CODES.userTakeoverActive}).` };
@@ -370,6 +382,10 @@ export class BrowserAgentEngine {
     return { ok: false, message: 'Approval required.' };
   }
 
+  private signedInHumanUrl(targetUrl: string): string | null {
+    return signedInHumanUrlFor(targetUrl, this.pages.listOrdinaryTabs?.() ?? []);
+  }
+
   private requestTakeover(tabId: string, inspectedTarget: string, detail: string): BrowserAgentCommandResult {
     this.controlEpoch += 1;
     this.latestSnapshotByTab.clear();
@@ -395,12 +411,11 @@ export class BrowserAgentEngine {
     }
     let normalizedUrl: string | undefined;
     if (url) {
-      try {
-        const parsed = new URL(url);
-        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error();
-        normalizedUrl = parsed.toString();
-      } catch {
-        return { ok: false, message: 'New Agent Tabs support only HTTP and HTTPS URLs.' };
+      normalizedUrl = normalizeAgentUrl(url);
+      if (!normalizedUrl) return { ok: false, message: 'New Agent Tabs support only HTTP and HTTPS URLs.' };
+      if (AUTH_URL.test(normalizedUrl)) {
+        const signedIn = this.signedInHumanUrl(normalizedUrl);
+        if (signedIn) normalizedUrl = signedIn;
       }
     }
     const newTabId = this.pages.createTaskSpaceExplorationTab(taskSpaceId, normalizedUrl);
@@ -647,6 +662,17 @@ export class BrowserAgentEngine {
 
 function emptySnapshot(): BrowserAgentSnapshot {
   return { state: 'idle', taskId: null, taskSpace: null, watching: false, allowedTabIds: [], activeTabId: null, currentAction: null, pendingApproval: null, log: [] };
+}
+
+function normalizeAgentUrl(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  try {
+    const parsed = new URL(value);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return undefined;
+    return parsed.toString();
+  } catch {
+    return undefined;
+  }
 }
 
 function label(action: BrowserAgentAction): string {

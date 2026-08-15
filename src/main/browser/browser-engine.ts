@@ -39,6 +39,8 @@ import type { CapturedTabContext } from '../../shared/workspace';
 import type { VisualSelectionSnapshot } from '../../shared/workspace';
 import { HtmlFullscreenCoordinator, type HtmlFullscreenTransition } from './html-fullscreen';
 import type { BrowserAgentAction, BrowserSemanticNode, BrowserSemanticSnapshot } from '../../shared/browser-agent';
+import { classifyMailboxControl, isSignedInMailboxUrl } from '../../shared/mail';
+import { signedInHumanUrlFor } from '../../shared/signed-in-session';
 import { showPageContextMenu } from './context-menu';
 import { DownloadManager } from './downloads';
 
@@ -340,6 +342,21 @@ export class BrowserEngine {
     return tab ? `${tab.snapshot.title} — ${tab.snapshot.url}` : 'Selected browser tab';
   }
 
+  tabUrl(tabId: string): string | null {
+    const tab = this.tabs.get(tabId);
+    if (!tab || tab.view.webContents.isDestroyed()) return null;
+    return tab.snapshot.url || tab.lastExternalUrl || null;
+  }
+
+  listOrdinaryTabs(): Array<{ id: string; url: string }> {
+    return this.tabOrder.flatMap((id) => {
+      const tab = this.tabs.get(id);
+      if (!tab || tab.snapshot.taskSpaceId || tab.view.webContents.isDestroyed()) return [];
+      const url = tab.snapshot.url || tab.lastExternalUrl;
+      return url ? [{ id, url }] : [];
+    });
+  }
+
   prepareTabForAgent(tabId: string, taskSpaceId: string): boolean {
     const tab = this.tabs.get(tabId);
     return Boolean(tab && !tab.view.webContents.isDestroyed() && tab.snapshot.taskSpaceId === taskSpaceId);
@@ -419,7 +436,7 @@ export class BrowserEngine {
       contents.debugger.sendCommand('DOM.enable'),
     ]);
     const response = await contents.debugger.sendCommand('Accessibility.getFullAXTree') as { nodes?: CdpAxNode[] };
-    const candidates = (response.nodes ?? []).filter(isUsefulAxNode).slice(0, 300);
+    const candidates = rankSemanticAxNodes((response.nodes ?? []).filter(isUsefulAxNode)).slice(0, 300);
     const records = await Promise.all(candidates.map(async (node, index) => this.semanticNodeFromAx(contents, node, index)));
     const nodes = records.flatMap((record) => record ? [record.node] : []);
     const refs = new Map<string, { backendNodeId: number; credential: boolean; mediaControl: boolean; target: string }>();
@@ -457,7 +474,7 @@ export class BrowserEngine {
     const credential = isCredentialDescriptor([role, axNode.name?.value, attributes.id, attributes.name, attributes.type, attributes.autocomplete, attributes['aria-label']].filter(Boolean).join(' '));
     const name = credential ? 'Credential field' : String(axNode.name?.value ?? '').replace(/\s+/g, ' ').trim().slice(0, 240);
     const editable = !credential && (role === 'textbox' || role === 'searchbox' || role === 'combobox' || axProperty(axNode, 'editable') !== undefined);
-    const clickable = !credential && (['button', 'link', 'checkbox', 'radio', 'menuitem', 'menuitemcheckbox', 'menuitemradio', 'option', 'switch', 'tab'].includes(role) || axProperty(axNode, 'focusable') === true);
+    const clickable = !credential && (CLICKABLE_SEMANTIC_ROLES.has(role) || axProperty(axNode, 'focusable') === true);
     const states = axNode.properties?.flatMap((property) => {
       if (!['checked', 'disabled', 'expanded', 'selected', 'required', 'pressed', 'invalid'].includes(property.name)) return [];
       const value = property.value?.value;
@@ -524,17 +541,20 @@ export class BrowserEngine {
     if (action.type !== 'click' && action.type !== 'type') {
       return { credential: false, consequential: null, target: agentActionTarget(action) };
     }
+    const pageUrl = tab.snapshot.url || tab.lastExternalUrl;
+    const mailbox = isSignedInMailboxUrl(pageUrl);
+    const pageIsAuth = isAuthenticationRedirectInterstitial(pageUrl);
+    const humanSessionAvailable = Boolean(signedInHumanUrlFor(pageUrl, this.listOrdinaryTabs()));
     if (action.ref && action.snapshotId) {
       const resolved = this.resolveSemanticReference(tab, action.snapshotId, action.ref);
       if (resolved.credential) return { credential: true, consequential: null, target: 'Credential field' };
-      const signal = resolved.target;
-      const takeover = resolved.mediaControl
-        ? 'Media playback remains under user control. Take over the Agent Tab to use playback controls.'
-        : /\b(sign[- ]?in|log[- ]?in|authenticate|oauth|captcha|verify you are human|two[- ]?factor)\b/i.test(signal)
-        ? 'Authentication or unusual manual interaction must be completed by the user.' : null;
-      const consequential = !takeover && /\b(download|upload|purchase|pay|buy|delete|trash|discard|publish|send|submit|merge|create (?:pull request|record)|remove)\b/i.test(signal)
-        ? 'This action may cause an external or irreversible effect.' : null;
-      return { credential: false, consequential, takeover, target: signal };
+      return classifyInspectedControl({
+        mailbox,
+        pageIsAuth,
+        humanSessionAvailable,
+        mediaControl: resolved.mediaControl,
+        target: resolved.target,
+      });
     }
     if (!action.selector) throw new Error('Read the page and use a current semantic reference.');
     const selector = JSON.stringify(action.selector);
@@ -551,27 +571,24 @@ export class BrowserEngine {
       const form = element.closest('form');
       const credential = /password|passkey|credential|one[-_ ]?time|otp|verification[-_ ]?code/i.test(descriptor)
         || input?.type === 'password';
-      let consequential = null;
       const signal = [text, href, form?.action || '', descriptor].join(' ');
       const mediaControl = (element.matches('button, [role="button"]') || element.closest('button, [role="button"]'))
         && /^(play|pause|mute|unmute|volume)(\\b|\\s*\\()/i.test(text);
-      const takeover = mediaControl
-        ? 'Media playback remains under user control. Take over the Agent Tab to use playback controls.'
-        : /\\b(sign[- ]?in|log[- ]?in|authenticate|oauth|captcha|verify you are human|two[- ]?factor)\\b/i.test(signal)
-          ? 'Authentication or unusual manual interaction must be completed by the user.' : null;
-      if (!takeover && (element.hasAttribute('download') || /\\b(download|upload|purchase|pay|buy|delete|trash|discard|publish|send|submit|merge|create (?:pull request|record)|remove (?:account|message|draft|file|record|item))\\b/i.test(signal))) {
-        consequential = 'This action may cause an external or irreversible effect.';
-      }
-      return { credential, consequential, takeover, target: text || href || element.tagName.toLowerCase() };
-    })()`.replace('actionType', JSON.stringify(action.type)), true);
+      const download = element.hasAttribute('download');
+      return { credential, mediaControl, download, target: text || href || element.tagName.toLowerCase(), signal };
+    })()`, true);
     if (!inspected || typeof inspected !== 'object') throw new Error('The target element is no longer available.');
-    const value = inspected as { credential?: unknown; consequential?: unknown; takeover?: unknown; target?: unknown };
-    return {
-      credential: value.credential === true,
-      consequential: typeof value.consequential === 'string' ? value.consequential : null,
-      takeover: typeof value.takeover === 'string' ? value.takeover : null,
-      target: typeof value.target === 'string' ? value.target : action.selector,
-    };
+    const value = inspected as { credential?: unknown; mediaControl?: unknown; download?: unknown; target?: unknown; signal?: unknown };
+    const target = typeof value.target === 'string' ? value.target : action.selector;
+    if (value.credential === true) return { credential: true, consequential: null, target: 'Credential field' };
+    return classifyInspectedControl({
+      mailbox,
+      pageIsAuth,
+      humanSessionAvailable,
+      mediaControl: value.mediaControl === true,
+      target,
+      download: value.download === true,
+    });
   }
 
   async performAction(tabId: string, action: BrowserAgentAction): Promise<string> {
@@ -2305,17 +2322,44 @@ interface CdpAxNode {
   properties?: Array<{ name: string; value?: { value?: unknown } }>;
 }
 
-const SEMANTIC_ROLES = new Set([
+export const SEMANTIC_ROLES = new Set([
   'button', 'link', 'textbox', 'searchbox', 'combobox', 'checkbox', 'radio', 'switch', 'tab',
   'menuitem', 'menuitemcheckbox', 'menuitemradio', 'option', 'heading', 'listitem', 'cell',
   'rowheader', 'columnheader', 'statictext', 'paragraph', 'article', 'region', 'dialog', 'alert',
+  'treeitem', 'row', 'gridcell',
 ]);
+
+export const CLICKABLE_SEMANTIC_ROLES = new Set([
+  'button', 'link', 'checkbox', 'radio', 'menuitem', 'menuitemcheckbox', 'menuitemradio',
+  'option', 'switch', 'tab', 'treeitem', 'row', 'gridcell', 'listitem', 'cell',
+]);
+
+const PRIORITY_SEMANTIC_ROLES = new Set(['treeitem', 'row', 'gridcell', 'listitem', 'cell', 'button', 'link', 'textbox', 'searchbox']);
+
+export function isUsefulSemanticRole(role: string, name: string): boolean {
+  return SEMANTIC_ROLES.has(role) && (name.length > 0 || !['statictext', 'paragraph', 'heading', 'listitem', 'cell', 'treeitem', 'row', 'gridcell'].includes(role));
+}
 
 function isUsefulAxNode(node: CdpAxNode): boolean {
   if (node.ignored || !node.backendDOMNodeId) return false;
   const role = String(node.role?.value ?? '').toLowerCase();
   const name = String(node.name?.value ?? '').trim();
-  return SEMANTIC_ROLES.has(role) && (name.length > 0 || !['statictext', 'paragraph', 'heading', 'listitem'].includes(role));
+  return isUsefulSemanticRole(role, name);
+}
+
+function rankSemanticAxNodes(nodes: CdpAxNode[]): CdpAxNode[] {
+  return [...nodes].sort((left, right) => semanticAxPriority(right) - semanticAxPriority(left));
+}
+
+function semanticAxPriority(node: CdpAxNode): number {
+  const role = String(node.role?.value ?? '').toLowerCase();
+  const name = String(node.name?.value ?? '').trim();
+  let score = 0;
+  if (PRIORITY_SEMANTIC_ROLES.has(role) && name) score += 4;
+  if (CLICKABLE_SEMANTIC_ROLES.has(role)) score += 2;
+  if (name) score += 1;
+  if (role === 'statictext' || role === 'paragraph') score -= 2;
+  return score;
 }
 
 function axProperty(node: CdpAxNode, name: string): unknown {
@@ -2336,8 +2380,45 @@ function safeLocator(attributes: Record<string, string>, role: string, name: str
   if (attributes['data-testid']) return { locator: `[data-testid=${JSON.stringify(attributes['data-testid'])}]` };
   if (attributes.id) return { locator: `#${attributes.id.replace(/[^a-zA-Z0-9_-]/g, '')}` };
   if (attributes['aria-label']) return { locator: `[aria-label=${JSON.stringify(attributes['aria-label'].slice(0, 160))}]` };
-  if (name && ['button', 'link', 'textbox', 'checkbox', 'radio', 'option'].includes(role)) return { locator: `role=${role};name=${name.slice(0, 160)}` };
+  if (name && (CLICKABLE_SEMANTIC_ROLES.has(role) || ['textbox', 'searchbox', 'combobox'].includes(role))) {
+    return { locator: `role=${role};name=${name.slice(0, 160)}` };
+  }
   return {};
+}
+
+const AUTH_CONTROL = /\b(?:sign[- ]?in|log[- ]?in|authenticate|verify you are human)\b/i;
+const CRITICAL_CONTROL = /^(?:send(?:\s+(?:email|e-?mail|mail|message|now))?|delete(?:\s+(?:email|e-?mail|mail|message|item|forever|permanently))?|submit|purchase|buy(?:\s+now)?|pay(?:\s+now)?|checkout|place order|publish|download|upload|merge|create (?:pull request|pr))$/i;
+
+export function classifyInspectedControl(input: {
+  mailbox?: boolean;
+  pageIsAuth?: boolean;
+  humanSessionAvailable?: boolean;
+  mediaControl: boolean;
+  target: string;
+  soup?: string;
+  download?: boolean;
+}): { credential: false; consequential: string | null; takeover: string | null; target: string } {
+  const takeover = input.mediaControl
+    ? 'Media playback remains under user control. Take over the Agent Tab to use playback controls.'
+    : (input.pageIsAuth && !input.humanSessionAvailable && AUTH_CONTROL.test(input.target.trim())
+      ? 'Authentication or unusual manual interaction must be completed by the user.'
+      : null);
+  if (takeover) return { credential: false, consequential: null, takeover, target: input.target };
+  if (input.mailbox) {
+    const gate = classifyMailboxControl(input.target);
+    return {
+      credential: false,
+      consequential: gate === 'send' || gate === 'delete'
+        ? 'This mailbox action needs approval.'
+        : null,
+      takeover: null,
+      target: input.target,
+    };
+  }
+  const consequential = input.download || CRITICAL_CONTROL.test(input.target.replace(/\s+/gu, ' ').trim())
+    ? 'This action may cause an external or irreversible effect.'
+    : null;
+  return { credential: false, consequential, takeover: null, target: input.target };
 }
 
 /**

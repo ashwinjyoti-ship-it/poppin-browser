@@ -11,17 +11,39 @@ import type { BrowserAgentAction } from '../src/shared/browser-agent';
 
 class FakePages implements BrowserAgentPageController {
   tabs = new Set(['approved', 'other']);
+  urls = new Map<string, string>([['approved', 'https://example.com'], ['other', 'https://example.com']]);
   activated: string[] = [];
   performed: Array<{ tabId: string; action: BrowserAgentAction }> = [];
   mediaPolicies: Array<{ taskSpaceId: string; blocked: boolean }> = [];
+  explorationUrls: string[] = [];
   explorationCount = 0;
   inspection: { credential: boolean; consequential: string | null; takeover?: string | null; target: string } = { credential: false, consequential: null, target: 'visible target' };
 
   hasTab(tabId: string) { return this.tabs.has(tabId); }
-  createTaskSpaceTabs(taskSpaceId: string, sourceTabIds: string[]) {
-    return sourceTabIds.map((tabId) => { const id = `agent-${tabId}`; this.tabs.add(id); return id; });
+  tabUrl(tabId: string) { return this.urls.get(tabId) ?? null; }
+  listOrdinaryTabs() {
+    return [...this.tabs].flatMap((id) => {
+      if (id.startsWith('agent-')) return [];
+      const url = this.urls.get(id);
+      return url ? [{ id, url }] : [];
+    });
   }
-  createTaskSpaceExplorationTab() { this.explorationCount += 1; const id = this.explorationCount === 1 ? 'agent-exploration' : `agent-exploration-${this.explorationCount}`; this.tabs.add(id); return id; }
+  createTaskSpaceTabs(taskSpaceId: string, sourceTabIds: string[]) {
+    return sourceTabIds.map((tabId) => {
+      const id = `agent-${tabId}`;
+      this.tabs.add(id);
+      this.urls.set(id, this.urls.get(tabId) ?? 'https://example.com');
+      return id;
+    });
+  }
+  createTaskSpaceExplorationTab(_taskSpaceId: string, url?: string) {
+    this.explorationCount += 1;
+    this.explorationUrls.push(url ?? '');
+    const id = this.explorationCount === 1 ? 'agent-exploration' : `agent-exploration-${this.explorationCount}`;
+    this.tabs.add(id);
+    this.urls.set(id, url || 'https://example.com');
+    return id;
+  }
   prepareTabForAgent(tabId: string) { return this.tabs.has(tabId) && tabId.startsWith('agent-'); }
   watchTaskSpace(_taskSpaceId: string, tabId: string | null) { if (tabId) this.activated.push(tabId); return Boolean(tabId && this.tabs.has(tabId)); }
   closeTaskSpaceTab(_taskSpaceId: string, tabId: string) { return this.tabs.delete(tabId); }
@@ -71,8 +93,24 @@ describe('BrowserAgentEngine', () => {
     });
     expect(engine.getSnapshot().watching).toBe(true);
     expect(pages.activated).toEqual(['agent-exploration']);
+    expect(pages.explorationUrls).toEqual(['']);
     expect((await agentAct(engine, { type: 'navigate', url: 'https://example.com' }, 'agent-exploration')).ok).toBe(true);
     expect(pages.performed).toContainEqual({ tabId: 'agent-exploration', action: { type: 'navigate', url: 'https://example.com' } });
+  });
+
+  it('seeds the exploration Agent Tab with a Mail inbox URL', async () => {
+    const { engine, pages } = setup();
+    expect(await engine.execute({
+      type: 'start', taskId: 'mail-1', name: 'Mail', mode: 'browser-only', tabIds: [], url: 'https://mail.google.com/',
+    })).toMatchObject({ ok: true });
+    expect(pages.explorationUrls).toEqual(['https://mail.google.com/']);
+    expect(engine.getSnapshot()).toMatchObject({
+      watching: true,
+      taskSpace: { name: 'Mail', mode: 'browser-only', activeTabId: 'agent-exploration' },
+    });
+    expect(await engine.execute({
+      type: 'start', taskId: 'mail-2', name: 'Mail', mode: 'browser-only', tabIds: [], url: 'javascript:alert(1)',
+    })).toMatchObject({ ok: false, message: expect.stringMatching(/HTTP and HTTPS/i) });
   });
 
   it('shows live Agent Tabs by default, follows agent tab changes, and lets the user leave without stopping', async () => {
@@ -90,13 +128,40 @@ describe('BrowserAgentEngine', () => {
     expect(pages.activated).toEqual(['agent-exploration', 'agent-approved', 'agent-exploration']);
   });
 
-  it('closes task-owned tabs automatically after successful completion', async () => {
+  it('retains task-owned tabs after successful completion so a follow-up can resume them', async () => {
     const { engine, pages } = setup();
     await engine.execute({ type: 'start', taskId: 'task-1', mode: 'browser-only', tabIds: [] });
     expect(engine.getSnapshot().watching).toBe(true);
     engine.complete();
-    expect(engine.getSnapshot()).toMatchObject({ state: 'idle', watching: false, taskSpace: null });
-    expect(pages.tabs.has('agent-exploration')).toBe(false);
+    expect(engine.getSnapshot()).toMatchObject({
+      state: 'completed', watching: false,
+      taskSpace: { owner: 'user', status: 'completed', kept: false, tabIds: ['agent-exploration'] },
+    });
+    expect(pages.tabs.has('agent-exploration')).toBe(true);
+    expect(await engine.execute({ type: 'resume' })).toEqual({ ok: true });
+    expect(engine.getSnapshot()).toMatchObject({
+      state: 'running',
+      taskSpace: { owner: 'agent', status: 'agent-controlling', id: engine.getSnapshot().taskSpace!.id },
+    });
+  });
+
+  it('keeps a mailbox Agent Tab after successful completion so the next mail turn can resume it', async () => {
+    const { engine, pages } = setup();
+    expect(await engine.execute({
+      type: 'start', taskId: 'mail-1', name: 'Mail', mode: 'browser-only', tabIds: [], url: 'https://outlook.live.com/mail/',
+    })).toMatchObject({ ok: true });
+    engine.complete();
+    expect(engine.getSnapshot()).toMatchObject({
+      state: 'completed', watching: false,
+      taskSpace: { owner: 'user', status: 'completed', kept: false, tabIds: ['agent-exploration'] },
+    });
+    expect(pages.tabs.has('agent-exploration')).toBe(true);
+    expect(await engine.execute({ type: 'resume' })).toEqual({ ok: true });
+    expect(engine.getSnapshot()).toMatchObject({
+      state: 'running',
+      taskSpace: { owner: 'agent', status: 'agent-controlling', id: engine.getSnapshot().taskSpace!.id },
+    });
+    expect((await agentAct(engine, { type: 'read' }, 'agent-exploration')).ok).toBe(true);
   });
 
   it('preserves tabs only when the user opts in before completion', async () => {
@@ -144,6 +209,25 @@ describe('BrowserAgentEngine', () => {
     await engine.execute({ type: 'start', taskId: 'task-1', mode: 'browser-only', tabIds: [] });
     expect((await agentAct(engine, { type: 'readMetadata' }, 'agent-exploration')).ok).toBe(true);
     expect(pages.performed).toContainEqual({ tabId: 'agent-exploration', action: { type: 'readMetadata' } });
+  });
+
+  it('reuses a signed-in human tab instead of pausing for auth on the same site', async () => {
+    const { engine, pages } = setup();
+    pages.urls.set('approved', 'https://github.com/issues');
+    await engine.execute({ type: 'start', taskId: 'task-1', mode: 'mixed', tabIds: ['approved'] });
+    expect((await agentAct(engine, { type: 'navigate', url: 'https://github.com/login' }, 'agent-exploration'))).toEqual({ ok: true, data: 'visible page content' });
+    expect(engine.getSnapshot().state).toBe('running');
+    expect(pages.performed).toContainEqual({
+      tabId: 'agent-exploration',
+      action: { type: 'navigate', url: 'https://github.com/issues' },
+    });
+  });
+
+  it('still pauses for auth when no signed-in human tab exists for that site', async () => {
+    const { engine } = setup();
+    await engine.execute({ type: 'start', taskId: 'task-1', mode: 'browser-only', tabIds: [] });
+    expect((await agentAct(engine, { type: 'navigate', url: 'https://github.com/login' }, 'agent-exploration')).message).toMatch(/takeover required/i);
+    expect(engine.getSnapshot()).toMatchObject({ state: 'paused', taskSpace: { owner: 'user', status: 'user-controlling' } });
   });
 
   it('never operates credential fields or accepts credential-like typing', async () => {
