@@ -6,7 +6,7 @@ import path from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { authenticationDialogBounds, classifyInspectedControl, isAuthenticationCompletionUrl, isAuthenticationPopup, isAuthenticationRedirectInterstitial, isExternalLinkPreview, isGoogleWidgetMainFrameUrl, isIdentityProviderHost, isLocalhostUrl, isUsefulSemanticRole, recoverMailInboxFromAuthRedirect, recoverMailUrlFromGoogleWidget, SEMANTIC_ROLES } from '../src/main/browser/browser-engine';
+import { authenticationDialogBounds, classifyInspectedControl, isAuthenticationCompletionUrl, isAuthenticationPopup, isAuthenticationRedirectInterstitial, isExternalLinkPreview, isGoogleWidgetMainFrameUrl, isIdentityProviderHost, isInFlightMailOAuthRedirect, isLocalhostUrl, isUsefulSemanticRole, persistableTabUrl, recoverMailInboxFromAuthRedirect, recoverMailUrlFromGoogleWidget, recoverStuckMailAuthRedirect, resolvedBrowserTabTitle, SEMANTIC_ROLES } from '../src/main/browser/browser-engine';
 import { WorkspaceStore } from '../src/main/workspace/workspace-store';
 import type { VisualSelectionSnapshot } from '../src/shared/workspace';
 
@@ -87,6 +87,23 @@ describe('authentication popup policy', () => {
     expect(isAuthenticationCompletionUrl('https://outlook.live.com/owa/authredirect.html?code=x', 'https://outlook.live.com/mail/')).toBe(false);
     expect(isAuthenticationCompletionUrl('https://outlook.live.com/mail/u/0/', 'https://outlook.live.com/mail/')).toBe(true);
     expect(recoverMailInboxFromAuthRedirect('https://outlook.live.com/owa/authredirect.html?code=x')).toBe('https://outlook.live.com/mail/');
+    expect(isAuthenticationRedirectInterstitial('https://outlook.cloud.microsoft/mail/oauthRedirect.html')).toBe(true);
+    expect(isAuthenticationCompletionUrl('https://outlook.cloud.microsoft/mail/oauthRedirect.html', 'https://outlook.cloud.microsoft/mail/')).toBe(false);
+    expect(isAuthenticationCompletionUrl('https://outlook.cloud.microsoft/mail/', 'https://outlook.cloud.microsoft/mail/')).toBe(true);
+    expect(recoverMailInboxFromAuthRedirect('https://outlook.cloud.microsoft/mail/oauthRedirect.html')).toBe('https://outlook.cloud.microsoft/mail/');
+    expect(recoverMailInboxFromAuthRedirect('https://outlook.office.com/mail/oauthRedirect.html')).toBe('https://outlook.office.com/mail/');
+    expect(isInFlightMailOAuthRedirect('https://outlook.cloud.microsoft/mail/oauthRedirect.html?code=x')).toBe(true);
+    expect(isInFlightMailOAuthRedirect('https://outlook.cloud.microsoft/mail/oauthRedirect.html')).toBe(false);
+    expect(recoverStuckMailAuthRedirect('https://outlook.cloud.microsoft/mail/oauthRedirect.html')).toBe('https://outlook.cloud.microsoft/mail/');
+    expect(recoverStuckMailAuthRedirect('https://outlook.cloud.microsoft/mail/oauthRedirect.html?code=x')).toBeNull();
+    expect(persistableTabUrl('https://outlook.cloud.microsoft/mail/oauthRedirect.html')).toBe('https://outlook.cloud.microsoft/mail/');
+    expect(persistableTabUrl('https://outlook.cloud.microsoft/mail/oauthRedirect.html?code=x')).toBe('https://outlook.cloud.microsoft/mail/oauthRedirect.html?code=x');
+  });
+
+  it('replaces the Loading… placeholder with Chromium title or hostname after paint', () => {
+    expect(resolvedBrowserTabTitle('Loading…', 'Outlook', 'https://outlook.cloud.microsoft/mail/')).toBe('Outlook');
+    expect(resolvedBrowserTabTitle('Loading…', 'Loading…', 'https://claude.ai/')).toBe('claude.ai');
+    expect(resolvedBrowserTabTitle('New Tab', '', 'poppin://new-tab/')).toBe('New Tab');
   });
 });
 
