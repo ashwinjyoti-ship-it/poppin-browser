@@ -1604,6 +1604,7 @@ body.pane-is-resizing .poppin-pad-pane {
 .mail-presets { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
 .mail-inbox-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }
 .mail-inbox-actions .primary-button { display: inline-flex; align-items: center; gap: 6px; }
+.mail-card > .review-message { margin: 10px 0 0; }
 .mail-skill-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px; }
 .mail-skill-row {
   display: grid;

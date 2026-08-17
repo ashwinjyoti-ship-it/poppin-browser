@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
@@ -13,7 +14,7 @@ import { PaneResizer } from '../src/renderer/ui/PaneResizer';
 import { DEFAULT_BROWSER_SETTINGS, type BrowserTabSnapshot } from '../src/shared/browser';
 import type { BrowserAgentSnapshot } from '../src/shared/browser-agent';
 import type { TaskSnapshot } from '../src/shared/task';
-import type { WorkspaceSnapshot } from '../src/shared/workspace';
+import type { WorkspaceCommand, WorkspaceCommandResult, WorkspaceSnapshot } from '../src/shared/workspace';
 import { EMPTY_POPPIN_PAD_SNAPSHOT } from '../src/shared/poppin-pad';
 import { EMPTY_TANDEM_SNAPSHOT } from '../src/shared/tandem';
 
@@ -725,21 +726,40 @@ describe('Codex controls', () => {
   });
 });
 
+const EMPTY_MAIL_WORKSPACE: WorkspaceSnapshot = {
+  workspace: { id: 'primary', name: 'Mail', createdAt: '' },
+  documents: [],
+  tabContexts: [],
+  project: null,
+  visualSelection: null,
+  mailInboxUrl: 'https://mail.google.com/',
+  mailSkills: [],
+};
+
+function MailSkillSaveHarness() {
+  const [workspace, setWorkspace] = useState(EMPTY_MAIL_WORKSPACE);
+  const onCommand = async (command: WorkspaceCommand): Promise<WorkspaceCommandResult> => {
+    if (command.type !== 'createMailSkill') return { ok: true };
+    const skill = {
+      id: 'skill-quotes',
+      name: command.name,
+      rule: command.rule,
+      enabled: true,
+      createdAt: '2026-08-17T00:00:00.000Z',
+      updatedAt: '2026-08-17T00:00:00.000Z',
+    };
+    setWorkspace((current) => ({ ...current, mailSkills: [...(current.mailSkills ?? []), skill] }));
+    return { ok: true, message: `Saved mail skill "${command.name}".` };
+  };
+  return <MailSection workspace={workspace} tabs={[]} onCommand={onCommand} onOpenInbox={() => undefined} />;
+}
+
 describe('Poppin Mail section', () => {
   it('saves a natural-language mail skill and opens the inbox', async () => {
     const user = userEvent.setup();
     const onCommand = vi.fn().mockResolvedValue({ ok: true, message: 'Saved mail skill "Quotes".' });
     const onOpenInbox = vi.fn();
-    const workspace: WorkspaceSnapshot = {
-      workspace: { id: 'primary', name: 'Mail', createdAt: '' },
-      documents: [],
-      tabContexts: [],
-      project: null,
-      visualSelection: null,
-      mailInboxUrl: 'https://mail.google.com/',
-      mailSkills: [],
-    };
-    render(<MailSection workspace={workspace} tabs={[]} onCommand={onCommand} onOpenInbox={onOpenInbox} />);
+    render(<MailSection workspace={EMPTY_MAIL_WORKSPACE} tabs={[]} onCommand={onCommand} onOpenInbox={onOpenInbox} />);
 
     await user.type(screen.getByRole('textbox', { name: /mail skill name/i }), 'Quotes');
     await user.type(screen.getByRole('textbox', { name: /mail skill rule/i }), 'Mails addressed to Ashwin with a request for quote get a draft reply.');
@@ -752,6 +772,55 @@ describe('Poppin Mail section', () => {
 
     await user.click(screen.getByRole('button', { name: /open inbox/i }));
     expect(onOpenInbox).toHaveBeenCalledWith('https://mail.google.com/');
+  });
+
+  it('lists a newly saved mail skill under Saved skills', async () => {
+    const user = userEvent.setup();
+    render(<MailSkillSaveHarness />);
+
+    await user.type(screen.getByRole('textbox', { name: /mail skill name/i }), 'Quotes');
+    await user.type(screen.getByRole('textbox', { name: /mail skill rule/i }), 'Mails addressed to Ashwin with a request for quote get a draft reply.');
+    await user.click(screen.getByRole('button', { name: /save skill/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('region', { name: /saved mail skills/i })).toHaveTextContent('Quotes');
+      expect(screen.getByRole('region', { name: /saved mail skills/i })).toHaveTextContent('request for quote');
+    });
+    expect(screen.queryByText(/no mail skills yet/i)).not.toBeInTheDocument();
+  });
+
+  it('saves from the skill generator when the name field submits', async () => {
+    const user = userEvent.setup();
+    const onCommand = vi.fn().mockResolvedValue({ ok: true, message: 'Saved mail skill "Quotes".' });
+    render(<MailSection workspace={EMPTY_MAIL_WORKSPACE} tabs={[]} onCommand={onCommand} onOpenInbox={() => undefined} />);
+
+    await user.type(screen.getByRole('textbox', { name: /mail skill rule/i }), 'Mails addressed to Ashwin with a request for quote get a draft reply.');
+    await user.type(screen.getByRole('textbox', { name: /mail skill name/i }), 'Quotes{Enter}');
+    expect(onCommand).toHaveBeenCalledWith({
+      type: 'createMailSkill',
+      name: 'Quotes',
+      rule: 'Mails addressed to Ashwin with a request for quote get a draft reply.',
+    });
+  });
+
+  it('explains why Save skill cannot persist an empty generator', async () => {
+    const user = userEvent.setup();
+    const onCommand = vi.fn();
+    render(<MailSection workspace={EMPTY_MAIL_WORKSPACE} tabs={[]} onCommand={onCommand} onOpenInbox={() => undefined} />);
+    await user.click(screen.getByRole('button', { name: /save skill/i }));
+    expect(onCommand).not.toHaveBeenCalled();
+    expect(screen.getAllByRole('status').some((node) => /short name/i.test(node.textContent ?? ''))).toBe(true);
+  });
+
+  it('does not fail silently when the workspace command returns nothing', async () => {
+    const user = userEvent.setup();
+    const onCommand = vi.fn().mockResolvedValue(undefined);
+    render(<MailSection workspace={EMPTY_MAIL_WORKSPACE} tabs={[]} onCommand={onCommand} onOpenInbox={() => undefined} />);
+    await user.type(screen.getByRole('textbox', { name: /mail skill name/i }), 'Quotes');
+    await user.type(screen.getByRole('textbox', { name: /mail skill rule/i }), 'Mails addressed to Ashwin with a request for quote get a draft reply.');
+    await user.click(screen.getByRole('button', { name: /save skill/i }));
+    expect(screen.getAllByRole('status').some((node) => /could not update mail/i.test(node.textContent ?? ''))).toBe(true);
+    expect(screen.getByRole('region', { name: /saved mail skills/i })).toHaveTextContent(/no mail skills yet/i);
   });
 
   it('opens a persisted inbox when the draft has not synced yet', async () => {

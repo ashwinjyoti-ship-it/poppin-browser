@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 
 import type { BrowserWindow } from 'electron';
@@ -18,6 +19,7 @@ import {
   type TaskTurnSnapshot,
 } from '../../shared/task';
 import { isOpenableGeneratedFile } from '../../shared/task-output';
+import { shouldAutoAcceptWorkApproval, workWritableRoots } from '../../shared/work-approval-policy';
 import type { PageContextSnapshot, WorkspaceSnapshot } from '../../shared/workspace';
 import type { AgentHarnessId } from '../../shared/agent';
 import type { TandemContextSnapshot } from '../../shared/tandem';
@@ -64,6 +66,7 @@ import { GitEngine } from '../project/git-engine';
 import { WorkspaceStore } from '../workspace/workspace-store';
 import { TaskStore } from './task-store';
 import { listTaskOutputFiles, resolveTaskOutputFile, taskOutputDirectory } from './task-output';
+import { ensureCodexSkillsDirectory, syncCodexSkills } from './codex-skills';
 import { GitHubEngine } from '../project/github-engine';
 
 const MAX_RESULT_LENGTH = 120_000;
@@ -85,6 +88,8 @@ interface TaskEngineOptions {
   locateCodex?: () => Promise<CodexLaunch | null>;
   createServer?: (launch: CodexLaunch) => CodexAppServer;
   workDirectory?: string;
+  /** Override the user home directory in tests (Codex skills live under ~/.codex/skills). */
+  homeDirectory?: string;
   onResultReady?: (task: TaskRecordSnapshot) => void;
   onTaskEnded?: (outcome: 'completed' | 'stopped') => void;
   onOpenPreview?: (project: NonNullable<WorkspaceSnapshot['project']>) => Promise<void>;
@@ -157,6 +162,8 @@ export class TaskEngine {
     resolveMcp?: (result: { ok: boolean; text: string }) => void;
   } | null = null;
   private browserToolsAvailableInCurrentThread = false;
+  /** Set before the Work session exists so extra writable roots are available immediately. */
+  private workSessionOutputDirectory: string | null = null;
   private agentCapabilities: AgentHarnessCapabilities = { clientTools: true, resumeSession: true };
   private readonly agentMessages = new Map<string, string>();
   private readonly capabilityBridge = new CapabilityBridge();
@@ -319,7 +326,8 @@ export class TaskEngine {
     const adapter = this.options.createAdapter?.(this.agentId) ?? createAgentAdapter(this.agentId, {
       ...(this.options.locateCodex ? { locateCodex: this.options.locateCodex } : {}),
       ...(this.options.createServer ? { createServer: this.options.createServer } : {}),
-      workspaceRoot: () => this.workspaceStore.getProject()?.repositoryPath ?? this.currentWorkOutputDirectory() ?? this.workDirectory(),
+      workspaceRoot: () => this.currentWorkOutputDirectory() ?? this.workspaceStore.getProject()?.repositoryPath ?? this.workDirectory(),
+      extraWorkspaceRoots: () => this.currentWorkWritableRoots(),
       mcpBridgeAvailable: () => this.capabilityBridge.isAvailable(),
       resolveMcpServers: async (tools) => {
         if (!tools.length) {
@@ -386,6 +394,7 @@ export class TaskEngine {
   private async startTask(rawPrompt: string, modelId: string, effort: string, kind: TaskKind, useBrowser?: boolean): Promise<TaskCommandResult> {
     const prompt = validatePrompt(rawPrompt);
     const { model, project, workspace, cwd: defaultCwd } = this.validateStart(modelId, effort, kind);
+    if (kind === 'code') this.workSessionOutputDirectory = null;
     let baselineCommit = '';
     if (kind === 'code' && project) {
       const changes = await this.git.getWorkingTreeChanges(project.repositoryPath);
@@ -429,6 +438,7 @@ export class TaskEngine {
       model: model.id,
       instructions: kind === 'code' ? CODE_DEVELOPER_INSTRUCTIONS : WORK_DEVELOPER_INSTRUCTIONS,
       tools,
+      ...(kind === 'work' ? { workspaceRoots: await this.prepareWorkWritableRoots(documentId) } : {}),
     });
     this.browserToolsAvailableInCurrentThread = tools.some((tool) => tool.name === BROWSER_TOOL_NAME);
     const now = new Date().toISOString();
@@ -693,6 +703,7 @@ export class TaskEngine {
       await this.options.executeBrowserAgentCommand?.({ type: 'closeTaskTabs' });
     }
     this.task = null;
+    this.workSessionOutputDirectory = null;
     this.store.clear();
     this.agentMessages.clear();
     this.browserToolsAvailableInCurrentThread = false;
@@ -1046,6 +1057,26 @@ export class TaskEngine {
       this.persistAndEmit();
       return;
     }
+    if (
+      request.type === 'approval'
+      && task.kind === 'work'
+      && shouldAutoAcceptWorkApproval(request.kind, request.detail, this.currentWorkWritableRoots())
+    ) {
+      this.adapter?.respondApproval(request.requestId, 'accept');
+      this.appendProgress({
+        id: `auto-allow-${Date.now()}`,
+        kind: 'status',
+        title: request.kind === 'files'
+          ? 'Allowed skill or output file access'
+          : request.kind === 'command'
+            ? 'Allowed a non-destructive command'
+            : 'Allowed extra access inside the task folder',
+        detail: request.detail,
+        status: 'completed',
+      });
+      this.touchAndSchedule();
+      return;
+    }
     const approval: TaskApprovalSnapshot = {
       requestId: request.requestId,
       kind: request.kind,
@@ -1376,6 +1407,7 @@ export class TaskEngine {
       model: task.model,
       instructions: task.kind === 'code' ? CODE_DEVELOPER_INSTRUCTIONS : WORK_DEVELOPER_INSTRUCTIONS,
       tools,
+      ...(task.kind === 'work' ? { workspaceRoots: await this.prepareWorkWritableRoots(task.documentId) } : {}),
       fallbackHistory: [
         ...taskTurns(task).flatMap((turn) => [
           { role: 'user' as const, text: `USER REQUEST\n${turn.prompt}` },
@@ -1419,6 +1451,7 @@ export class TaskEngine {
   }
 
   private currentWorkOutputDirectory(): string | null {
+    if (this.workSessionOutputDirectory) return this.workSessionOutputDirectory;
     if (!this.task || this.task.kind !== 'work' || !this.task.documentId) return null;
     return taskOutputDirectory(this.workDirectory(), this.task.documentId);
   }
@@ -1426,16 +1459,36 @@ export class TaskEngine {
   private async ensureWorkOutputDirectory(documentId: string): Promise<string> {
     const directory = taskOutputDirectory(this.workDirectory(), documentId);
     await mkdir(directory, { recursive: true });
+    this.workSessionOutputDirectory = directory;
     return directory;
   }
 
   private async refreshGeneratedFiles(): Promise<void> {
     const task = this.task;
     if (!task || task.kind !== 'work') return;
-    const files = await listTaskOutputFiles(taskOutputDirectory(this.workDirectory(), task.documentId));
+    const directory = taskOutputDirectory(this.workDirectory(), task.documentId);
+    await syncCodexSkills(directory, task.createdAt, this.homeDirectory());
+    const files = await listTaskOutputFiles(directory);
     task.generatedFiles = files;
     const turn = currentTaskTurn(task);
     if (turn) turn.generatedFiles = files;
+  }
+
+  private homeDirectory(): string {
+    return this.options.homeDirectory ?? os.homedir();
+  }
+
+  private currentWorkWritableRoots(): string[] {
+    if (this.task?.kind === 'code') return [];
+    const output = this.currentWorkOutputDirectory();
+    if (!output) return [];
+    return workWritableRoots(output, this.homeDirectory());
+  }
+
+  private async prepareWorkWritableRoots(documentId: string): Promise<string[]> {
+    const output = await this.ensureWorkOutputDirectory(documentId);
+    await ensureCodexSkillsDirectory(this.homeDirectory());
+    return workWritableRoots(output, this.homeDirectory());
   }
 
   private failTask(message: string): void {
@@ -1506,7 +1559,8 @@ Do not claim that a browser action succeeded unless the tool output confirms it.
 Use the bounded batch tool to reduce round trips when several refs from one snapshot can be acted on safely. End every batch with read or assert, and treat any pause, takeover, stale ref, skipped step, or failed assertion as a stop rather than retrying.
 When the Tandem capability tool is supplied, use it for every Tandem read and write. It speaks the Tandem REST API: search or list to resolve a page, read_page before editing, and prefer append or edit_section so existing content survives. Never navigate to Tandem in a browser tab or automate its interface to do something the tool can do, and never ask the user for a Tandem API key.
 Your final agent message becomes Poppin's trusted Result page for contextual, browser-only, and mixed tasks. Return the complete polished outcome rather than a browser activity summary. Include source URLs and the time-sensitive date or timestamp when research, prices, availability, or other changing facts are involved. Create a new output artifact rather than overwriting an input.
-When the user asks for a file such as a spreadsheet, CSV, PDF, or document, write it in the working directory with a descriptive filename and the correct extension. Do not invent https download links, file:// URLs, or “click here to download” placeholders — those cannot save the file in Poppin. Mention the exact filename in the result as a markdown file link, for example [findings.xlsx](findings.xlsx). Poppin lists generated files and lets the user Save as… to a location they choose.
+When the user asks for a file such as a spreadsheet, CSV, PDF, or document, write it in the working directory with a descriptive filename and the correct extension. Do not invent https download links, file:// URLs, or “click here to download” placeholders — those cannot save the file in Poppin. Mention the exact filename in the result as a markdown file link, for example [findings.xlsx](findings.xlsx). Poppin lists generated files and lets the user Save as… to a location they choose. Writing that file in the working directory does not need extra filesystem or mkdir approvals.
+When the user asks to save a workflow as a skill, write SKILL.md in the working directory (so Poppin can show it on Reply) and also under the Codex skills folder that is already writable for this task. Use file tools, not shell grants, sudo, or extra home-directory access. Do not request approval for that install; Poppin copies the skill into Codex for reuse. Poppin recipes and mail skills are saved through the app, not by requesting home-directory access.
 Cite provenance for every load-bearing claim. Inline each factual claim as a markdown link — write [<the exact claim or the source title>](<the real http(s) URL from an Agent Tab visit or from SELECTED CONTEXT>). Use only URLs Poppin actually opened for this task or that appear in SELECTED CONTEXT; do not fabricate, shorten, or paraphrase URLs. Prefer one link per claim so Poppin can render a Claims list. If a paragraph draws from several sources, add the links at the end of that paragraph. A trailing "Sources" list is fine in addition to inline links, but the inline claim→URL links are required so Poppin can render provenance.`;
 
 function signedInHumanPagesForPrompt(

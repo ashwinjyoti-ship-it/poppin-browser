@@ -23,6 +23,7 @@ class FakeCodexServer extends EventEmitter {
   prompt = '';
   developerInstructions = '';
   cwd = '';
+  workspaceRoots: string[] = [];
   dynamicTools: unknown[] | null = null;
   responses: Array<{ id: number | string; result: unknown }> = [];
   resumeCount = 0;
@@ -41,10 +42,11 @@ class FakeCodexServer extends EventEmitter {
       defaultReasoningEffort: 'high', isDefault: true,
     }];
   }
-  async startThread(params: { developerInstructions: string; cwd: string; dynamicTools?: unknown[] }) {
+  async startThread(params: { developerInstructions: string; cwd: string; dynamicTools?: unknown[]; workspaceRoots?: string[] }) {
     this.startThreadCount += 1;
     this.developerInstructions = params.developerInstructions;
     this.cwd = params.cwd;
+    this.workspaceRoots = params.workspaceRoots ?? [];
     this.dynamicTools = params.dynamicTools ?? null;
     return { id: 'thread-1', sessionId: 'session-1', preview: '', ephemeral: false };
   }
@@ -148,6 +150,7 @@ async function setup({ withProject = true, withBrowserAgent = false, withTabCont
       locateCodex: async () => ({ executable: '/fake/codex', args: [] }),
       createServer: () => fake as unknown as CodexAppServer,
       workDirectory: directory,
+      homeDirectory: directory,
       onResultReady,
       onTaskEnded,
       github: github as unknown as GitHubEngine,
@@ -261,6 +264,80 @@ describe('task engine', () => {
     expect(onRevealGeneratedFile).toHaveBeenCalled();
 
     expect(await engine.execute({ type: 'saveGeneratedFile', relativePath: '../escape.xlsx' })).toMatchObject({ ok: false });
+    await engine.close();
+    taskStore.close();
+    workspaceStore.close();
+  });
+
+  it('allows non-destructive Work skill and output-file access without pausing for approval', async () => {
+    const { engine, fake, directory, taskStore, workspaceStore } = await setup({
+      withProject: false, withTabContext: false,
+    });
+    await engine.execute({
+      type: 'startTask', prompt: 'Save this workflow as a Codex skill and show it on Reply', model: 'gpt-test', reasoningEffort: 'high', kind: 'work',
+    });
+    const skillsRoot = path.join(directory, '.codex', 'skills');
+    expect(fake.workspaceRoots).toEqual(expect.arrayContaining([
+      path.join(directory, engine.getSnapshot().task!.documentId),
+      skillsRoot,
+    ]));
+    expect(fake.developerInstructions).toContain('SKILL.md');
+
+    fake.emit('request', {
+      id: 71,
+      method: 'item/fileChange/requestApproval',
+      params: { threadId: 'thread-1', turnId: 'turn-1', grantRoot: path.join(skillsRoot, 'inbox-triage'), reason: 'Write the skill' },
+    });
+    fake.emit('request', {
+      id: 72,
+      method: 'item/commandExecution/requestApproval',
+      params: { threadId: 'thread-1', turnId: 'turn-1', command: `mkdir -p ${path.join(skillsRoot, 'inbox-triage')}`, cwd: fake.cwd },
+    });
+    fake.emit('request', {
+      id: 74,
+      method: 'item/commandExecution/requestApproval',
+      params: { threadId: 'thread-1', turnId: 'turn-1', command: 'python3 write_findings.py', cwd: fake.cwd },
+    });
+    fake.emit('request', {
+      id: 75,
+      method: 'item/permissions/requestApproval',
+      params: {
+        threadId: 'thread-1', turnId: 'turn-1',
+        permissions: { network: { enabled: false }, fileSystem: { write: [skillsRoot] } },
+      },
+    });
+    expect(engine.getSnapshot().task?.pendingApproval).toBeNull();
+    expect(engine.getSnapshot().task?.state).toBe('Running');
+    expect(fake.responses).toEqual([
+      { id: 71, result: { decision: 'accept' } },
+      { id: 72, result: { decision: 'accept' } },
+      { id: 74, result: { decision: 'accept' } },
+      { id: 75, result: { permissions: { network: { enabled: false }, fileSystem: { write: [skillsRoot] } }, scope: 'turn' } },
+    ]);
+
+    fake.emit('request', {
+      id: 76,
+      method: 'item/fileChange/requestApproval',
+      params: { threadId: 'thread-1', turnId: 'turn-1', grantRoot: directory, reason: 'Write anywhere in home' },
+    });
+    expect(engine.getSnapshot().task?.pendingApproval).toMatchObject({ requestId: 76, kind: 'files' });
+    expect(await engine.execute({ type: 'respondApproval', decision: 'decline' })).toEqual({ ok: true });
+
+    fake.emit('request', {
+      id: 77,
+      method: 'item/permissions/requestApproval',
+      params: { threadId: 'thread-1', turnId: 'turn-1', permissions: { network: { enabled: true } } },
+    });
+    expect(engine.getSnapshot().task?.pendingApproval).toMatchObject({ requestId: 77, kind: 'permissions' });
+    expect(await engine.execute({ type: 'respondApproval', decision: 'decline' })).toEqual({ ok: true });
+
+    fake.emit('request', {
+      id: 73,
+      method: 'item/commandExecution/requestApproval',
+      params: { threadId: 'thread-1', turnId: 'turn-1', command: 'rm -rf /', cwd: fake.cwd },
+    });
+    expect(engine.getSnapshot().task?.pendingApproval).toMatchObject({ requestId: 73, kind: 'command' });
+    expect(await engine.execute({ type: 'respondApproval', decision: 'decline' })).toEqual({ ok: true });
     await engine.close();
     taskStore.close();
     workspaceStore.close();
@@ -793,6 +870,7 @@ describe('task engine', () => {
         locateCodex: async () => ({ executable: '/fake/codex', args: [] }),
         createServer: () => resumedServer as unknown as CodexAppServer,
         workDirectory: first.directory,
+        homeDirectory: first.directory,
         getBrowserAgentSnapshot: () => first.browserSnapshot,
         executeBrowserAgentCommand: first.browserCommand,
       },

@@ -42,6 +42,7 @@ export function isAcpHarnessId(id: AgentHarnessId): boolean {
 
 export interface AgentFactoryOptions extends CodexAppServerAdapterOptions {
   workspaceRoot?: () => string | null;
+  extraWorkspaceRoots?: () => string[];
   mcpBridgeAvailable?: () => boolean;
   resolveMcpServers?: (tools: AgentToolSpec[]) => Promise<AcpMcpServerStdio[]>;
 }
@@ -53,6 +54,7 @@ export function createAgentAdapter(id: AgentHarnessId, options: AgentFactoryOpti
       descriptor,
       locate: async () => locateAcpHarness(id),
       ...(options.workspaceRoot ? { workspaceRoot: options.workspaceRoot } : {}),
+      ...(options.extraWorkspaceRoots ? { extraWorkspaceRoots: options.extraWorkspaceRoots } : {}),
       ...(options.mcpBridgeAvailable ? { mcpBridgeAvailable: options.mcpBridgeAvailable } : {}),
       ...(options.resolveMcpServers ? { resolveMcpServers: options.resolveMcpServers } : {}),
     });

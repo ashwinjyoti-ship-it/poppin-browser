@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { type FormEvent, useState } from 'react';
 import { Mail, Plus, X } from 'lucide-react';
 
 import type { WorkspaceCommand, WorkspaceCommandResult, WorkspaceSnapshot } from '../../shared/workspace';
@@ -33,10 +33,21 @@ export function MailSection({ workspace, tabs, onCommand, onOpenInbox }: MailSec
   const [editingId, setEditingId] = useState<string | null>(null);
   const [message, setMessage] = useState('');
 
-  const run = async (command: WorkspaceCommand) => {
-    const result = await onCommand(command);
-    setMessage(result.message ?? (result.ok ? '' : 'Could not update Mail.'));
-    return result;
+  const run = async (command: WorkspaceCommand): Promise<WorkspaceCommandResult> => {
+    try {
+      const result = await onCommand(command);
+      if (!result || typeof result.ok !== 'boolean') {
+        const fallback = { ok: false, message: 'Could not update Mail.' };
+        setMessage(fallback.message);
+        return fallback;
+      }
+      setMessage(result.message ?? (result.ok ? '' : 'Could not update Mail.'));
+      return result;
+    } catch {
+      const fallback = { ok: false, message: 'Could not update Mail.' };
+      setMessage(fallback.message);
+      return fallback;
+    }
   };
 
   const saveInbox = async (raw: string) => {
@@ -50,15 +61,34 @@ export function MailSection({ workspace, tabs, onCommand, onOpenInbox }: MailSec
     return result.ok ? url : null;
   };
 
-  const saveSkill = async () => {
+  const saveSkill = async (rawName = skillName, rawRule = skillRule) => {
+    const name = rawName.trim();
+    const rule = rawRule.trim();
+    if (!name) {
+      setMessage('Give the mail skill a short name.');
+      return;
+    }
+    if (!rule) {
+      setMessage('Describe the mail skill in plain language, without passwords or secrets.');
+      return;
+    }
     const result = editingId
-      ? await run({ type: 'updateMailSkill', skillId: editingId, name: skillName, rule: skillRule })
-      : await run({ type: 'createMailSkill', name: skillName, rule: skillRule });
+      ? await run({ type: 'updateMailSkill', skillId: editingId, name, rule })
+      : await run({ type: 'createMailSkill', name, rule });
     if (result.ok) {
       setSkillName('');
       setSkillRule('');
       setEditingId(null);
     }
+  };
+
+  const submitSkill = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    void saveSkill(
+      String(data.get('mail-skill-name') ?? skillName),
+      String(data.get('mail-skill-rule') ?? skillRule),
+    );
   };
 
   return (
@@ -128,17 +158,26 @@ export function MailSection({ workspace, tabs, onCommand, onOpenInbox }: MailSec
         </div>
       </section>
 
-      <section className="mail-card" aria-label="Mail skill generator">
+      <form className="mail-card" aria-label="Mail skill generator" onSubmit={submitSkill}>
         <span className="eyebrow">Skill generator</span>
         <h3>{editingId ? 'Edit mail skill' : 'New mail skill'}</h3>
         <p className="mail-hint">Describe the behaviour in natural language. Enabled skills are ingested into Mail Agent Tabs automatically — the harness follows them on the next command-bar request.</p>
         <label className="mail-field">
           <span>Name</span>
-          <input value={skillName} onChange={(event) => setSkillName(event.target.value)} placeholder="Meeting invites" aria-label="Mail skill name" maxLength={80} />
+          <input
+            name="mail-skill-name"
+            value={skillName}
+            onChange={(event) => setSkillName(event.target.value)}
+            placeholder="Meeting invites"
+            aria-label="Mail skill name"
+            maxLength={80}
+            autoComplete="off"
+          />
         </label>
         <label className="mail-field">
           <span>Rule</span>
           <textarea
+            name="mail-skill-rule"
             value={skillRule}
             onChange={(event) => setSkillRule(event.target.value)}
             placeholder="When an email is a meeting invite or minutes, do not draft a reply. Extract the proposed times and summarise them instead."
@@ -160,11 +199,12 @@ export function MailSection({ workspace, tabs, onCommand, onOpenInbox }: MailSec
               Cancel edit
             </button>
           ) : null}
-          <button type="button" className="primary-button" disabled={!skillName.trim() || !skillRule.trim()} onClick={() => { void saveSkill(); }}>
-            <Plus size={14} /> {editingId ? 'Update skill' : 'Save skill'}
+          <button type="submit" className="primary-button">
+            <Plus size={14} aria-hidden="true" /> {editingId ? 'Update skill' : 'Save skill'}
           </button>
         </div>
-      </section>
+        {message ? <p className="review-message" role="status">{message}</p> : null}
+      </form>
 
       <section className="mail-card" aria-label="Saved mail skills">
         <span className="eyebrow">Enabled for every harness</span>

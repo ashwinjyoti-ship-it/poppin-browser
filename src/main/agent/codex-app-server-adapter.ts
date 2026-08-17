@@ -63,6 +63,7 @@ export class CodexAppServerAdapter extends EventEmitter<AgentAdapterEvents> impl
   private toolsAttached = false;
   private pendingPermissionProfile: JsonObject | null = null;
   private pendingQuestionIds: string[] = [];
+  private workspaceRoots: string[] = [];
 
   constructor(private readonly options: CodexAppServerAdapterOptions = {}) {
     super();
@@ -97,11 +98,13 @@ export class CodexAppServerAdapter extends EventEmitter<AgentAdapterEvents> impl
   }
 
   async createSession(request: AgentSessionRequest): Promise<AgentSession> {
+    this.workspaceRoots = request.workspaceRoots ?? [];
     const thread = await this.requireServer().startThread({
       cwd: request.cwd,
       model: request.model,
       developerInstructions: request.instructions,
       dynamicTools: request.tools.length ? request.tools.map(toDynamicTool) : undefined,
+      workspaceRoots: this.workspaceRoots,
     });
     this.activeSessionId = thread.id;
     this.activeTurnId = '';
@@ -111,7 +114,8 @@ export class CodexAppServerAdapter extends EventEmitter<AgentAdapterEvents> impl
 
   async resumeSession(sessionId: string, request: AgentResumeRequest): Promise<AgentResumeResult> {
     const server = this.requireServer();
-    const resumed = await server.resumeThread(sessionId, request.cwd);
+    this.workspaceRoots = request.workspaceRoots ?? this.workspaceRoots;
+    const resumed = await server.resumeThread(sessionId, request.cwd, this.workspaceRoots);
     this.activeSessionId = resumed.id;
     this.activeTurnId = '';
     const toolsAttached = request.toolsAlreadyAttached && this.toolsAttached;
@@ -127,6 +131,7 @@ export class CodexAppServerAdapter extends EventEmitter<AgentAdapterEvents> impl
       model: request.model,
       developerInstructions: request.instructions,
       dynamicTools: request.tools.map(toDynamicTool),
+      workspaceRoots: this.workspaceRoots,
     });
     await server.injectThreadItems(replacement.id, historyItems(resumed, request.fallbackHistory));
     this.activeSessionId = replacement.id;
@@ -141,6 +146,7 @@ export class CodexAppServerAdapter extends EventEmitter<AgentAdapterEvents> impl
       cwd: request.cwd,
       model: request.model,
       effort: request.reasoningEffort,
+      workspaceRoots: this.workspaceRoots,
     });
     this.activeSessionId = request.sessionId;
     this.activeTurnId = turn.id;

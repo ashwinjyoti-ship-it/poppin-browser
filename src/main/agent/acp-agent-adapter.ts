@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import { readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -28,6 +28,7 @@ import {
 } from '../acp/acp-protocol';
 import { discoverControlsFromSession } from '../acp/acp-session-config';
 import { AgentNotInstalledError, AgentSignedOutError } from './agent-errors';
+import { pathIsInside } from '../../shared/work-approval-policy';
 import type {
   AgentAdapter,
   AgentAdapterEvents,
@@ -83,6 +84,8 @@ export interface AcpAgentAdapterOptions {
   createConnection?: (launch: AcpLaunch) => AcpConnection;
   /** Absolute path the agent may read and write through `fs/*`. */
   workspaceRoot?: () => string | null;
+  /** Additional writable roots (Work: Codex skills directory). */
+  extraWorkspaceRoots?: () => string[];
   /** True when Poppin can launch its MCP capability bridge for this process. */
   mcpBridgeAvailable?: () => boolean;
   /**
@@ -534,6 +537,7 @@ export class AcpAgentAdapter extends EventEmitter<AgentAdapterEvents> implements
       return;
     }
     try {
+      await mkdir(path.dirname(resolved), { recursive: true });
       await writeFile(resolved, typeof params.content === 'string' ? params.content : '', 'utf8');
       this.connection?.respond(requestId, {});
     } catch (error) {
@@ -541,15 +545,34 @@ export class AcpAgentAdapter extends EventEmitter<AgentAdapterEvents> implements
     }
   }
 
-  /** Keeps agent filesystem access inside the session working directory. */
+  /** Keeps agent filesystem access inside the session working directory and extra Work roots. */
   private resolveWorkspacePath(candidate: unknown): string | null {
-    const root = this.options.workspaceRoot?.() ?? this.sessionCwd;
-    if (!root || typeof candidate !== 'string' || !candidate) return null;
-    const resolvedRoot = path.resolve(root);
-    const resolved = path.resolve(resolvedRoot, candidate);
-    const relative = path.relative(resolvedRoot, resolved);
-    if (relative.startsWith('..') || path.isAbsolute(relative)) return null;
-    return resolved;
+    if (typeof candidate !== 'string' || !candidate) return null;
+    const roots = this.writableRoots();
+    if (roots.length === 0) return null;
+    const files = path.isAbsolute(candidate)
+      ? [path.resolve(candidate)]
+      : roots.map((root) => path.resolve(root, candidate));
+    for (const file of files) {
+      if (roots.some((root) => pathIsInside(root, file))) return file;
+    }
+    return null;
+  }
+
+  private writableRoots(): string[] {
+    const roots = [
+      this.options.workspaceRoot?.() ?? this.sessionCwd,
+      ...(this.options.extraWorkspaceRoots?.() ?? []),
+    ].filter((root): root is string => Boolean(root));
+    const seen = new Set<string>();
+    const unique: string[] = [];
+    for (const root of roots) {
+      const resolved = path.resolve(root);
+      if (seen.has(resolved)) continue;
+      seen.add(resolved);
+      unique.push(resolved);
+    }
+    return unique;
   }
 
   private activityFromToolCall(toolCall: AcpToolCall): AgentActivity | null {
@@ -598,15 +621,20 @@ function approvalKindFor(toolCall: AcpToolCall | undefined): AgentApprovalKind {
 }
 
 function permissionDetail(permission: AcpRequestPermissionRequest): string {
-  const detail = toolCallDetail(permission.toolCall ?? { toolCallId: '' });
-  const raw = permission.toolCall?.rawInput;
-  if (detail) return detail;
-  if (raw === undefined) return permission.toolCall?.title ?? 'The agent requested permission.';
-  try {
-    return JSON.stringify(raw, null, 2).slice(0, 8_000);
-  } catch {
-    return permission.toolCall?.title ?? 'The agent requested permission.';
+  const toolCall = permission.toolCall ?? { toolCallId: '' };
+  const parts: string[] = [];
+  if (toolCall.kind) parts.push(`acpKind:${toolCall.kind}`);
+  const detail = toolCallDetail(toolCall);
+  if (detail) parts.push(detail);
+  if (toolCall.rawInput !== undefined) {
+    try {
+      parts.push(typeof toolCall.rawInput === 'string' ? toolCall.rawInput : JSON.stringify(toolCall.rawInput, null, 2).slice(0, 8_000));
+    } catch {
+      // Keep the kind/title even when rawInput cannot be serialized.
+    }
   }
+  if (parts.length === 0) return toolCall.title ?? 'The agent requested permission.';
+  return parts.join('\n');
 }
 
 function renderPlan(entries: AcpPlanEntry[]): string {
