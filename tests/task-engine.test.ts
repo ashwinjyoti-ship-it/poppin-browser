@@ -2,7 +2,7 @@
 
 import { execFile } from 'node:child_process';
 import { EventEmitter } from 'node:events';
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -91,6 +91,13 @@ async function setup({ withProject = true, withBrowserAgent = false, withTabCont
   const github = new FakeGitHub();
   const onOpenExternal = vi.fn();
   const onProjectUpdated = vi.fn();
+  const onSaveGeneratedFile = vi.fn(async (sourcePath: string, suggestedName: string) => {
+    const dest = path.join(directory, `saved-${suggestedName}`);
+    await copyFile(sourcePath, dest);
+    return dest;
+  });
+  const onRevealGeneratedFile = vi.fn();
+  const onOpenGeneratedFile = vi.fn(async () => '');
   const querySelectedDatabase = vi.fn(() => 'Name\nGuitar');
   const applyPageComment = vi.fn(() => 'Applied comment');
   const browsableTabs: Array<{ id: string; url: string; taskSpaceId?: string | null }> = [];
@@ -146,6 +153,9 @@ async function setup({ withProject = true, withBrowserAgent = false, withTabCont
       github: github as unknown as GitHubEngine,
       onOpenExternal,
       onProjectUpdated,
+      onSaveGeneratedFile,
+      onRevealGeneratedFile,
+      onOpenGeneratedFile,
       querySelectedDatabase,
       applyPageComment,
       ...(withBrowserAgent ? {
@@ -164,7 +174,7 @@ async function setup({ withProject = true, withBrowserAgent = false, withTabCont
     },
   );
   await engine.initialize();
-  return { engine, fake, repositoryPath, taskStore, workspaceStore, onResultReady, onTaskEnded, directory, github, onOpenExternal, onProjectUpdated, browserSnapshot, browserCommand, browsableTabs, querySelectedDatabase, applyPageComment };
+  return { engine, fake, repositoryPath, taskStore, workspaceStore, onResultReady, onTaskEnded, directory, github, onOpenExternal, onProjectUpdated, onSaveGeneratedFile, onRevealGeneratedFile, onOpenGeneratedFile, browserSnapshot, browserCommand, browsableTabs, querySelectedDatabase, applyPageComment };
 }
 
 describe('task engine', () => {
@@ -217,9 +227,40 @@ describe('task engine', () => {
     const result = await engine.execute({ type: 'startTask', prompt: 'Summarize the selected source', model: 'gpt-test', reasoningEffort: 'high', kind: 'work' });
     expect(result).toEqual({ ok: true });
     expect(engine.getSnapshot().task).toMatchObject({ kind: 'work', state: 'Running', baselineCommit: '' });
-    expect(fake.cwd).toBe(directory);
+    expect(fake.cwd).toBe(path.join(directory, engine.getSnapshot().task!.documentId));
     expect(fake.developerInstructions).toContain('Git project is not required');
     expect(fake.prompt).toContain('Reference');
+    await engine.close();
+    taskStore.close();
+    workspaceStore.close();
+  });
+
+  it('lists generated Work files and copies them to a user-chosen path', async () => {
+    const { engine, fake, directory, taskStore, workspaceStore, onSaveGeneratedFile, onRevealGeneratedFile } = await setup({
+      withProject: false, withTabContext: false,
+    });
+    await engine.execute({
+      type: 'startTask', prompt: 'Make an Excel sheet of the findings', model: 'gpt-test', reasoningEffort: 'high', kind: 'work',
+    });
+    const documentId = engine.getSnapshot().task!.documentId;
+    await mkdir(path.join(directory, documentId), { recursive: true });
+    await writeFile(path.join(directory, documentId, 'findings.xlsx'), 'workbook-bytes');
+    fake.emit('notification', { method: 'item/agentMessage/delta', params: { threadId: 'thread-1', turnId: 'turn-1', itemId: 'message-1', delta: '[Download excel sheet here](findings.xlsx)' } });
+    fake.emit('notification', { method: 'turn/completed', params: { threadId: 'thread-1', turn: { id: 'turn-1', status: 'completed', error: null } } });
+    await vi.waitFor(() => expect(engine.getSnapshot().task).toMatchObject({
+      state: 'Completed',
+      generatedFiles: [expect.objectContaining({ name: 'findings.xlsx', relativePath: 'findings.xlsx' })],
+    }));
+
+    const saved = await engine.execute({ type: 'saveGeneratedFile', relativePath: 'findings.xlsx' });
+    expect(saved.ok).toBe(true);
+    expect(saved.message).toContain('saved-findings.xlsx');
+    expect(onSaveGeneratedFile).toHaveBeenCalled();
+
+    expect(await engine.execute({ type: 'revealGeneratedFile', relativePath: 'findings.xlsx' })).toEqual({ ok: true });
+    expect(onRevealGeneratedFile).toHaveBeenCalled();
+
+    expect(await engine.execute({ type: 'saveGeneratedFile', relativePath: '../escape.xlsx' })).toMatchObject({ ok: false });
     await engine.close();
     taskStore.close();
     workspaceStore.close();
