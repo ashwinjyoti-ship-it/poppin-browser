@@ -54,10 +54,20 @@ describe('capability router', () => {
     expect(plan.capabilities).toEqual(['context_read']);
   });
 
-  it('asks before starting when the signal is weak and context was supplied', () => {
+  it('asks before starting when the signal is weak and only documents were supplied', () => {
     const plan = route('Compare the two options and recommend one.', { selectedContextCount: 1 });
     expect(plan.confirmation).toBe(BROWSER_CONFIRMATION_QUESTION);
     expect(plan.browser).toBe('context-only');
+  });
+
+  it('makes selected tabs agent-controllable when the request needs live work', () => {
+    const plan = route('Compare the two options and recommend one.', {
+      selectedContextCount: 1,
+      selectedTabContextCount: 1,
+    });
+    expect(plan.confirmation).toBeNull();
+    expect(plan.browser).toBe('selected-tab');
+    expect(plan.capabilities).toContain('selected_tab_control');
   });
 
   it('provisions browsing for a weak-signal request when nothing was supplied', () => {

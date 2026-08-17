@@ -12,6 +12,7 @@ import {
 } from '../shared/browser';
 import { BrowserEngine } from './browser/browser-engine';
 import { handleInternalPages, registerInternalScheme } from './browser/internal-pages';
+import { searchEngineHomeUrl } from './browser/url-input';
 import { BrowserStateStore } from './browser/state-store';
 import { isAllowedBrowsingPermission } from './browser/permissions';
 import { clampWindowState, DEFAULT_WINDOW_STATE } from './browser/window-state';
@@ -115,7 +116,7 @@ async function createWindow(): Promise<void> {
   });
 
   const browserSession = session.fromPartition('persist:poppin-browser', { cache: true });
-  handleInternalPages(browserSession);
+  handleInternalPages(browserSession, () => browserEngine?.getSnapshot().settings.searchEngine ?? DEFAULT_BROWSER_SETTINGS.searchEngine);
   const getWindowState = (): WindowState => {
     if (!mainWindow) return windowState;
     const normalBounds = mainWindow.getNormalBounds();
@@ -310,6 +311,8 @@ async function createWindow(): Promise<void> {
     },
     getPadAttachments: () => poppinPadEngine?.getAttachmentPayloads() ?? [],
     clearPadAttachments: () => poppinPadEngine?.clearAttachments(),
+    clearSelectedContext: async () => workspaceEngine?.execute({ type: 'clearSelectedContext' }) ?? { ok: false, message: 'Workspace is not ready.' },
+    getSearchEngineHomeUrl: () => searchEngineHomeUrl(browserEngine?.getSnapshot().settings.searchEngine ?? DEFAULT_BROWSER_SETTINGS.searchEngine),
   });
   browserEngine.restore(persisted);
   void tandemEngine.initialize().then(() => {

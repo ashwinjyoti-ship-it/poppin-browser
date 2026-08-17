@@ -229,7 +229,7 @@ export class BrowserEngine {
   }
 
   openExternalUrl(url: string): void {
-    const normalized = normalizeAddressInput(url);
+    const normalized = normalizeAddressInput(url, this.settings.searchEngine);
     if (normalized.kind !== 'url') return;
     this.createTab(normalized.url, randomUUID(), false, undefined, true, 'end');
   }
@@ -242,7 +242,7 @@ export class BrowserEngine {
    * tabs.
    */
   openTandemWorld(url: string): void {
-    const normalized = normalizeAddressInput(url);
+    const normalized = normalizeAddressInput(url, this.settings.searchEngine);
     if (normalized.kind !== 'url') return;
     const hostedUrl = ensureTandemHostParam(normalized.url);
     const existing = this.tandemWorldTabId ? this.tabs.get(this.tandemWorldTabId) : undefined;

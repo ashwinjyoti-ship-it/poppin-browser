@@ -32,6 +32,7 @@ interface BrowserToolbarProps {
    * Provided by the App so `BrowserToolbar` stays stateless.
    */
   downloadsSlot?: ReactNode;
+  commandSlot?: ReactNode;
   padOpen?: boolean;
   onTogglePad?: () => void;
 }
@@ -59,6 +60,7 @@ export function BrowserToolbar({
   onSubmit,
   onOverlayOpenChange,
   downloadsSlot,
+  commandSlot,
   padOpen = false,
   onTogglePad,
 }: BrowserToolbarProps) {
@@ -256,6 +258,7 @@ export function BrowserToolbar({
             <span>Pad</span>
           </button>
         ) : null}
+        {commandSlot}
         {downloadsSlot}
         <button
           type="button"

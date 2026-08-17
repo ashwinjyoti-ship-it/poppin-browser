@@ -27,6 +27,8 @@ export interface CapabilityRouterInput {
   hasProject: boolean;
   /** Number of explicitly checked context items (tabs, documents, pages). */
   selectedContextCount: number;
+  /** Number of explicitly checked browser tabs in the context package. */
+  selectedTabContextCount?: number;
   /** A browsable http(s) tab is currently visible to the user. */
   hasActiveBrowsableTab: boolean;
   tandem: { available: boolean; writable: boolean };
@@ -113,20 +115,27 @@ export function routeCapabilities(input: CapabilityRouterInput): CapabilityPlan 
   const wantsInteraction = INTERACTION_INTENT.test(prompt);
   const pointsAtOpenPage = DEICTIC_PAGE.test(prompt);
   const namesWebDestination = /https?:\/\/\S+/i.test(prompt) || WEB_DOMAIN.test(prompt);
+  const selectedTabCount = input.selectedTabContextCount ?? 0;
+  const selectedTabsNeedLiveControl = selectedTabCount > 0
+    && (score >= UNCERTAIN_THRESHOLD || wantsInteraction || pointsAtOpenPage);
 
   let browser: BrowserProvisionMode = 'none';
   let confirmation: string | null = null;
 
-  if (wantsInteraction && pointsAtOpenPage && (input.hasActiveBrowsableTab || !namesWebDestination)) {
+  if (wantsInteraction && pointsAtOpenPage && (input.hasActiveBrowsableTab || selectedTabCount > 0 || !namesWebDestination)) {
     // Deterministic: the user is talking about the page in front of them and
     // wants something done to it. Reading extracted text is not enough.
     browser = 'selected-tab';
     add('selected_tab_control', 'the request acts on the page you are looking at');
     add('browser_control', 'the agent needs a controllable browsing context');
-  } else if (pointsAtOpenPage && input.hasActiveBrowsableTab) {
+  } else if (pointsAtOpenPage && (input.hasActiveBrowsableTab || selectedTabCount > 0)) {
     // Inspecting the open website: a real browsing context, read-only intent.
     browser = 'selected-tab';
     add('browser_control', 'the request inspects the website you have open');
+  } else if (selectedTabsNeedLiveControl) {
+    browser = 'selected-tab';
+    add('selected_tab_control', 'selected tabs need live control for this request');
+    add('browser_control', 'the agent needs a controllable browsing context');
   } else if (score >= EXPLORATION_THRESHOLD || (wantsInteraction && namesWebDestination)) {
     browser = 'exploration';
     add('browser_exploration', reasons[0] ?? 'the request needs live web access');
@@ -148,7 +157,7 @@ export function routeCapabilities(input: CapabilityRouterInput): CapabilityPlan 
     browser = 'context-only';
   }
 
-  if (browser === 'selected-tab' && wantsInteraction && !input.hasActiveBrowsableTab) {
+  if (browser === 'selected-tab' && wantsInteraction && !input.hasActiveBrowsableTab && selectedTabCount === 0) {
     // The requirement stands; provisioning will report BROWSER_NOT_PROVISIONED.
     confirmation = 'This request acts on an open web page, but no browsable tab is active. Open the page first?';
   }

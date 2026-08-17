@@ -73,7 +73,7 @@ export const DEFAULT_BROWSER_SETTINGS: BrowserSettings = {
   startup: 'restore',
   newTabPosition: 'end',
   warnBeforeClosingMultipleTabs: false,
-  searchEngine: 'duckduckgo',
+  searchEngine: 'google',
 };
 
 /** Sticky centre split: two live WebContentsViews side by side. */

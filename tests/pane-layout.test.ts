@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import {
+  browserBottomInset,
   browserLeftInset,
   browserRightInset,
   clampResizedLeftPaneWidth,
@@ -92,5 +93,17 @@ describe('resizable Poppin Pad layout', () => {
     const setItem = vi.fn();
     saveRightPaneWidth({ setItem }, 720);
     expect(setItem).toHaveBeenCalledWith('poppin:pad-width:v1', '720');
+  });
+});
+
+describe('command bar bottom inset', () => {
+  it('gives the native viewport the full height when the command bar is collapsed', () => {
+    expect(browserBottomInset({ commandCollapsed: true, commandOverlayHeight: 160, agentDockHeight: 0 })).toBe(0);
+    expect(browserBottomInset({ commandCollapsed: true, commandOverlayHeight: 0, agentDockHeight: 48 })).toBe(48);
+  });
+
+  it('reserves the expanded bar, overlay, and dock together', () => {
+    expect(browserBottomInset({ commandCollapsed: false, commandOverlayHeight: 0, agentDockHeight: 0 })).toBe(94);
+    expect(browserBottomInset({ commandCollapsed: false, commandOverlayHeight: 40, agentDockHeight: 56 })).toBe(190);
   });
 });

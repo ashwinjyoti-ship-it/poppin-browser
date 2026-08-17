@@ -7,7 +7,7 @@ import type {
   PoppinPadCommandResult,
 } from '../../../shared/poppin-pad';
 import { PoppinPadCard } from './PoppinPadCard';
-import { clientToCanvasPoint, strokePath } from './pad-coords';
+import { clientToCanvasPoint, hitTestPadObject, padObjectBounds, resizePadObject, strokePath, translatePadObject } from './pad-coords';
 
 interface PoppinPadCanvasProps {
   objects: PadObjectSnapshot[];
@@ -28,12 +28,21 @@ function createId(): string {
   return `pad-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
+interface TransformState {
+  objectId: string;
+  mode: 'move' | 'resize';
+  startX: number;
+  startY: number;
+  origin: PadObjectSnapshot;
+}
+
 export function PoppinPadCanvas({ objects, tool, onCommand }: PoppinPadCanvasProps) {
   const surfaceRef = useRef<HTMLDivElement>(null);
   const editInputRef = useRef<HTMLTextAreaElement | null>(null);
   const editingIdRef = useRef<string | null>(null);
   const draftsRef = useRef<Record<string, string>>({});
   const suppressBlurRef = useRef(false);
+  const transformRef = useRef<TransformState | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
@@ -135,13 +144,17 @@ export function PoppinPadCanvas({ objects, tool, onCommand }: PoppinPadCanvasPro
     const now = new Date().toISOString();
     const zIndex = mergedObjects.length + 1;
     if (state.kind === 'stroke' && state.points && state.points.length > 1) {
+      const xs = state.points.map((point) => point.x);
+      const ys = state.points.map((point) => point.y);
+      const x = Math.min(...xs);
+      const y = Math.min(...ys);
       upsertLocal({
         id: state.id,
         kind: 'stroke',
-        x: Math.min(...state.points.map((point) => point.x)),
-        y: Math.min(...state.points.map((point) => point.y)),
-        width: 0,
-        height: 0,
+        x,
+        y,
+        width: Math.max(8, Math.max(...xs) - x),
+        height: Math.max(8, Math.max(...ys) - y),
         rotation: 0,
         zIndex,
         payload: { points: state.points, color: '#40372f', width: 2 },
@@ -304,6 +317,56 @@ export function PoppinPadCanvas({ objects, tool, onCommand }: PoppinPadCanvasPro
     event.stopPropagation();
   };
 
+  const objectAtPoint = (point: { x: number; y: number }) => {
+    return [...mergedObjects].reverse().find((object) => hitTestPadObject(object, point));
+  };
+
+  const beginTransform = (object: PadObjectSnapshot, event: React.PointerEvent, mode: 'move' | 'resize') => {
+    transformRef.current = {
+      objectId: object.id,
+      mode,
+      startX: event.clientX,
+      startY: event.clientY,
+      origin: object,
+    };
+    setSelectedId(object.id);
+    surfaceRef.current?.setPointerCapture?.(event.pointerId);
+    event.preventDefault();
+    event.stopPropagation();
+  };
+
+  const applyTransform = (event: React.PointerEvent) => {
+    const transform = transformRef.current;
+    if (!transform) return;
+    const dx = event.clientX - transform.startX;
+    const dy = event.clientY - transform.startY;
+    if (transform.mode === 'move') {
+      upsertLocal(translatePadObject(transform.origin, dx, dy));
+      return;
+    }
+    const box = padObjectBounds(transform.origin);
+    upsertLocal(resizePadObject(transform.origin, box.width + dx, box.height + dy));
+  };
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Backspace' && event.key !== 'Delete') return;
+      const target = event.target as HTMLElement | null;
+      if (target && (target.tagName === 'TEXTAREA' || target.tagName === 'INPUT' || target.isContentEditable)) return;
+      if (!selectedId || editingId) return;
+      event.preventDefault();
+      setLocalObjects((current) => {
+        const next = { ...current };
+        delete next[selectedId];
+        return next;
+      });
+      void onCommand({ type: 'deleteObject', objectId: selectedId });
+      setSelectedId(null);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [editingId, onCommand, selectedId]);
+
   return (
     <div
       ref={surfaceRef}
@@ -316,9 +379,18 @@ export function PoppinPadCanvas({ objects, tool, onCommand }: PoppinPadCanvasPro
         if (activeEditingId && !(event.target as HTMLElement).closest(`[data-pad-object="${activeEditingId}"]`)) {
           commitEdit(activeEditingId, drafts[activeEditingId] ?? '');
         }
-        if (tool === 'select') return;
-        if ((event.target as HTMLElement).closest('.poppin-pad-text, .poppin-pad-sticky')) return;
+        if ((event.target as HTMLElement).closest('.poppin-pad-text, .poppin-pad-sticky, .poppin-pad-card, .poppin-pad-shape')) return;
         const point = pointFromEvent(event);
+        if (tool === 'select') {
+          const hit = objectAtPoint(point);
+          if (!hit) {
+            setSelectedId(null);
+            return;
+          }
+          beginTransform(hit, event, 'move');
+          return;
+        }
+        if ((event.target as HTMLElement).closest('.poppin-pad-text, .poppin-pad-sticky')) return;
         if (tool === 'text' || tool === 'sticky') {
           placeObject(point);
           return;
@@ -332,6 +404,10 @@ export function PoppinPadCanvas({ objects, tool, onCommand }: PoppinPadCanvasPro
         event.currentTarget.setPointerCapture(event.pointerId);
       }}
       onPointerMove={(event) => {
+        if (transformRef.current) {
+          applyTransform(event);
+          return;
+        }
         if (!draft) return;
         const point = pointFromEvent(event);
         if (draft.kind === 'stroke') {
@@ -341,11 +417,15 @@ export function PoppinPadCanvas({ objects, tool, onCommand }: PoppinPadCanvasPro
         setDraft({ ...draft, current: point });
       }}
       onPointerUp={() => {
+        transformRef.current = null;
         if (!draft) return;
         finishDraft(draft);
         setDraft(null);
       }}
-      onPointerCancel={() => setDraft(null)}
+      onPointerCancel={() => {
+        transformRef.current = null;
+        setDraft(null);
+      }}
     >
       <svg className="poppin-pad-svg" aria-hidden="true">
         {mergedObjects.filter((object) => object.kind === 'stroke').map((object) => {
@@ -386,6 +466,29 @@ export function PoppinPadCanvas({ objects, tool, onCommand }: PoppinPadCanvasPro
         </defs>
       </svg>
 
+      {mergedObjects.filter((object) => object.kind === 'stroke' || object.kind === 'arrow' || object.kind === 'rect').map((object) => {
+        const box = padObjectBounds(object);
+        const selected = selectedId === object.id;
+        return (
+          <div
+            key={`${object.id}-hit`}
+            className={`poppin-pad-shape ${selected ? 'poppin-pad-shape-selected' : ''}`}
+            data-pad-object={object.id}
+            style={{ left: box.x, top: box.y, width: box.width, height: box.height, zIndex: object.zIndex }}
+            onPointerDown={(event) => {
+              if (event.button !== 0 || tool !== 'select') return;
+              const mode = (event.target as HTMLElement).dataset.handle === 'resize' ? 'resize' : 'move';
+              beginTransform(object, event, mode);
+            }}
+            onPointerMove={(event) => applyTransform(event)}
+            onPointerUp={() => { transformRef.current = null; }}
+            onPointerCancel={() => { transformRef.current = null; }}
+          >
+            {selected ? <button type="button" className="poppin-pad-card-resize" data-handle="resize" aria-label="Resize shape" /> : null}
+          </div>
+        );
+      })}
+
       {mergedObjects.filter((object) => object.kind === 'text').map((object) => {
         const payload = object.payload as { text: string; fontSize: number; color: string };
         const editing = activeEditingId === object.id;
@@ -393,10 +496,18 @@ export function PoppinPadCanvas({ objects, tool, onCommand }: PoppinPadCanvasPro
           <div
             key={object.id}
             data-pad-object={object.id}
-            className="poppin-pad-text"
-            style={{ left: object.x, top: object.y, fontSize: payload.fontSize, color: payload.color, zIndex: object.zIndex }}
-            draggable={!editing}
+            className={`poppin-pad-text ${selectedId === object.id ? 'poppin-pad-shape-selected' : ''}`}
+            style={{ left: object.x, top: object.y, width: object.width, fontSize: payload.fontSize, color: payload.color, zIndex: object.zIndex }}
+            draggable={!editing && tool !== 'select'}
             onDragStart={(event) => event.dataTransfer.setData('application/x-poppin-pad-attachment', object.id)}
+            onPointerDown={(event) => {
+              if (editing || event.button !== 0 || tool !== 'select') return;
+              const mode = (event.target as HTMLElement).dataset.handle === 'resize' ? 'resize' : 'move';
+              beginTransform(object, event, mode);
+            }}
+            onPointerMove={(event) => applyTransform(event)}
+            onPointerUp={() => { transformRef.current = null; }}
+            onPointerCancel={() => { transformRef.current = null; }}
             onDoubleClick={(event) => {
               event.stopPropagation();
               beginEdit(object.id, payload.text);
@@ -429,6 +540,7 @@ export function PoppinPadCanvas({ objects, tool, onCommand }: PoppinPadCanvasPro
             ) : (
               payload.text
             )}
+            {selectedId === object.id && !editing ? <button type="button" className="poppin-pad-card-resize" data-handle="resize" aria-label="Resize text" /> : null}
           </div>
         );
       })}
@@ -440,10 +552,18 @@ export function PoppinPadCanvas({ objects, tool, onCommand }: PoppinPadCanvasPro
           <div
             key={object.id}
             data-pad-object={object.id}
-            className="poppin-pad-sticky"
+            className={`poppin-pad-sticky ${selectedId === object.id ? 'poppin-pad-shape-selected' : ''}`}
             style={{ left: object.x, top: object.y, width: object.width, height: object.height, background: payload.color, zIndex: object.zIndex }}
-            draggable={!editing}
+            draggable={!editing && tool !== 'select'}
             onDragStart={(event) => event.dataTransfer.setData('application/x-poppin-pad-attachment', object.id)}
+            onPointerDown={(event) => {
+              if (editing || event.button !== 0 || tool !== 'select') return;
+              const mode = (event.target as HTMLElement).dataset.handle === 'resize' ? 'resize' : 'move';
+              beginTransform(object, event, mode);
+            }}
+            onPointerMove={(event) => applyTransform(event)}
+            onPointerUp={() => { transformRef.current = null; }}
+            onPointerCancel={() => { transformRef.current = null; }}
             onDoubleClick={(event) => {
               event.stopPropagation();
               beginEdit(object.id, payload.text);
@@ -472,6 +592,7 @@ export function PoppinPadCanvas({ objects, tool, onCommand }: PoppinPadCanvasPro
             ) : (
               payload.text || 'Note'
             )}
+            {selectedId === object.id && !editing ? <button type="button" className="poppin-pad-card-resize" data-handle="resize" aria-label="Resize sticky" /> : null}
           </div>
         );
       })}

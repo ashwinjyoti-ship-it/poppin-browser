@@ -70,6 +70,11 @@ export function TaskTabView({ taskSnapshot, workspace, browserAgentSnapshot, onT
             <button type="button" className="secondary-button" onClick={() => { void onTaskCommand({ type: 'refreshConnection' }); }}>Reconnect</button>
           </p>
         ) : null}
+        {browserAgentSnapshot?.taskSpace && onBrowserAgentCommand ? (
+          <div className="task-agent-controls">
+            <BrowserUseView snapshot={browserAgentSnapshot} onCommand={onBrowserAgentCommand} />
+          </div>
+        ) : null}
         {task.kind === 'work' ? (
           <WorkThread
             task={task}
@@ -79,7 +84,7 @@ export function TaskTabView({ taskSnapshot, workspace, browserAgentSnapshot, onT
           />
         ) : null}
         {isLive
-          ? <LiveView task={task} browserAgent={browserAgentSnapshot} onBrowserAgentCommand={onBrowserAgentCommand} onTaskCommand={onTaskCommand} />
+          ? <LiveView task={task} browserAgent={browserAgentSnapshot} onBrowserAgentCommand={undefined} onTaskCommand={onTaskCommand} />
           : task.kind === 'code'
             ? <CodeReview task={task} workspace={workspace} onCommand={onTaskCommand} />
             : null}
@@ -173,12 +178,21 @@ function BrowserUseView({ snapshot, onCommand }: { snapshot?: BrowserAgentSnapsh
           {taskSpace ? (
             <span className={`ownership-pill ownership-pill-${ownership}`} aria-label={ownershipLabel}>{ownershipLabel}</span>
           ) : null}
-          <span className={`task-state browser-state-${snapshot?.state ?? 'idle'}`}>{snapshot?.taskSpace?.status ?? snapshot?.state ?? 'idle'}</span>
+          <span className={`task-state browser-state-${snapshot?.state ?? 'idle'}`} aria-hidden="true">{snapshot?.taskSpace?.status ?? snapshot?.state ?? 'idle'}</span>
         </div>
       </div>
       {!taskSpace ? <p className="context-note">This task is using frozen context only. Eligible browser-use tasks create Agent Tabs automatically.</p> : null}
       {taskSpace ? <p className="context-note">{taskSpace.contextTabIds.length} context · {taskSpace.explorationTabIds.length} exploration · {snapshot?.watching ? 'Live browser view' : 'Working in background'}</p> : null}
-      {taskSpace ? <div className="browser-controls"><button type="button" onClick={() => { void onCommand({ type: 'watch' }); }}>{snapshot?.watching ? 'Watching live' : 'Return to live view'}</button>{canControl ? <button type="button" onClick={() => { void onCommand({ type: 'pause' }); }}>Pause</button> : null}{canControl ? <button type="button" onClick={() => { void onCommand({ type: 'takeOver' }); }}>Take over</button> : null}{snapshot?.state === 'paused' ? <button type="button" onClick={() => { void onCommand({ type: 'resume' }); }}>Resume agent</button> : null}{!canCleanUp ? <button type="button" onClick={() => { void onCommand({ type: 'setKeepTabs', keep: !taskSpace.kept }); }}>{taskSpace.kept ? 'Close tabs after task' : 'Keep tabs after task'}</button> : null}{!canCleanUp ? <button type="button" onClick={() => { void onCommand({ type: 'stop' }); }}>Stop</button> : null}</div> : null}
+      {taskSpace ? (
+        <div className="browser-controls" role="group" aria-label="Agent Tab controls">
+          <button type="button" className="secondary-button" onClick={() => { void onCommand({ type: 'watch' }); }}>{snapshot?.watching ? 'Watching live' : 'Return to live view'}</button>
+          {canControl ? <button type="button" className="secondary-button" onClick={() => { void onCommand({ type: 'pause' }); }}>Pause</button> : null}
+          {canControl ? <button type="button" className="secondary-button" onClick={() => { void onCommand({ type: 'takeOver' }); }}>Take over</button> : null}
+          {snapshot?.state === 'paused' ? <button type="button" className="secondary-button" onClick={() => { void onCommand({ type: 'resume' }); }}>Resume agent</button> : null}
+          {!canCleanUp ? <button type="button" className="secondary-button" onClick={() => { void onCommand({ type: 'setKeepTabs', keep: !taskSpace.kept }); }}>{taskSpace.kept ? 'Close tabs after task' : 'Keep tabs after task'}</button> : null}
+          {!canCleanUp ? <button type="button" className="secondary-button" onClick={() => { void onCommand({ type: 'stop' }); }}>Stop</button> : null}
+        </div>
+      ) : null}
       {canCleanUp ? <div className="browser-controls browser-cleanup-controls"><button type="button" className="primary-button" onClick={() => { void onCommand({ type: 'closeTaskTabs' }); }}>Close task tabs</button>{taskSpace && !taskSpace.kept ? <button type="button" onClick={() => { void onCommand({ type: 'keepTabs' }); }}>Keep tabs</button> : null}</div> : null}
       {snapshot?.log.length ? <AutomationFilmstrip log={snapshot.log} /> : null}
     </section>

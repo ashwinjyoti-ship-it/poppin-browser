@@ -152,6 +152,14 @@ async function setup({ withProject = true, withBrowserAgent = false, withTabCont
         getBrowserAgentSnapshot: () => browserSnapshot,
         executeBrowserAgentCommand: browserCommand,
         getBrowsableTabs: () => browsableTabs,
+        getSearchEngineHomeUrl: () => 'https://www.google.com/',
+        clearSelectedContext: async () => {
+          for (const context of workspaceStore.listTabContexts()) workspaceStore.removeTabContext(context.tabId);
+          for (const document of workspaceStore.listDocuments().filter((item) => item.selected)) {
+            workspaceStore.setDocumentContext(document.id, false, null, false);
+          }
+          return { ok: true };
+        },
       } : {}),
     },
   );
@@ -488,7 +496,7 @@ describe('task engine', () => {
     expect(fake.prompt).toContain('POPPIN ENVIRONMENT');
     const environment = JSON.parse(fake.prompt.split('POPPIN ENVIRONMENT (what you can actually read and control right now)\n')[1]!.split('\n\nSELECTED CONTEXT')[0]!) as Record<string, unknown>;
     expect(environment).toMatchObject({
-      browser: { state: 'agent_controlling', taskSpaceId: 'space-1', mode: 'exploration' },
+      browser: { state: 'agent_controlling', taskSpaceId: 'space-1', mode: 'selected-tab' },
       tandem: { available: false, read: false, write: false },
       project: { connected: false },
       context: { items: 1, kinds: ['browser-tab'] },
@@ -498,8 +506,24 @@ describe('task engine', () => {
     workspaceStore.close();
   });
 
-  it('asks before starting when live web access is uncertain and context was supplied', async () => {
+  it('starts mixed Agent Tabs on selected tabs instead of asking when live work is needed', async () => {
     const { engine, browserCommand, taskStore, workspaceStore } = await setup({ withProject: false, withBrowserAgent: true, withTabContext: true });
+    const started = await engine.execute({
+      type: 'startTask', prompt: 'Compare the two options and recommend one.', model: 'gpt-test', reasoningEffort: 'high', kind: 'work',
+    });
+    expect(started).toEqual({ ok: true });
+    expect(browserCommand).toHaveBeenCalledWith(expect.objectContaining({ type: 'start', mode: 'mixed', tabIds: ['tab-1'] }));
+    await engine.close();
+    taskStore.close();
+    workspaceStore.close();
+  });
+
+  it('asks before starting when live web access is uncertain and only documents were supplied', async () => {
+    const { engine, browserCommand, taskStore, workspaceStore } = await setup({ withProject: false, withBrowserAgent: true, withTabContext: false });
+    workspaceStore.upsertDocument({
+      id: 'doc-1', name: 'brief.md', path: '/tmp/brief.md', sizeBytes: 12, capturedText: 'Two options', truncated: false,
+    });
+    workspaceStore.setDocumentContext('doc-1', true, 'Two options', false);
     const asked = await engine.execute({
       type: 'startTask', prompt: 'Compare the two options and recommend one.', model: 'gpt-test', reasoningEffort: 'high', kind: 'work',
     });
@@ -517,13 +541,41 @@ describe('task engine', () => {
     workspaceStore.close();
   });
 
+  it('clears selected workspace context when starting a new task', async () => {
+    const { engine, fake, taskStore, workspaceStore } = await setup({
+      withProject: false, withBrowserAgent: true, withTabContext: true,
+    });
+    workspaceStore.upsertDocument({
+      id: 'doc-1', name: 'brief.md', path: '/tmp/brief.md', sizeBytes: 12, capturedText: 'Notes', truncated: false,
+    });
+    workspaceStore.setDocumentContext('doc-1', true, 'Notes', false);
+    await engine.execute({
+      type: 'startTask', prompt: 'Summarise this supplied document.', model: 'gpt-test', reasoningEffort: 'high', kind: 'work',
+    });
+    fake.emit('notification', { method: 'item/agentMessage/delta', params: { threadId: 'thread-1', turnId: 'turn-1', itemId: 'message-1', delta: 'Summary.' } });
+    fake.emit('notification', { method: 'turn/completed', params: { threadId: 'thread-1', turn: { id: 'turn-1', status: 'completed', error: null } } });
+    await vi.waitFor(() => expect(engine.getSnapshot().task).toMatchObject({ state: 'Completed' }));
+    expect(workspaceStore.listTabContexts()).toHaveLength(1);
+    expect(workspaceStore.listDocuments()[0]?.selected).toBe(true);
+    expect(await engine.execute({ type: 'finishTask' })).toEqual({ ok: true, message: 'Ready for a new task.' });
+    expect(workspaceStore.listTabContexts()).toEqual([]);
+    expect(workspaceStore.listDocuments()[0]?.selected).toBe(false);
+    await engine.close();
+    taskStore.close();
+    workspaceStore.close();
+  });
+
   it('starts browsing without asking when the uncertain request has no supplied context', async () => {
     const { engine, browserCommand, taskStore, workspaceStore } = await setup({ withProject: false, withBrowserAgent: true, withTabContext: false });
     const started = await engine.execute({
       type: 'startTask', prompt: 'Compare the two options and recommend one.', model: 'gpt-test', reasoningEffort: 'high', kind: 'work',
     });
     expect(started).toEqual({ ok: true });
-    expect(browserCommand).toHaveBeenCalledWith(expect.objectContaining({ type: 'start', mode: 'browser-only' }));
+    expect(browserCommand).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'start',
+      mode: 'browser-only',
+      url: 'https://www.google.com/',
+    }));
     expect(engine.getSnapshot().task).toMatchObject({ browserRun: expect.objectContaining({ required: true }) });
     await engine.close();
     taskStore.close();
@@ -575,6 +627,7 @@ describe('task engine', () => {
     ]));
     expect(await engine.execute({ type: 'finishTask' })).toEqual({ ok: true, message: 'Ready for a new task.' });
     expect(engine.getSnapshot().task).toBeNull();
+    expect(workspaceStore.listTabContexts()).toEqual([]);
     await engine.close();
     taskStore.close();
     workspaceStore.close();

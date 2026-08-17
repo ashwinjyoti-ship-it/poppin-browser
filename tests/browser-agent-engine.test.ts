@@ -70,12 +70,19 @@ function setup() {
 }
 
 describe('BrowserAgentEngine', () => {
+  it('watches the first context clone when mixed work has selected tabs', async () => {
+    const { engine, pages } = setup();
+    expect(await engine.execute({ type: 'start', taskId: 'task-1', mode: 'mixed', tabIds: ['approved'] })).toMatchObject({ ok: true });
+    expect(engine.getSnapshot().activeTabId).toBe('agent-approved');
+    expect(pages.activated[0]).toBe('agent-approved');
+  });
+
   it('limits every action to explicitly approved tabs and revokes access on stop', async () => {
     const { engine, pages } = setup();
     expect(await engine.execute({ type: 'start', taskId: 'task-1', mode: 'mixed', tabIds: ['approved'] })).toMatchObject({ ok: true });
     expect(engine.getSnapshot().taskSpace).toMatchObject({
       mode: 'mixed', tabIds: ['agent-approved', 'agent-exploration'],
-      contextTabIds: ['agent-approved'], explorationTabIds: ['agent-exploration'], activeTabId: 'agent-exploration',
+      contextTabIds: ['agent-approved'], explorationTabIds: ['agent-exploration'], activeTabId: 'agent-approved',
     });
     expect(pages.tabs).toEqual(new Set(['approved', 'other', 'agent-approved', 'agent-exploration']));
     const denied = await agentAct(engine, { type: 'read' }, 'other');
@@ -117,15 +124,15 @@ describe('BrowserAgentEngine', () => {
     const { engine, pages } = setup();
     await engine.execute({ type: 'start', taskId: 'task-1', mode: 'mixed', tabIds: ['approved'] });
     expect(engine.getSnapshot().watching).toBe(true);
-    expect(pages.activated).toEqual(['agent-exploration']);
+    expect(pages.activated).toEqual(['agent-approved']);
     expect((await agentAct(engine, { type: 'read' }, 'agent-approved')).ok).toBe(true);
-    expect(pages.activated).toEqual(['agent-exploration', 'agent-approved']);
+    expect(pages.activated).toEqual(['agent-approved', 'agent-approved']);
     expect(await engine.execute({ type: 'leaveWatch' })).toEqual({ ok: true });
     expect(engine.getSnapshot()).toMatchObject({ state: 'running', watching: false });
     expect((await agentAct(engine, { type: 'read' }, 'agent-exploration')).ok).toBe(true);
-    expect(pages.activated).toEqual(['agent-exploration', 'agent-approved']);
+    expect(pages.activated).toEqual(['agent-approved', 'agent-approved']);
     expect(await engine.execute({ type: 'watch' })).toEqual({ ok: true });
-    expect(pages.activated).toEqual(['agent-exploration', 'agent-approved', 'agent-exploration']);
+    expect(pages.activated).toEqual(['agent-approved', 'agent-approved', 'agent-exploration']);
   });
 
   it('retains task-owned tabs after successful completion so a follow-up can resume them', async () => {
