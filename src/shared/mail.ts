@@ -118,12 +118,24 @@ export function mailContextTabIds(
   });
 }
 
+/** Inbox URL for a Microsoft Outlook on the web host, or null. */
+export function outlookWebInboxUrl(hostname: string): string | null {
+  const host = hostname.toLowerCase();
+  if (host === 'outlook.cloud.microsoft' || host.endsWith('.outlook.cloud.microsoft')) {
+    return 'https://outlook.cloud.microsoft/mail/';
+  }
+  if (host === 'outlook.office.com' || host === 'outlook.office365.com') {
+    return `https://${host}/mail/`;
+  }
+  if (host === 'outlook.live.com' || host.endsWith('.outlook.com')) {
+    return 'https://outlook.live.com/mail/';
+  }
+  return null;
+}
+
 export function isMailboxHost(hostname: string): boolean {
   const host = hostname.toLowerCase();
-  return host === 'outlook.live.com'
-    || host.endsWith('.outlook.com')
-    || host === 'outlook.office.com'
-    || host === 'outlook.office365.com'
+  return Boolean(outlookWebInboxUrl(host))
     || host.endsWith('.office.com')
     || host === 'mail.google.com'
     || host === 'app.fastmail.com';

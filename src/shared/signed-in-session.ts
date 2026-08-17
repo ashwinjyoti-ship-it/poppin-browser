@@ -4,6 +4,8 @@
  * share `persist:poppin-browser`, so opening the same origin is enough.
  */
 
+import { outlookWebInboxUrl } from './mail';
+
 const IDENTITY_PROVIDER_HOSTS = new Set([
   'accounts.google.com',
   'appleid.apple.com',
@@ -77,9 +79,8 @@ function knownAppUrlForIdentityProvider(value: string): string | null {
     const target = new URL(value);
     const host = target.hostname.toLowerCase();
     if (host === 'login.microsoftonline.com' || host === 'login.live.com') return 'https://outlook.live.com/mail/';
-    if (host === 'outlook.live.com' || host.endsWith('.outlook.com')) {
-      if (/authredirect/i.test(`${target.pathname}${target.search}`)) return 'https://outlook.live.com/mail/';
-    }
+    const outlookInbox = outlookWebInboxUrl(host);
+    if (outlookInbox && /authredirect/i.test(`${target.pathname}${target.search}`)) return outlookInbox;
     if (host === 'accounts.google.com' || (host === 'mail.google.com' && /authredirect/i.test(`${target.pathname}${target.search}`))) {
       return 'https://mail.google.com/mail/u/0/#inbox';
     }

@@ -8,6 +8,7 @@ import {
   Menu,
   type Input,
   type MenuItemConstructorOptions,
+  powerMonitor,
   type Rectangle,
   type Session,
   type WebContents,
@@ -39,7 +40,7 @@ import type { CapturedTabContext } from '../../shared/workspace';
 import type { VisualSelectionSnapshot } from '../../shared/workspace';
 import { HtmlFullscreenCoordinator, type HtmlFullscreenTransition } from './html-fullscreen';
 import type { BrowserAgentAction, BrowserSemanticNode, BrowserSemanticSnapshot } from '../../shared/browser-agent';
-import { classifyMailboxControl, isSignedInMailboxUrl } from '../../shared/mail';
+import { classifyMailboxControl, isSignedInMailboxUrl, outlookWebInboxUrl } from '../../shared/mail';
 import { signedInHumanUrlFor } from '../../shared/signed-in-session';
 import { showPageContextMenu } from './context-menu';
 import { DownloadManager } from './downloads';
@@ -134,6 +135,8 @@ export class BrowserEngine {
     private readonly stateStore: BrowserStateStore,
     private readonly getWindowState: () => WindowState,
   ) {
+    powerMonitor.on('resume', () => this.recoverStuckMailTabs());
+    app.on('did-become-active', () => this.recoverStuckMailTabs());
     this.window.on('resize', () => this.layoutViews());
     this.window.on('move', () => this.layoutAuthenticationWindow());
     this.window.on('enter-full-screen', () => {
@@ -184,7 +187,7 @@ export class BrowserEngine {
       : [{ id: randomUUID(), url: NEW_TAB_URL, pinned: false, groupId: null }];
     for (const tab of tabs) {
       const rawUrl = tab.surface === 'tandem-world' ? ensureTandemHostParam(tab.url) : tab.url;
-      const url = recoverMailUrlFromGoogleWidget(rawUrl) ?? rawUrl;
+      const url = persistableTabUrl(rawUrl);
       this.createTab(url, tab.id, false, { ...tab, url }, false, 'end');
       if (tab.surface === 'tandem-world') this.tandemWorldTabId = tab.id;
     }
@@ -201,6 +204,18 @@ export class BrowserEngine {
         this.emitSnapshot();
         this.scheduleSave();
       }
+    }
+  }
+
+  /** After sleep, restart, or returning to Poppin, leave a hung Outlook OAuth bridge. */
+  private recoverStuckMailTabs(): void {
+    for (const tab of this.tabs.values()) {
+      if (tab.view.webContents.isDestroyed()) continue;
+      const url = tab.view.webContents.getURL() || tab.lastExternalUrl;
+      const recovered = recoverStuckMailAuthRedirect(url);
+      if (!recovered) continue;
+      tab.lastExternalUrl = recovered;
+      void tab.view.webContents.loadURL(recovered).catch(() => undefined);
     }
   }
 
@@ -908,7 +923,7 @@ export class BrowserEngine {
         const tab = this.tabs.get(id);
         return tab ? [{
           id: tab.snapshot.id,
-          url: (recoverMailUrlFromGoogleWidget(tab.lastExternalUrl) ?? tab.lastExternalUrl) || NEW_TAB_URL,
+          url: persistableTabUrl(tab.lastExternalUrl || NEW_TAB_URL),
           pinned: tab.snapshot.pinned,
           groupId: tab.snapshot.groupId,
           taskSpaceId: tab.snapshot.taskSpaceId,
@@ -1114,11 +1129,6 @@ export class BrowserEngine {
         }
         return;
       }
-      if (isAuthenticationRedirectInterstitial(url)) {
-        event.preventDefault();
-        const recovered = recoverMailInboxFromAuthRedirect(url);
-        if (recovered) void contents.loadURL(recovered).catch(() => undefined);
-      }
     });
     contents.on('before-input-event', (event, input) => {
       if (this.handleShortcut(input)) event.preventDefault();
@@ -1134,7 +1144,12 @@ export class BrowserEngine {
     contents.on('did-start-loading', () => this.updateTab(tab, { isLoading: true, failure: null }));
     contents.on('did-stop-loading', () => {
       this.syncNavigationState(tab);
-      this.updateTab(tab, { isLoading: false });
+      const liveTitle = contents.getTitle();
+      const pageUrl = contents.getURL();
+      const title = pageUrl.startsWith('poppin://')
+        ? tab.snapshot.title
+        : resolvedBrowserTabTitle(tab.snapshot.title, liveTitle, pageUrl);
+      this.updateTab(tab, { isLoading: false, title });
     });
     contents.on('dom-ready', () => {
       this.applyLinkOpeningPreference(tab);
@@ -1284,7 +1299,8 @@ export class BrowserEngine {
 
   private maybeCompleteAuthentication(url: string): void {
     if (!this.authenticationOpenerTabId || !this.authenticationOpenerUrl) return;
-    if (!isAuthenticationCompletionUrl(url, this.authenticationOpenerUrl)) return;
+    const complete = isAuthenticationCompletionUrl(url, this.authenticationOpenerUrl);
+    if (!complete) return;
     const tabId = this.authenticationOpenerTabId;
     this.authenticationOpenerTabId = null;
     this.authenticationOpenerUrl = '';
@@ -2197,14 +2213,51 @@ export function recoverMailInboxFromAuthRedirect(value: string): string | null {
   try {
     const target = new URL(value);
     if (!/authredirect/i.test(`${target.pathname}${target.search}`)) return null;
-    if (target.hostname === 'outlook.live.com' || target.hostname.endsWith('.outlook.com')) {
-      return 'https://outlook.live.com/mail/';
-    }
+    const outlookInbox = outlookWebInboxUrl(target.hostname);
+    if (outlookInbox) return outlookInbox;
     if (target.hostname === 'mail.google.com') return 'https://mail.google.com/mail/u/0/#inbox';
     return null;
   } catch {
     return null;
   }
+}
+
+/** True when MSAL is still exchanging an auth code — do not hijack that navigation. */
+export function isInFlightMailOAuthRedirect(value: string): boolean {
+  try {
+    const target = new URL(value);
+    return /(?:^|[?&#])(?:code|error)=/.test(`${target.search}${target.hash}`);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Inbox URL for a hung Outlook/Gmail bridge (sleep, restart, dormant tab).
+ * Live logins that still carry `code=` or `error=` are left alone.
+ */
+export function recoverStuckMailAuthRedirect(value: string): string | null {
+  if (isInFlightMailOAuthRedirect(value)) return null;
+  return recoverMailInboxFromAuthRedirect(value);
+}
+
+/** Session restore / persist should not reopen a hung OAuth bridge or Gmail widget. */
+export function persistableTabUrl(value: string): string {
+  return recoverMailUrlFromGoogleWidget(value) ?? recoverStuckMailAuthRedirect(value) ?? value;
+}
+
+/** Prefer Chromium's live title over the createTab placeholder after the page has painted. */
+export function resolvedBrowserTabTitle(snapshotTitle: string, liveTitle: string, url: string): string {
+  const live = liveTitle.trim();
+  if (live && live !== 'Loading…') return live;
+  if (snapshotTitle && snapshotTitle !== 'Loading…') return snapshotTitle;
+  try {
+    const host = new URL(url).hostname;
+    if (host) return host;
+  } catch {
+    // Ignore invalid URLs and fall through.
+  }
+  return live || 'Untitled';
 }
 
 export function isAuthenticationPopup(value: string, openerValue: string): boolean {

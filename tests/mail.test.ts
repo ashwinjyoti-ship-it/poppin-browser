@@ -12,6 +12,7 @@ import {
   mailInboxTabId,
   mailOrdinaryInboxTabId,
   normalizeMailInboxUrl,
+  outlookWebInboxUrl,
   sanitizeMailSkillName,
   sanitizeMailSkillRule,
   shouldApplyMailPolicy,
@@ -88,6 +89,9 @@ describe('Poppin Mail helpers', () => {
     expect(isSignedInMailboxUrl('https://login.microsoftonline.com/common/oauth2')).toBe(false);
     expect(isSignedInMailboxUrl('https://outlook.live.com/mail/u/0/', 'https://outlook.live.com/mail/')).toBe(true);
     expect(isSignedInMailboxUrl('https://mail.google.com/mail/u/0/#inbox', 'https://outlook.live.com/mail/')).toBe(false);
+    expect(outlookWebInboxUrl('outlook.cloud.microsoft')).toBe('https://outlook.cloud.microsoft/mail/');
+    expect(isSignedInMailboxUrl('https://outlook.cloud.microsoft/mail/')).toBe(true);
+    expect(isSignedInMailboxUrl('https://outlook.cloud.microsoft/mail/oauthRedirect.html')).toBe(false);
     expect(classifyMailboxControl('Search')).toBe('ordinary');
     expect(classifyMailboxControl('Deleted Items')).toBe('ordinary');
     expect(classifyMailboxControl('Sign in with a different account')).toBe('ordinary');
