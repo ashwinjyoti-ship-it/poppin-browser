@@ -135,6 +135,8 @@ export class WorkspaceEngine {
       case 'clearVisualSelection':
         this.store.clearVisualSelection();
         break;
+      case 'clearSelectedContext':
+        return await this.clearSelectedContext();
       case 'addProject':
         return this.addProject(command.source);
       case 'chooseProjectFolder':
@@ -217,6 +219,27 @@ export class WorkspaceEngine {
     this.store.insertContextPack(pack);
     this.emitSnapshot();
     return { ok: true, message: `Saved context pack "${pack.name}".` };
+  }
+
+  private async clearSelectedContext(): Promise<WorkspaceCommandResult> {
+    for (const context of this.store.listTabContexts()) this.store.removeTabContext(context.tabId);
+    for (const document of this.store.listDocuments().filter((item) => item.selected)) {
+      this.store.setDocumentContext(document.id, false, null, false);
+    }
+    this.store.clearVisualSelection();
+    this.store.setMemorySelected(false);
+    if (this.pagesStore) {
+      for (const pageId of this.pagesStore.listSelectedPageIds()) this.pagesStore.setPageSelected(pageId, false);
+      this.onPagesChanged?.();
+    }
+    const tandemPages = this.getTandemContexts?.() ?? [];
+    if (this.options.setTandemPageSelected) {
+      for (const page of tandemPages) {
+        await this.options.setTandemPageSelected(page.pageId, false);
+      }
+    }
+    this.emitSnapshot();
+    return { ok: true, message: 'Selected context was cleared.' };
   }
 
   private async applyContextPack(packId: string): Promise<WorkspaceCommandResult> {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { NEW_TAB_URL, normalizeAddressInput, normalizeTabInput } from '../src/main/browser/url-input';
+import { NEW_TAB_URL, newTabSearchForm, normalizeAddressInput, normalizeTabInput, searchEngineHomeUrl } from '../src/main/browser/url-input';
 
 describe('normalizeAddressInput', () => {
   it('opens the branded new-tab page for empty input', () => {
@@ -29,8 +29,15 @@ describe('normalizeAddressInput', () => {
     });
   });
 
-  it('searches DuckDuckGo for plain text', () => {
+  it('searches Google for plain text by default', () => {
     expect(normalizeAddressInput('calm browser design')).toEqual({
+      kind: 'search',
+      url: 'https://www.google.com/search?q=calm%20browser%20design',
+    });
+  });
+
+  it('can use DuckDuckGo as the selected search engine', () => {
+    expect(normalizeAddressInput('calm browser design', 'duckduckgo')).toEqual({
       kind: 'search',
       url: 'https://duckduckgo.com/?q=calm%20browser%20design',
     });
@@ -52,5 +59,17 @@ describe('normalizeAddressInput', () => {
 
   it('does not restore the retired internal result page', () => {
     expect(normalizeTabInput('poppin://task/current/result')).toMatchObject({ kind: 'invalid' });
+  });
+
+  it('points the new-tab form at the configured search engine', () => {
+    expect(newTabSearchForm('google')).toEqual({
+      action: 'https://www.google.com/search',
+      formActionOrigin: 'https://www.google.com',
+    });
+    expect(newTabSearchForm('duckduckgo')).toEqual({
+      action: 'https://duckduckgo.com/',
+      formActionOrigin: 'https://duckduckgo.com',
+    });
+    expect(searchEngineHomeUrl('google')).toBe('https://www.google.com/');
   });
 });

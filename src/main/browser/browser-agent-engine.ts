@@ -203,17 +203,19 @@ export class BrowserAgentEngine {
     }
     const explorationTabIds = [explorationTabId];
     const tabIds = [...contextTabIds, ...explorationTabIds];
+    const activeTabId = contextTabIds[0] ?? explorationTabId;
     const now = new Date().toISOString();
     const taskSpace: BrowserTaskSpace = {
       id, taskId, name: name?.trim().slice(0, 80) || 'Browser task', mode, owner: 'agent', status: 'agent-controlling',
-      tabIds, contextTabIds, explorationTabIds, activeTabId: explorationTabId, createdAt: now, updatedAt: now, kept: false,
+      tabIds, contextTabIds, explorationTabIds, activeTabId, createdAt: now, updatedAt: now, kept: false,
     };
     this.controlEpoch += 1;
     this.latestSnapshotByTab.clear();
-    const watching = this.pages.watchTaskSpace(id, explorationTabId);
-    this.snapshot = { ...emptySnapshot(), state: 'running', taskId, taskSpace, watching, allowedTabIds: tabIds, activeTabId: explorationTabId };
+    const watching = this.pages.watchTaskSpace(id, activeTabId);
+    this.snapshot = { ...emptySnapshot(), state: 'running', taskId, taskSpace, watching, allowedTabIds: tabIds, activeTabId };
     const seedDetail = seedUrl ? ` Exploration opened at ${seedUrl}.` : '';
-    this.append('', 'Agent Tabs started', tabIds.join(', '), 'completed', `${contextTabIds.length} context clone(s) and 1 fresh exploration tab created; source tabs were unchanged.${seedDetail}`);
+    const watchDetail = contextTabIds[0] ? ' Live view starts on the first selected-context clone.' : '';
+    this.append('', 'Agent Tabs started', tabIds.join(', '), 'completed', `${contextTabIds.length} context clone(s) and 1 fresh exploration tab created; source tabs were unchanged.${seedDetail}${watchDetail}`);
     await this.persist();
     this.emit();
     return { ok: true, data: JSON.stringify({ taskSpaceId: id, mode, contextTabIds, explorationTabIds, url: seedUrl ?? null }) };

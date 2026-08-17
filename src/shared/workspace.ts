@@ -140,6 +140,8 @@ export type WorkspaceCommand =
   | { type: 'refreshTabContext'; tabId: string }
   | { type: 'captureVisualSelection'; tabId: string }
   | { type: 'clearVisualSelection' }
+  /** Clears every explicit context checkbox without deleting documents, packs, or tabs. */
+  | { type: 'clearSelectedContext' }
   /** Free-form local path or Git URL; main detects which and completes the flow. */
   | { type: 'addProject'; source: string }
   /** Opens a folder picker, then connects or initializes that folder. */

@@ -1,6 +1,8 @@
 import { protocol, type Session } from 'electron';
 
+import type { SearchEnginePreference } from '../../shared/browser';
 import { escapeHtml } from './safe-html';
+import { newTabSearchForm } from './url-input';
 
 export function registerInternalScheme(): void {
   protocol.registerSchemesAsPrivileged([
@@ -11,14 +13,15 @@ export function registerInternalScheme(): void {
   ]);
 }
 
-export function handleInternalPages(browserSession: Session): void {
+export function handleInternalPages(browserSession: Session, getSearchEngine?: () => SearchEnginePreference): void {
   if (browserSession.protocol.isProtocolHandled('poppin')) return;
   browserSession.protocol.handle('poppin', (request) => {
     const url = new URL(request.url);
+    const searchEngine = getSearchEngine?.() ?? 'google';
     if (url.hostname === 'error') {
-      return htmlResponse(renderErrorPage(url));
+      return htmlResponse(renderErrorPage(url), searchEngine);
     }
-    return htmlResponse(renderNewTabPage());
+    return htmlResponse(renderNewTabPage(searchEngine), searchEngine);
   });
 }
 
@@ -27,16 +30,8 @@ export function errorPageUrl(url: string, code: number, description: string): st
   return `poppin://error/?${params.toString()}`;
 }
 
-function htmlResponse(body: string): Response {
-  return new Response(body, {
-    headers: {
-      'content-type': 'text/html; charset=utf-8',
-      'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; img-src poppin: data:; form-action https://duckduckgo.com",
-    },
-  });
-}
-
-function renderNewTabPage(): string {
+export function renderNewTabPage(searchEngine: SearchEnginePreference = 'google'): string {
+  const form = newTabSearchForm(searchEngine);
   return pageShell(`
     <main class="new-tab">
       <div class="orbit" aria-hidden="true">
@@ -46,7 +41,7 @@ function renderNewTabPage(): string {
       </div>
       <h1>Where would you like to go?</h1>
       <p>Browse with a little more breathing room.</p>
-      <form method="get" action="https://duckduckgo.com/">
+      <form method="get" action="${form.action}">
         <label>
           <span aria-hidden="true">⌕</span>
           <input name="q" autocomplete="off" autofocus placeholder="Search the web" aria-label="Search the web" />
@@ -54,6 +49,16 @@ function renderNewTabPage(): string {
       </form>
     </main>
   `, 'New Tab');
+}
+
+function htmlResponse(body: string, searchEngine: SearchEnginePreference): Response {
+  const form = newTabSearchForm(searchEngine);
+  return new Response(body, {
+    headers: {
+      'content-type': 'text/html; charset=utf-8',
+      'content-security-policy': `default-src 'none'; style-src 'unsafe-inline'; img-src poppin: data:; form-action ${form.formActionOrigin}`,
+    },
+  });
 }
 
 function renderErrorPage(url: URL): string {

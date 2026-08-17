@@ -17,7 +17,7 @@ import { WorkspacePane } from './WorkspacePane';
 import { TaskTabView } from './TaskTabView';
 import { AgentDock } from './AgentDock';
 import { PoppinPadPane } from './PoppinPadPane';
-import { CommandBar } from './CommandBar';
+import { CommandBar, CollapsedCommandControl } from './CommandBar';
 import { PaneResizer } from './PaneResizer';
 import { NativePageView } from './NativePageView';
 import { NativeDatabaseView } from './NativeDatabaseView';
@@ -31,6 +31,7 @@ import { isReusableMailAgentSession, mailInboxTabId } from '../../shared/mail';
 import {
   browserLeftInset,
   browserRightInset,
+  browserBottomInset,
   clampResizedLeftPaneWidth,
   clampResizedRightPaneWidth,
   COLLAPSED_RAIL_WIDTH,
@@ -302,7 +303,11 @@ export function App() {
     const topInset = chromeHeight + (urlOverlayOpen ? 280 : 0) + (tabSearchOpen ? TAB_SEARCH_RESULTS_INSET : 0);
     const leftInset = browserLeftInset(leftPaneWidth, layoutWorkspaceCollapsed);
     const rightInset = browserRightInset(effectiveRightPaneWidth, downloadsOpen);
-    const bottomInset = commandCollapsed ? 64 : 94 + commandOverlayHeight + agentDockHeight;
+    const bottomInset = browserBottomInset({
+      commandCollapsed,
+      commandOverlayHeight,
+      agentDockHeight,
+    });
     void window.poppinBrowser.command({
       type: 'setLayout',
       // The address suggestions dropdown spans near the full width under the
@@ -540,6 +545,12 @@ export function App() {
             }}
             onSettingsOpenChange={(open) => { void window.poppinSettings.command({ type: open ? 'open' : 'close' }); }}
             onSubmit={submitAddress}
+            commandSlot={commandCollapsed ? (
+              <CollapsedCommandControl
+                running={taskSnapshot.task?.state === 'Running'}
+                onOpen={() => setCommandCollapsed(false)}
+              />
+            ) : null}
             downloadsSlot={
               <DownloadsPopover
                 snapshot={downloadsSnapshot}

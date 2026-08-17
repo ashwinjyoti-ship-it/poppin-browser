@@ -16,6 +16,7 @@ const DELIVERY_INTENT = /\b(push|create (?:a )?(?:pull request|pr)|merge (?:the 
 
 export interface TaskRequirementContext {
   selectedContextCount?: number;
+  selectedTabContextCount?: number;
   hasActiveBrowsableTab?: boolean;
   tandem?: { available: boolean; writable: boolean };
 }
@@ -36,6 +37,7 @@ export function inferTaskRequirements(
     prompt,
     hasProject,
     selectedContextCount: context.selectedContextCount ?? 0,
+    selectedTabContextCount: context.selectedTabContextCount ?? 0,
     hasActiveBrowsableTab: context.hasActiveBrowsableTab ?? false,
     tandem: context.tandem ?? { available: false, writable: false },
   };

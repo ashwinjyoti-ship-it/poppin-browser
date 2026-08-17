@@ -82,14 +82,7 @@ export function CommandBar({ snapshot, workspace, pad, collapsed, onCollapseChan
     return () => observer.disconnect();
   }, [browserQuestion, collapsed, error, onOverlayHeightChange, pad.pendingAttachments.length, preflight]);
 
-  if (collapsed) {
-    return (
-      <button type="button" className={`command-bar-collapsed ${snapshot.task?.state === 'Running' ? 'command-activity-running' : ''}`} onClick={() => onCollapseChange(false)} aria-label="Open Codex command bar">
-        <Brand compact />
-        <ChevronUp size={13} />
-      </button>
-    );
-  }
+  if (collapsed) return null;
 
   const start = async (kind: 'work' | 'code', useBrowser?: boolean) => {
     setSending(true);
@@ -128,6 +121,7 @@ export function CommandBar({ snapshot, workspace, pad, collapsed, onCollapseChan
     }
     const requirements = inferTaskRequirements(prompt, Boolean(workspace.project), {
       selectedContextCount: selectedContextCount(workspace),
+      selectedTabContextCount: workspace.tabContexts.length,
     });
     const needsPreflight = requirements.kind === 'code';
     if (needsPreflight && !preflight) {
@@ -284,6 +278,27 @@ export function CommandBar({ snapshot, workspace, pad, collapsed, onCollapseChan
         </section>
       ) : null}
     </form>
+  );
+}
+
+export function CollapsedCommandControl({
+  running,
+  onOpen,
+}: {
+  running: boolean;
+  onOpen: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className={`command-bar-reopen ${running ? 'command-activity-running' : ''}`}
+      onClick={onOpen}
+      aria-label="Open Codex command bar"
+      title="Open command bar"
+    >
+      <Brand compact />
+      <ChevronUp size={13} />
+    </button>
   );
 }
 

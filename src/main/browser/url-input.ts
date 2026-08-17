@@ -1,3 +1,5 @@
+import type { SearchEnginePreference } from '../../shared/browser';
+
 export const NEW_TAB_URL = 'poppin://new-tab/';
 
 const EXPLICIT_PROTOCOL = /^[a-z][a-z\d+.-]*:/i;
@@ -10,7 +12,24 @@ export type NormalizedInput =
   | { kind: 'search'; url: string }
   | { kind: 'invalid'; message: string };
 
-export function normalizeAddressInput(input: string, searchEngine: 'duckduckgo' | 'google' = 'duckduckgo'): NormalizedInput {
+export function searchEngineHomeUrl(searchEngine: SearchEnginePreference = 'google'): string {
+  return searchEngine === 'duckduckgo' ? 'https://duckduckgo.com/' : 'https://www.google.com/';
+}
+
+export function searchEngineQueryUrl(query: string, searchEngine: SearchEnginePreference = 'google'): string {
+  const encoded = encodeURIComponent(query);
+  return searchEngine === 'duckduckgo'
+    ? `https://duckduckgo.com/?q=${encoded}`
+    : `https://www.google.com/search?q=${encoded}`;
+}
+
+export function newTabSearchForm(searchEngine: SearchEnginePreference = 'google'): { action: string; formActionOrigin: string } {
+  return searchEngine === 'duckduckgo'
+    ? { action: 'https://duckduckgo.com/', formActionOrigin: 'https://duckduckgo.com' }
+    : { action: 'https://www.google.com/search', formActionOrigin: 'https://www.google.com' };
+}
+
+export function normalizeAddressInput(input: string, searchEngine: SearchEnginePreference = 'google'): NormalizedInput {
   const value = input.trim();
 
   if (!value) {
@@ -39,13 +58,11 @@ export function normalizeAddressInput(input: string, searchEngine: 'duckduckgo' 
 
   return {
     kind: 'search',
-    url: searchEngine === 'google'
-      ? `https://www.google.com/search?q=${encodeURIComponent(value)}`
-      : `https://duckduckgo.com/?q=${encodeURIComponent(value)}`,
+    url: searchEngineQueryUrl(value, searchEngine),
   };
 }
 
-export function normalizeTabInput(input: string, searchEngine: 'duckduckgo' | 'google' = 'duckduckgo'): NormalizedInput {
+export function normalizeTabInput(input: string, searchEngine: SearchEnginePreference = 'google'): NormalizedInput {
   const value = input.trim();
   if (value === NEW_TAB_URL) return { kind: 'empty', url: NEW_TAB_URL };
   return normalizeAddressInput(value, searchEngine);

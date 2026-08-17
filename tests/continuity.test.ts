@@ -137,7 +137,7 @@ describe('continuity payload', () => {
     const sealed = sealContinuityPayload(JSON.stringify(payload), 'office-home-pass');
     const opened = parseContinuityPayload(openContinuityPayload(sealed, 'office-home-pass'));
     expect(opened.profileName).toBe('Work');
-    expect(opened.browser.settings.searchEngine).toBe('duckduckgo');
+    expect(opened.browser.settings.searchEngine).toBe('google');
   });
 
   it('maps import onto persisted browser state without window from the package', () => {

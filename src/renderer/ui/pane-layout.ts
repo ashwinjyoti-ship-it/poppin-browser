@@ -95,6 +95,18 @@ export function browserLeftInset(leftPaneWidth: number, workspaceCollapsed: bool
   return workspaceCollapsed ? COLLAPSED_RAIL_WIDTH + 12 : leftPaneWidth + PANE_BROWSER_GUTTER;
 }
 
+export const EXPANDED_COMMAND_BAR_HEIGHT = 94;
+
+/** Native BrowserView bottom inset. A collapsed command bar lives in top chrome. */
+export function browserBottomInset(options: {
+  commandCollapsed: boolean;
+  commandOverlayHeight: number;
+  agentDockHeight: number;
+}): number {
+  if (options.commandCollapsed) return Math.max(0, options.agentDockHeight);
+  return EXPANDED_COMMAND_BAR_HEIGHT + options.commandOverlayHeight + options.agentDockHeight;
+}
+
 export function clampResizedLeftPaneWidth(requestedWidth: number, viewportWidth: number): number {
   const { minimum, maximum } = getLeftPaneWidthRange(viewportWidth);
   return clamp(requestedWidth, minimum, maximum);
