@@ -1,8 +1,8 @@
 import path from 'node:path';
 
-import { mkdir, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, writeFile } from 'node:fs/promises';
 
-import { app, BrowserWindow, dialog, ipcMain, Menu, safeStorage, screen, session } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, safeStorage, screen, session, shell } from 'electron';
 
 import {
   BROWSER_CHANNELS,
@@ -239,6 +239,20 @@ async function createWindow(): Promise<void> {
       await writeFile(result.filePath, `${contents}\n`, 'utf8');
       return result.filePath;
     },
+    onSaveGeneratedFile: async (sourcePath, suggestedName) => {
+      if (!mainWindow) return null;
+      const result = await dialog.showSaveDialog(mainWindow, {
+        title: 'Save generated file',
+        defaultPath: suggestedName,
+      });
+      if (result.canceled || !result.filePath) return null;
+      await copyFile(sourcePath, result.filePath);
+      return result.filePath;
+    },
+    onRevealGeneratedFile: (absolutePath) => {
+      shell.showItemInFolder(absolutePath);
+    },
+    onOpenGeneratedFile: async (absolutePath) => shell.openPath(absolutePath),
     getBrowserAgentSnapshot: () => browserAgentEngine?.getSnapshot() ?? {
       state: 'idle', taskId: null, taskSpace: null, watching: false, allowedTabIds: [], activeTabId: null, currentAction: null, pendingApproval: null, log: [],
     },

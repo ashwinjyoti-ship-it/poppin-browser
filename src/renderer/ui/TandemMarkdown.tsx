@@ -3,7 +3,17 @@ import { type MouseEvent, useMemo } from 'react';
 
 import { markdownToPdfHtml } from '../../tandem/markdownToPdfHtml';
 
-export function TandemMarkdown({ markdown, title, className = '' }: { markdown: string; title: string; className?: string }) {
+export function TandemMarkdown({
+  markdown,
+  title,
+  className = '',
+  onFileLink,
+}: {
+  markdown: string;
+  title: string;
+  className?: string;
+  onFileLink?: (href: string) => void;
+}) {
   const html = useMemo(
     () => wrapScrollableTables(DOMPurify.sanitize(markdownToPdfHtml(markdown || 'No result was returned.', title))),
     [markdown, title],
@@ -12,9 +22,14 @@ export function TandemMarkdown({ markdown, title, className = '' }: { markdown: 
   const openLink = (event: MouseEvent<HTMLElement>) => {
     const target = event.target instanceof Element ? event.target.closest('a') : null;
     const href = target?.getAttribute('href');
-    if (!href || !/^https?:\/\//iu.test(href)) return;
+    if (!href) return;
+    if (/^https?:\/\//iu.test(href)) {
+      event.preventDefault();
+      void window.poppinBrowser.command({ type: 'create', input: href });
+      return;
+    }
     event.preventDefault();
-    void window.poppinBrowser.command({ type: 'create', input: href });
+    onFileLink?.(href);
   };
 
   return <article className={`tandem-markdown ${className}`} onClick={openLink} dangerouslySetInnerHTML={{ __html: html }} />;

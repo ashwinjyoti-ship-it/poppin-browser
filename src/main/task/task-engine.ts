@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { mkdir } from 'node:fs/promises';
+import path from 'node:path';
 
 import type { BrowserWindow } from 'electron';
 
@@ -15,6 +17,7 @@ import {
   type TaskKind,
   type TaskTurnSnapshot,
 } from '../../shared/task';
+import { isOpenableGeneratedFile } from '../../shared/task-output';
 import type { PageContextSnapshot, WorkspaceSnapshot } from '../../shared/workspace';
 import type { AgentHarnessId } from '../../shared/agent';
 import type { TandemContextSnapshot } from '../../shared/tandem';
@@ -60,6 +63,7 @@ import { CapabilityBridge } from '../mcp/capability-bridge';
 import { GitEngine } from '../project/git-engine';
 import { WorkspaceStore } from '../workspace/workspace-store';
 import { TaskStore } from './task-store';
+import { listTaskOutputFiles, resolveTaskOutputFile, taskOutputDirectory } from './task-output';
 import { GitHubEngine } from '../project/github-engine';
 
 const MAX_RESULT_LENGTH = 120_000;
@@ -89,6 +93,10 @@ interface TaskEngineOptions {
   /** Refresh the workspace project snapshot after Git changes the connected checkout. */
   onProjectUpdated?: (project: NonNullable<WorkspaceSnapshot['project']>) => void;
   onExportResult?: (task: TaskRecordSnapshot, format: 'markdown' | 'text') => Promise<string | null>;
+  /** Copy a generated file to a user-chosen path. Return null if cancelled. */
+  onSaveGeneratedFile?: (sourcePath: string, suggestedName: string) => Promise<string | null>;
+  onRevealGeneratedFile?: (absolutePath: string) => void;
+  onOpenGeneratedFile?: (absolutePath: string) => Promise<string>;
   getBrowserAgentSnapshot?: () => BrowserAgentSnapshot;
   executeBrowserAgentCommand?: (command: BrowserAgentCommand) => Promise<BrowserAgentCommandResult>;
   getPageContexts?: () => PageContextSnapshot[];
@@ -188,6 +196,7 @@ export class TaskEngine {
   }
 
   async initialize(): Promise<void> {
+    if (this.task?.kind === 'work') await this.refreshGeneratedFiles();
     await this.refreshConnection();
   }
 
@@ -260,6 +269,12 @@ export class TaskEngine {
           return this.requestUpdateLocal();
         case 'exportResult':
           return await this.exportResult(command.format);
+        case 'saveGeneratedFile':
+          return await this.saveGeneratedFile(command.relativePath);
+        case 'revealGeneratedFile':
+          return this.revealGeneratedFile(command.relativePath);
+        case 'openGeneratedFile':
+          return await this.openGeneratedFile(command.relativePath);
         case 'saveResultToMemory':
           return this.saveResultToMemory();
         case 'addResultToTandem':
@@ -304,7 +319,7 @@ export class TaskEngine {
     const adapter = this.options.createAdapter?.(this.agentId) ?? createAgentAdapter(this.agentId, {
       ...(this.options.locateCodex ? { locateCodex: this.options.locateCodex } : {}),
       ...(this.options.createServer ? { createServer: this.options.createServer } : {}),
-      workspaceRoot: () => this.workspaceStore.getProject()?.repositoryPath ?? this.workDirectory(),
+      workspaceRoot: () => this.workspaceStore.getProject()?.repositoryPath ?? this.currentWorkOutputDirectory() ?? this.workDirectory(),
       mcpBridgeAvailable: () => this.capabilityBridge.isAvailable(),
       resolveMcpServers: async (tools) => {
         if (!tools.length) {
@@ -370,7 +385,7 @@ export class TaskEngine {
 
   private async startTask(rawPrompt: string, modelId: string, effort: string, kind: TaskKind, useBrowser?: boolean): Promise<TaskCommandResult> {
     const prompt = validatePrompt(rawPrompt);
-    const { model, project, workspace, cwd } = this.validateStart(modelId, effort, kind);
+    const { model, project, workspace, cwd: defaultCwd } = this.validateStart(modelId, effort, kind);
     let baselineCommit = '';
     if (kind === 'code' && project) {
       const changes = await this.git.getWorkingTreeChanges(project.repositoryPath);
@@ -407,6 +422,8 @@ export class TaskEngine {
     // Capability tools are registered once per Work session. They remain dormant unless
     // TaskEngine has created a task-owned browser space for the current browser-required turn.
     const tools = kind === 'work' && this.agentCapabilities.clientTools ? workCapabilityTools(this.options) : [];
+    const documentId = randomUUID();
+    const cwd = kind === 'code' ? defaultCwd : await this.ensureWorkOutputDirectory(documentId);
     const thread = await adapter.createSession({
       cwd,
       model: model.id,
@@ -417,14 +434,14 @@ export class TaskEngine {
     const now = new Date().toISOString();
     this.agentMessages.clear();
     this.task = {
-      state: 'Running', kind, prompt, model: model.id, reasoningEffort: effort, documentId: randomUUID(),
+      state: 'Running', kind, prompt, model: model.id, reasoningEffort: effort, documentId,
       threadId: thread.id, turnId: '', baselineCommit,
       progress: [{
         id: 'starting', kind: 'status', title: kind === 'code' ? 'Starting Code task' : 'Starting Work task',
         detail: kind === 'code' ? pathTail(cwd) : selectedContextSummary(workspace), status: 'running',
       }],
       turns: [createTaskTurn(prompt, now)],
-      pendingApproval: null, result: '', diff: '', error: null, createdAt: now, updatedAt: now,
+      pendingApproval: null, result: '', diff: '', error: null, generatedFiles: [], createdAt: now, updatedAt: now,
       browserRun: createBrowserRun(wantsBrowserUse, browserSnapshot),
     };
     this.persistAndEmit();
@@ -601,7 +618,7 @@ export class TaskEngine {
     if (task.pendingApproval) return { ok: false, message: 'Resolve the current approval before continuing.' };
     const project = this.workspaceStore.getProject();
     if (task.kind === 'code' && !project) return { ok: false, message: 'Reconnect the project before continuing this task.' };
-    const cwd = task.kind === 'code' ? project!.repositoryPath : this.workDirectory();
+    const cwd = task.kind === 'code' ? project!.repositoryPath : await this.ensureWorkOutputDirectory(task.documentId);
     const model = this.connection.models.find((candidate) => candidate.id === task.model);
     if (!model) return { ok: false, message: 'The original model is no longer available for the selected agent.' };
     const adapter = this.requireAdapter();
@@ -918,6 +935,39 @@ export class TaskEngine {
     return { ok: true, message: filePath ? `Saved a new output artifact to ${filePath}.` : 'Export cancelled.' };
   }
 
+  private async saveGeneratedFile(relativePath: string): Promise<TaskCommandResult> {
+    const absolute = this.resolveGeneratedFile(relativePath);
+    if (!absolute) return { ok: false, message: 'That generated file is no longer available.' };
+    if (!this.options.onSaveGeneratedFile) return { ok: false, message: 'Saving generated files is not available.' };
+    const filePath = await this.options.onSaveGeneratedFile(absolute, path.basename(absolute));
+    return { ok: true, message: filePath ? `Saved to ${filePath}.` : 'Save cancelled.' };
+  }
+
+  private revealGeneratedFile(relativePath: string): TaskCommandResult {
+    const absolute = this.resolveGeneratedFile(relativePath);
+    if (!absolute) return { ok: false, message: 'That generated file is no longer available.' };
+    if (!this.options.onRevealGeneratedFile) return { ok: false, message: 'Finder reveal is not available.' };
+    this.options.onRevealGeneratedFile(absolute);
+    return { ok: true };
+  }
+
+  private async openGeneratedFile(relativePath: string): Promise<TaskCommandResult> {
+    const absolute = this.resolveGeneratedFile(relativePath);
+    if (!absolute) return { ok: false, message: 'That generated file is no longer available.' };
+    if (!isOpenableGeneratedFile(path.basename(absolute))) {
+      return { ok: false, message: 'Save that file first, then open it with an app you trust.' };
+    }
+    if (!this.options.onOpenGeneratedFile) return { ok: false, message: 'Opening generated files is not available.' };
+    const error = await this.options.onOpenGeneratedFile(absolute);
+    return error ? { ok: false, message: error } : { ok: true, message: `Opened ${path.basename(absolute)}.` };
+  }
+
+  private resolveGeneratedFile(relativePath: string): string | null {
+    const task = this.task;
+    if (!task || task.kind !== 'work') return null;
+    return resolveTaskOutputFile(taskOutputDirectory(this.workDirectory(), task.documentId), relativePath);
+  }
+
   private saveResultToMemory(): TaskCommandResult {
     const task = this.task;
     if (!task?.result) return { ok: false, message: 'There is no result to save yet.' };
@@ -1224,6 +1274,7 @@ export class TaskEngine {
           task.error = event.error ?? `${describeAgent(this.agentId).name} failed to complete the task.`;
           completeCurrentTurn(task, 'failed');
         }
+        await this.refreshGeneratedFiles();
         await this.captureDiff();
         this.persistAndEmit();
         this.options.onTaskEnded?.(status === 'completed' ? 'completed' : 'stopped');
@@ -1305,7 +1356,7 @@ export class TaskEngine {
       const turn = await adapter.prompt({
         sessionId: task.threadId,
         prompt: buildTaskPrompt(browserRetryPrompt(task.prompt), workspaceSnapshot(this.workspaceStore, this.options.getPageContexts, this.options.getTandemContexts), browserSnapshot, this.environmentState(workspaceSnapshot(this.workspaceStore, this.options.getPageContexts, this.options.getTandemContexts), browserSnapshot, 'exploration'), [], this.mailSessionReusable(workspaceSnapshot(this.workspaceStore, this.options.getPageContexts, this.options.getTandemContexts)), signedInHumanPagesForPrompt(this.options.getBrowsableTabs?.() ?? [], task.prompt)),
-        cwd: this.workDirectory(),
+        cwd: await this.ensureWorkOutputDirectory(task.documentId),
         model: task.model,
         reasoningEffort: task.reasoningEffort,
       });
@@ -1365,6 +1416,26 @@ export class TaskEngine {
 
   private workDirectory(): string {
     return this.options.workDirectory ?? process.cwd();
+  }
+
+  private currentWorkOutputDirectory(): string | null {
+    if (!this.task || this.task.kind !== 'work' || !this.task.documentId) return null;
+    return taskOutputDirectory(this.workDirectory(), this.task.documentId);
+  }
+
+  private async ensureWorkOutputDirectory(documentId: string): Promise<string> {
+    const directory = taskOutputDirectory(this.workDirectory(), documentId);
+    await mkdir(directory, { recursive: true });
+    return directory;
+  }
+
+  private async refreshGeneratedFiles(): Promise<void> {
+    const task = this.task;
+    if (!task || task.kind !== 'work') return;
+    const files = await listTaskOutputFiles(taskOutputDirectory(this.workDirectory(), task.documentId));
+    task.generatedFiles = files;
+    const turn = currentTaskTurn(task);
+    if (turn) turn.generatedFiles = files;
   }
 
   private failTask(message: string): void {
@@ -1435,6 +1506,7 @@ Do not claim that a browser action succeeded unless the tool output confirms it.
 Use the bounded batch tool to reduce round trips when several refs from one snapshot can be acted on safely. End every batch with read or assert, and treat any pause, takeover, stale ref, skipped step, or failed assertion as a stop rather than retrying.
 When the Tandem capability tool is supplied, use it for every Tandem read and write. It speaks the Tandem REST API: search or list to resolve a page, read_page before editing, and prefer append or edit_section so existing content survives. Never navigate to Tandem in a browser tab or automate its interface to do something the tool can do, and never ask the user for a Tandem API key.
 Your final agent message becomes Poppin's trusted Result page for contextual, browser-only, and mixed tasks. Return the complete polished outcome rather than a browser activity summary. Include source URLs and the time-sensitive date or timestamp when research, prices, availability, or other changing facts are involved. Create a new output artifact rather than overwriting an input.
+When the user asks for a file such as a spreadsheet, CSV, PDF, or document, write it in the working directory with a descriptive filename and the correct extension. Do not invent https download links, file:// URLs, or “click here to download” placeholders — those cannot save the file in Poppin. Mention the exact filename in the result as a markdown file link, for example [findings.xlsx](findings.xlsx). Poppin lists generated files and lets the user Save as… to a location they choose.
 Cite provenance for every load-bearing claim. Inline each factual claim as a markdown link — write [<the exact claim or the source title>](<the real http(s) URL from an Agent Tab visit or from SELECTED CONTEXT>). Use only URLs Poppin actually opened for this task or that appear in SELECTED CONTEXT; do not fabricate, shorten, or paraphrase URLs. Prefer one link per claim so Poppin can render a Claims list. If a paragraph draws from several sources, add the links at the end of that paragraph. A trailing "Sources" list is fine in addition to inline links, but the inline claim→URL links are required so Poppin can render provenance.`;
 
 function signedInHumanPagesForPrompt(
@@ -1947,15 +2019,20 @@ function cloneTask(task: TaskRecordSnapshot): TaskRecordSnapshot {
   return {
     ...task,
     progress: task.progress.map((item) => ({ ...item })),
-    turns: task.turns?.map((turn) => ({ ...turn, sources: turn.sources.map((source) => ({ ...source })) })),
+    turns: task.turns?.map((turn) => ({
+      ...turn,
+      sources: turn.sources.map((source) => ({ ...source })),
+      ...(turn.generatedFiles ? { generatedFiles: turn.generatedFiles.map((file) => ({ ...file })) } : {}),
+    })),
     pendingApproval: task.pendingApproval ? { ...task.pendingApproval } : null,
     browserRun: { ...task.browserRun, sources: task.browserRun.sources.map((source) => ({ ...source })) },
+    ...(task.generatedFiles ? { generatedFiles: task.generatedFiles.map((file) => ({ ...file })) } : {}),
     ...(task.delivery ? { delivery: { ...task.delivery, pullRequest: task.delivery.pullRequest ? { ...task.delivery.pullRequest } : null } } : {}),
   };
 }
 
 function createTaskTurn(prompt: string, createdAt: string): TaskTurnSnapshot {
-  return { id: randomUUID(), prompt, result: '', status: 'running', sources: [], createdAt, completedAt: null };
+  return { id: randomUUID(), prompt, result: '', status: 'running', sources: [], generatedFiles: [], createdAt, completedAt: null };
 }
 
 function taskTurns(task: TaskRecordSnapshot): TaskTurnSnapshot[] {

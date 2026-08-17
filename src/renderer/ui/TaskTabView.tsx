@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
-import { BookOpenText, Check, Copy, ExternalLink, FileSignature, GitCompare, Plus, RotateCcw, Save, Sparkles, X } from 'lucide-react';
+import { BookOpenText, Check, Copy, Download, ExternalLink, FileSignature, FolderOpen, GitCompare, Plus, RotateCcw, Save, Sparkles, X } from 'lucide-react';
 
-import type { TaskCommand, TaskCommandResult, TaskSnapshot, TaskTurnSnapshot } from '../../shared/task';
+import type { TaskCommand, TaskCommandResult, TaskGeneratedFileSnapshot, TaskSnapshot, TaskTurnSnapshot } from '../../shared/task';
 import type { WorkspaceCommand, WorkspaceCommandResult, WorkspaceSnapshot } from '../../shared/workspace';
 import type { BrowserAgentCommand, BrowserAgentCommandResult, BrowserAgentSnapshot } from '../../shared/browser-agent';
 import { extractProvenanceClaims } from '../../shared/provenance';
+import { isOpenableGeneratedFile, matchGeneratedFile } from '../../shared/task-output';
+import { formatDownloadBytes } from '../../shared/downloads';
 import { parseCompareMatrix } from '../../shared/compare-board';
 import { buildDeliveryStory } from '../../shared/delivery-story';
 import { recipeStartUrl, sanitizeRecipeSteps } from '../../shared/recipes';
@@ -244,9 +246,32 @@ function WorkThread({ task, browserAgent, onCommand, onWorkspaceCommand }: {
       {turns.map((turn, index) => (
         <article className={`task-turn task-turn-${turn.status}`} key={turn.id}>
           <header className="task-turn-request"><span>You · Turn {index + 1}</span><p>{turn.prompt}</p></header>
-          {turn.result ? <TandemMarkdown markdown={turn.result} title={taskHeadline(turn.prompt)} className="reply-body task-turn-reply" /> : null}
+          {turn.result ? (
+            <TandemMarkdown
+              markdown={turn.result}
+              title={taskHeadline(turn.prompt)}
+              className="reply-body task-turn-reply"
+              onFileLink={(href) => {
+                const file = matchGeneratedFile(href, task.generatedFiles ?? []);
+                if (!file) {
+                  setMessage('Poppin could not find that file. Use Save as… on the generated files listed below.');
+                  return;
+                }
+                void onCommand({ type: 'saveGeneratedFile', relativePath: file.relativePath }).then((result) => {
+                  setMessage(result.message ?? (result.ok ? 'Saved.' : 'Could not save that file.'));
+                });
+              }}
+            />
+          ) : null}
           {turn.result ? <TurnCompareBoard markdown={turn.result} /> : null}
           {turn.result ? <ClaimsList turn={turn} /> : null}
+          {(task.generatedFiles?.length ?? 0) > 0 && index === turns.length - 1 ? (
+            <GeneratedFilesList
+              files={task.generatedFiles ?? []}
+              onCommand={onCommand}
+              onMessage={setMessage}
+            />
+          ) : null}
           {turn.sources.length ? (
             <section className="reply-sources">
               <h3>Sources</h3>
@@ -281,6 +306,49 @@ function TurnCompareBoard({ markdown }: { markdown: string }) {
   const matrix = parseCompareMatrix(markdown);
   if (!matrix) return null;
   return <CompareBoard matrix={matrix} title="Options compared" />;
+}
+
+function GeneratedFilesList({
+  files,
+  onCommand,
+  onMessage,
+}: {
+  files: TaskGeneratedFileSnapshot[];
+  onCommand: (command: TaskCommand) => Promise<TaskCommandResult>;
+  onMessage: (value: string) => void;
+}) {
+  const run = (command: TaskCommand, fallback: string) => {
+    void onCommand(command).then((result) => onMessage(result.message ?? fallback));
+  };
+  return (
+    <section className="reply-generated-files" aria-label="Generated files">
+      <h3>Generated files</h3>
+      <p className="context-note">Save as… lets you choose the name and folder. Poppin never overwrites a file without that dialog.</p>
+      <ul>
+        {files.map((file) => (
+          <li key={file.relativePath}>
+            <div>
+              <strong>{file.name}</strong>
+              <small>{formatDownloadBytes(file.sizeBytes)}</small>
+            </div>
+            <div className="reply-generated-file-actions">
+              <button type="button" className="primary-button" onClick={() => run({ type: 'saveGeneratedFile', relativePath: file.relativePath }, 'Saved.')}>
+                <Download size={13} /> Save as…
+              </button>
+              <button type="button" className="secondary-button" onClick={() => run({ type: 'revealGeneratedFile', relativePath: file.relativePath }, 'Shown in Finder.')}>
+                <FolderOpen size={13} /> Show in Finder
+              </button>
+              {isOpenableGeneratedFile(file.name) ? (
+                <button type="button" className="secondary-button" onClick={() => run({ type: 'openGeneratedFile', relativePath: file.relativePath }, 'Opened.')}>
+                  Open
+                </button>
+              ) : null}
+            </div>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
 }
 
 function ClaimsList({ turn }: { turn: TaskTurnSnapshot }) {

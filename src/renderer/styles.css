@@ -1656,6 +1656,15 @@ body.pane-is-resizing .poppin-pad-pane {
 .reply-claims li { margin: 4px 0; font-size: 12px; line-height: 1.45; }
 .reply-claims a { color: #9b5911; }
 .reply-claims small { color: #8a7b6a; font-size: 10.5px; }
+.task-turn .reply-generated-files { margin: 0 20px 18px; }
+.reply-generated-files { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--divider); }
+.reply-generated-files h3 { margin: 0 0 6px; color: #746a60; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
+.reply-generated-files ul { margin: 8px 0 0; padding: 0; list-style: none; }
+.reply-generated-files li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 0; border-top: 1px solid var(--divider); }
+.reply-generated-files li:first-child { border-top: 0; }
+.reply-generated-files strong { display: block; font-size: 12px; }
+.reply-generated-files small { color: #8a7b6a; font-size: 10.5px; }
+.reply-generated-file-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 
 .reply-next-actions {
   display: flex;

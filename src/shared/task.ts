@@ -57,12 +57,23 @@ export interface TaskBrowserSourceSnapshot {
   url: string;
 }
 
+export interface TaskGeneratedFileSnapshot {
+  /** Display name (basename). */
+  name: string;
+  /** Path relative to the task output directory, using `/`. */
+  relativePath: string;
+  sizeBytes: number;
+  updatedAt: string;
+}
+
 export interface TaskTurnSnapshot {
   id: string;
   prompt: string;
   result: string;
   status: 'running' | 'completed' | 'failed' | 'cancelled';
   sources: TaskBrowserSourceSnapshot[];
+  /** Files the agent wrote into this task's output directory. */
+  generatedFiles?: TaskGeneratedFileSnapshot[];
   createdAt: string;
   completedAt: string | null;
 }
@@ -84,6 +95,8 @@ export interface TaskRecordSnapshot {
   result: string;
   diff: string;
   error: string | null;
+  /** Files written into this Work task's output directory. */
+  generatedFiles?: TaskGeneratedFileSnapshot[];
   browserRun: TaskBrowserRunSnapshot;
   delivery?: TaskDeliverySnapshot;
   createdAt: string;
@@ -138,6 +151,12 @@ export type TaskCommand =
   | { type: 'requestMerge'; strategy: 'merge' | 'squash' | 'rebase' }
   | { type: 'requestUpdateLocal' }
   | { type: 'exportResult'; format: 'markdown' | 'text' }
+  /** Copy a generated task file to a user-chosen location. */
+  | { type: 'saveGeneratedFile'; relativePath: string }
+  /** Reveal a generated task file in Finder. */
+  | { type: 'revealGeneratedFile'; relativePath: string }
+  /** Open a generated document with the default macOS app. */
+  | { type: 'openGeneratedFile'; relativePath: string }
   /**
    * Appends the current task result to Poppin's protected Memory page. Uses
    * the shared Memory that already lives in the native Pages store — Memory
