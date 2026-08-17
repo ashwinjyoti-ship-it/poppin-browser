@@ -1,5 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { EventEmitter } from 'node:events';
+import path from 'node:path';
 import { createInterface } from 'node:readline';
 
 import type { CodexLaunch } from './codex-locator';
@@ -88,11 +89,12 @@ export class CodexAppServer extends EventEmitter<CodexAppServerEvents> {
     model: string;
     developerInstructions: string;
     dynamicTools?: CodexDynamicToolSpec[];
+    workspaceRoots?: string[];
   }): Promise<CodexThread> {
     const response = await this.request<{ thread: CodexThread }>('thread/start', {
       model: params.model,
       cwd: params.cwd,
-      runtimeWorkspaceRoots: [params.cwd],
+      runtimeWorkspaceRoots: uniqueRoots(params.cwd, params.workspaceRoots),
       approvalPolicy: 'on-request',
       approvalsReviewer: 'user',
       sandbox: 'workspace-write',
@@ -104,11 +106,11 @@ export class CodexAppServer extends EventEmitter<CodexAppServerEvents> {
     return response.thread;
   }
 
-  async resumeThread(threadId: string, cwd: string): Promise<CodexThread> {
+  async resumeThread(threadId: string, cwd: string, workspaceRoots?: string[]): Promise<CodexThread> {
     const response = await this.request<{ thread: CodexThread }>('thread/resume', {
       threadId,
       cwd,
-      runtimeWorkspaceRoots: [cwd],
+      runtimeWorkspaceRoots: uniqueRoots(cwd, workspaceRoots),
       approvalPolicy: 'on-request',
       approvalsReviewer: 'user',
       sandbox: 'workspace-write',
@@ -127,12 +129,13 @@ export class CodexAppServer extends EventEmitter<CodexAppServerEvents> {
     cwd: string;
     model: string;
     effort: string;
+    workspaceRoots?: string[];
   }): Promise<CodexTurn> {
     const response = await this.request<{ turn: CodexTurn }>('turn/start', {
       threadId: params.threadId,
       input: [{ type: 'text', text: params.prompt, text_elements: [] }],
       cwd: params.cwd,
-      runtimeWorkspaceRoots: [params.cwd],
+      runtimeWorkspaceRoots: uniqueRoots(params.cwd, params.workspaceRoots),
       approvalPolicy: 'on-request',
       model: params.model,
       effort: params.effort,
@@ -248,4 +251,17 @@ export class CodexAppServer extends EventEmitter<CodexAppServerEvents> {
 function rpcErrorMessage(value: unknown): string {
   if (isRecord(value) && typeof value.message === 'string') return value.message;
   return 'Codex returned an unknown protocol error.';
+}
+
+function uniqueRoots(cwd: string, extra: string[] | undefined): string[] {
+  const seen = new Set<string>();
+  const roots: string[] = [];
+  for (const candidate of [cwd, ...(extra ?? [])]) {
+    if (!candidate) continue;
+    const resolved = path.resolve(candidate);
+    if (seen.has(resolved)) continue;
+    seen.add(resolved);
+    roots.push(resolved);
+  }
+  return roots;
 }

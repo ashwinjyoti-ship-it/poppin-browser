@@ -67,6 +67,7 @@ class FakeAcpConnection extends EventEmitter {
 
 function setup(options: {
   workspaceRoot?: () => string | null;
+  extraWorkspaceRoots?: () => string[];
   mcpBridgeAvailable?: () => boolean;
   resolveMcpServers?: (tools: import('../src/main/agent/agent-adapter').AgentToolSpec[]) => Promise<import('../src/main/acp/acp-protocol').AcpMcpServerStdio[]>;
 } = {}) {
@@ -267,6 +268,32 @@ describe('AcpAgentAdapter', () => {
     expect(connection.responses[0]).toEqual({ id: 7, result: { outcome: { outcome: 'selected', optionId: 'allow' } } });
   });
 
+  it('includes skill write paths in permission details so Work can auto-allow them', async () => {
+    const { adapter, connection, requests } = setup();
+    await adapter.connect();
+    await adapter.createSession({ cwd: '/work', model: 'agent-default', instructions: '', tools: [] });
+    connection.emit('request', {
+      id: 8,
+      method: ACP_METHODS.sessionRequestPermission,
+      params: {
+        sessionId: 'acp-session-1',
+        toolCall: {
+          toolCallId: 't3',
+          title: 'Write SKILL.md',
+          kind: 'edit',
+          rawInput: { path: '/Users/tester/.codex/skills/inbox-triage/SKILL.md' },
+        },
+        options: [
+          { optionId: 'allow', name: 'Allow once', kind: 'allow_once' },
+          { optionId: 'deny', name: 'Reject', kind: 'reject_once' },
+        ],
+      },
+    });
+    expect(requests[0]).toMatchObject({ type: 'approval', kind: 'files' });
+    expect(requests[0]?.type === 'approval' ? requests[0].detail : '').toContain('acpKind:edit');
+    expect(requests[0]?.type === 'approval' ? requests[0].detail : '').toContain('/Users/tester/.codex/skills/inbox-triage/SKILL.md');
+  });
+
   it('refuses client methods it did not advertise', async () => {
     const { adapter, connection } = setup();
     await adapter.connect();
@@ -292,5 +319,24 @@ describe('AcpAgentAdapter', () => {
     connection.emit('request', { id: 3, method: ACP_METHODS.fsReadTextFile, params: { sessionId: 'acp-session-1', path: '../escape.txt' } });
     await vi.waitFor(() => expect(connection.responses).toHaveLength(3));
     expect(connection.responses[2]?.error?.message).toContain('inside the connected project');
+  });
+
+  it('allows writing a Codex skill through an extra Work writable root', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'poppin-acp-skill-'));
+    const skills = path.join(root, '.codex', 'skills', 'inbox-triage');
+    const { adapter, connection } = setup({
+      workspaceRoot: () => path.join(root, 'task'),
+      extraWorkspaceRoots: () => [path.join(root, '.codex', 'skills')],
+    });
+    await adapter.connect();
+    await adapter.createSession({ cwd: path.join(root, 'task'), model: 'agent-default', instructions: '', tools: [] });
+    connection.emit('request', {
+      id: 4,
+      method: ACP_METHODS.fsWriteTextFile,
+      params: { sessionId: 'acp-session-1', path: path.join(skills, 'SKILL.md'), content: '# Inbox triage\n' },
+    });
+    await vi.waitFor(() => expect(connection.responses).toHaveLength(1));
+    expect(connection.responses[0]).toEqual({ id: 4, result: {} });
+    expect(await readFile(path.join(skills, 'SKILL.md'), 'utf8')).toBe('# Inbox triage\n');
   });
 });

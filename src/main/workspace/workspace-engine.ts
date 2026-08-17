@@ -418,7 +418,11 @@ export class WorkspaceEngine {
       createdAt: now,
       updatedAt: now,
     };
-    this.store.insertMailSkill(skill);
+    try {
+      this.store.insertMailSkill(skill);
+    } catch (error) {
+      return { ok: false, message: error instanceof Error ? error.message : 'Could not save that mail skill.' };
+    }
     this.emitSnapshot();
     return { ok: true, message: `Saved mail skill "${skill.name}".` };
   }

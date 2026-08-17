@@ -50,6 +50,8 @@ export interface AgentSessionRequest {
   instructions: string;
   /** Poppin capability tools that should be callable for this session. */
   tools: AgentToolSpec[];
+  /** Extra writable roots besides cwd (Work: Codex skills directory). */
+  workspaceRoots?: string[];
 }
 
 export interface AgentSession {
