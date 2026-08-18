@@ -3,21 +3,27 @@ import { useEffect, useRef } from 'react';
 
 import { countProgressingDownloads, formatDownloadBytes, type DownloadItemSnapshot, type DownloadsSnapshot } from '../../shared/downloads';
 
-interface DownloadsPopoverProps {
+interface DownloadsPanelProps {
   snapshot: DownloadsSnapshot;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
   onCancel: (id: string) => void;
   onReveal: (id: string) => void;
   onDismiss: (id: string) => void;
   onClearFinished?: () => void;
 }
 
+interface DownloadsPopoverProps extends DownloadsPanelProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  /**
+   * The live panel lives in a child overlay window so it can paint above
+   * native page views. Tests still render it inline.
+   */
+  inlinePanel?: boolean;
+}
+
 /**
- * Compact downloads UI. Replaces the old chrome-height download bar so
- * downloads never steal viewport from the active page. Clicking the toolbar
- * icon opens the popover; a live badge shows the count of downloads still in
- * progress.
+ * Compact downloads trigger. The list itself is hosted in a child overlay
+ * window so it never steals viewport or sits under the native WebContentsView.
  */
 export function DownloadsPopover({
   snapshot,
@@ -27,12 +33,13 @@ export function DownloadsPopover({
   onReveal,
   onDismiss,
   onClearFinished,
+  inlinePanel = true,
 }: DownloadsPopoverProps) {
   const activeCount = countProgressingDownloads(snapshot);
   const wrapperRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || !inlinePanel) return;
     const handleClickOutside = (event: MouseEvent) => {
       if (wrapperRef.current && !wrapperRef.current.contains(event.target as Node)) onOpenChange(false);
     };
@@ -43,7 +50,7 @@ export function DownloadsPopover({
       window.removeEventListener('mousedown', handleClickOutside);
       window.removeEventListener('keydown', handleKey);
     };
-  }, [open, onOpenChange]);
+  }, [inlinePanel, open, onOpenChange]);
 
   const label = activeCount > 0
     ? `Downloads (${activeCount} in progress)`
@@ -67,33 +74,51 @@ export function DownloadsPopover({
           <span className="downloads-badge" aria-hidden="true">{activeCount}</span>
         ) : null}
       </button>
-      {open ? (
-        <section
-          className="downloads-popover"
-          role="dialog"
-          aria-label="Downloads"
-          aria-live="polite"
-        >
-          <header className="downloads-popover-heading">
-            <strong>Downloads</strong>
-            {onClearFinished && snapshot.items.some((item) => item.state !== 'progressing') ? (
-              <button type="button" className="downloads-clear" onClick={onClearFinished}>Clear finished</button>
-            ) : null}
-          </header>
-          {snapshot.items.length === 0 ? (
-            <p className="downloads-empty">No downloads yet.</p>
-          ) : (
-            <ul className="downloads-popover-list">
-              {snapshot.items.map((item) => (
-                <li key={item.id} className={`download-bar-item download-bar-item-${item.state}`}>
-                  <DownloadRow item={item} onCancel={onCancel} onReveal={onReveal} onDismiss={onDismiss} />
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
+      {open && inlinePanel ? (
+        <DownloadsPanel
+          snapshot={snapshot}
+          onCancel={onCancel}
+          onReveal={onReveal}
+          onDismiss={onDismiss}
+          onClearFinished={onClearFinished}
+        />
       ) : null}
     </div>
+  );
+}
+
+export function DownloadsPanel({
+  snapshot,
+  onCancel,
+  onReveal,
+  onDismiss,
+  onClearFinished,
+}: DownloadsPanelProps) {
+  return (
+    <section
+      className="downloads-popover"
+      role="dialog"
+      aria-label="Downloads"
+      aria-live="polite"
+    >
+      <header className="downloads-popover-heading">
+        <strong>Downloads</strong>
+        {onClearFinished && snapshot.items.some((item) => item.state !== 'progressing') ? (
+          <button type="button" className="downloads-clear" onClick={onClearFinished}>Clear finished</button>
+        ) : null}
+      </header>
+      {snapshot.items.length === 0 ? (
+        <p className="downloads-empty">No downloads yet.</p>
+      ) : (
+        <ul className="downloads-popover-list">
+          {snapshot.items.map((item) => (
+            <li key={item.id} className={`download-bar-item download-bar-item-${item.state}`}>
+              <DownloadRow item={item} onCancel={onCancel} onReveal={onReveal} onDismiss={onDismiss} />
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 

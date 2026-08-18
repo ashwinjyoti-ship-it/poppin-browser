@@ -232,10 +232,15 @@ export function App() {
       if (mounted) setSettingsOpen(nextSnapshot.open);
     });
     void window.poppinDownloads.getSnapshot().then((initialSnapshot) => {
-      if (mounted) setDownloadsSnapshot(initialSnapshot);
+      if (mounted) {
+        setDownloadsSnapshot(initialSnapshot);
+        setDownloadsOpen(Boolean(initialSnapshot.open));
+      }
     });
     const unsubscribeDownloads = window.poppinDownloads.subscribe((nextSnapshot) => {
-      if (mounted) setDownloadsSnapshot(nextSnapshot);
+      if (!mounted) return;
+      setDownloadsSnapshot(nextSnapshot);
+      setDownloadsOpen(Boolean(nextSnapshot.open));
     });
     void window.poppinPad.getSnapshot().then((initialSnapshot) => {
       if (mounted) setPadSnapshot(initialSnapshot);
@@ -302,7 +307,7 @@ export function App() {
   useEffect(() => {
     const topInset = chromeHeight + (urlOverlayOpen ? 280 : 0) + (tabSearchOpen ? TAB_SEARCH_RESULTS_INSET : 0);
     const leftInset = browserLeftInset(leftPaneWidth, layoutWorkspaceCollapsed);
-    const rightInset = browserRightInset(effectiveRightPaneWidth, downloadsOpen);
+    const rightInset = browserRightInset(effectiveRightPaneWidth);
     const bottomInset = browserBottomInset({
       commandCollapsed,
       commandOverlayHeight,
@@ -318,7 +323,7 @@ export function App() {
       // Keep a strip for the collapsed reopen control; native views paint above DOM otherwise.
       bottomInset,
     });
-  }, [agentDockHeight, chromeHeight, commandCollapsed, commandOverlayHeight, downloadsOpen, effectiveRightPaneWidth, leftPaneWidth, tabSearchOpen, urlOverlayOpen, layoutWorkspaceCollapsed, layoutPadCollapsed, viewport]);
+  }, [agentDockHeight, chromeHeight, commandCollapsed, commandOverlayHeight, effectiveRightPaneWidth, leftPaneWidth, tabSearchOpen, urlOverlayOpen, layoutWorkspaceCollapsed, layoutPadCollapsed, viewport]);
 
   const resizeLeftPane = (requestedWidth: number) => {
     setPreferredLeftPaneWidth(clampResizedLeftPaneWidth(requestedWidth, viewport.width));
@@ -545,17 +550,14 @@ export function App() {
             }}
             onSettingsOpenChange={(open) => { void window.poppinSettings.command({ type: open ? 'open' : 'close' }); }}
             onSubmit={submitAddress}
-            commandSlot={commandCollapsed ? (
-              <CollapsedCommandControl
-                running={taskSnapshot.task?.state === 'Running'}
-                onOpen={() => setCommandCollapsed(false)}
-              />
-            ) : null}
             downloadsSlot={
               <DownloadsPopover
                 snapshot={downloadsSnapshot}
                 open={downloadsOpen}
-                onOpenChange={setDownloadsOpen}
+                inlinePanel={false}
+                onOpenChange={(open) => {
+                  void window.poppinDownloads.command({ type: open ? 'openOverlay' : 'closeOverlay' });
+                }}
                 onCancel={(id) => { void window.poppinDownloads.command({ type: 'cancel', id }); }}
                 onReveal={(id) => { void window.poppinDownloads.command({ type: 'reveal', id }); }}
                 onDismiss={(id) => { void window.poppinDownloads.command({ type: 'dismiss', id }); }}
@@ -729,6 +731,12 @@ export function App() {
           onTaskCommand={sendTaskCommand}
           onBrowserAgentCommand={sendBrowserAgentCommand}
           onOpenTaskTab={() => { setMailActive(false); setTaskTabActive(true); }}
+        />
+      ) : null}
+      {commandCollapsed ? (
+        <CollapsedCommandControl
+          running={taskSnapshot.task?.state === 'Running'}
+          onOpen={() => setCommandCollapsed(false)}
         />
       ) : null}
       <CommandBar snapshot={taskSnapshot} workspace={workspaceSnapshot} pad={padSnapshot} collapsed={commandCollapsed} onCollapseChange={setCommandCollapsed} onCommand={sendTaskCommand} onPadCommand={sendPadCommand} onOverlayHeightChange={setCommandOverlayHeight} />

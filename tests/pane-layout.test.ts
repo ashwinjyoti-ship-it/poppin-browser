@@ -6,6 +6,7 @@ import {
   browserRightInset,
   clampResizedLeftPaneWidth,
   clampResizedRightPaneWidth,
+  COLLAPSED_RAIL_WIDTH,
   DEFAULT_LEFT_PANE_WIDTH,
   DEFAULT_RIGHT_PANE_WIDTH,
   getFocusedRightPaneWidth,
@@ -62,6 +63,11 @@ describe('resizable Poppin Pad layout', () => {
     expect(browserRightInset(MAX_RIGHT_PANE_WIDTH)).toBe(MAX_RIGHT_PANE_WIDTH + PANE_BROWSER_GUTTER);
     expect(browserLeftInset(DEFAULT_LEFT_PANE_WIDTH, false)).toBe(DEFAULT_LEFT_PANE_WIDTH + PANE_BROWSER_GUTTER);
     expect(browserLeftInset(DEFAULT_LEFT_PANE_WIDTH, true)).toBe(46);
+  });
+
+  it('does not steal a 400px page gutter for the downloads panel', () => {
+    expect(browserRightInset(COLLAPSED_RAIL_WIDTH)).toBe(COLLAPSED_RAIL_WIDTH + PANE_BROWSER_GUTTER);
+    expect(browserRightInset(COLLAPSED_RAIL_WIDTH)).toBeLessThan(80);
   });
 
   it('lets the pad grow to its max without being clipped by the prior 520px inset ceiling', () => {

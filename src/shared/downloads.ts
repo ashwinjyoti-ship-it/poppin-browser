@@ -20,13 +20,17 @@ export interface DownloadItemSnapshot {
 
 export interface DownloadsSnapshot {
   items: DownloadItemSnapshot[];
+  /** True while the downloads overlay window is visible above native page views. */
+  open?: boolean;
 }
 
 export type DownloadsCommand =
   | { type: 'cancel'; id: string }
   | { type: 'reveal'; id: string }
   | { type: 'dismiss'; id: string }
-  | { type: 'clearFinished' };
+  | { type: 'clearFinished' }
+  | { type: 'openOverlay' }
+  | { type: 'closeOverlay' };
 
 export interface DownloadsCommandResult {
   ok: boolean;

@@ -71,6 +71,10 @@ export class DownloadManager {
   }
 
   execute(command: DownloadsCommand): DownloadsCommandResult {
+    if (command.type === 'openOverlay' || command.type === 'closeOverlay') {
+      return { ok: false, message: 'Downloads overlay is owned by the Poppin shell.' };
+    }
+
     if (command.type === 'clearFinished') {
       for (const [id, entry] of this.items) {
         if (entry.state === 'progressing') continue;

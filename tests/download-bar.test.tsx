@@ -95,4 +95,24 @@ describe('DownloadsPopover', () => {
     expect(countProgressingDownloads(EMPTY_DOWNLOADS_SNAPSHOT)).toBe(0);
     expect(countProgressingDownloads(SNAPSHOT)).toBe(1);
   });
+
+  it('keeps the shell trigger from painting an in-window panel over the page', async () => {
+    const user = userEvent.setup();
+    const onOpenChange = vi.fn();
+    render(
+      <DownloadsPopover
+        snapshot={SNAPSHOT}
+        open
+        inlinePanel={false}
+        onOpenChange={onOpenChange}
+        onCancel={vi.fn()}
+        onReveal={vi.fn()}
+        onDismiss={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole('button', { name: /downloads \(1 in progress\)/i })).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.queryByRole('dialog', { name: /downloads/i })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /downloads \(1 in progress\)/i }));
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
 });

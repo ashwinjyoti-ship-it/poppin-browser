@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 
 import { DownloadManager, sanitizeFilename, uniqueSavePath } from '../src/main/browser/downloads';
 import { downloadPercent, formatDownloadBytes } from '../src/shared/downloads';
+import { downloadsOverlayBounds } from '../src/shared/downloads-overlay';
 
 describe('download helpers', () => {
   it('sanitizes unsafe filenames while keeping extensions', () => {
@@ -36,5 +37,14 @@ describe('download helpers', () => {
     expect(DownloadManager.isLikelyDownloadUrl('https://example.com/releases/app.zip#latest')).toBe(true);
     expect(DownloadManager.isLikelyDownloadUrl('https://example.com/blog/announcing-dmg')).toBe(false);
     expect(DownloadManager.isLikelyDownloadUrl('not a url')).toBe(false);
+  });
+
+  it('places the downloads overlay over the page instead of shrinking it', () => {
+    expect(downloadsOverlayBounds({ x: 80, y: 40, width: 1280, height: 800 })).toEqual({
+      x: 80 + 1280 - 360 - 18,
+      y: 40 + 52,
+      width: 360,
+      height: 420,
+    });
   });
 });

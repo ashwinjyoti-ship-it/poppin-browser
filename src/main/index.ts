@@ -37,6 +37,7 @@ import { TandemEngine } from './tandem/tandem-engine';
 import { TandemCredentialStore } from './tandem/tandem-credentials';
 import { executeTandemCapability } from './tandem/tandem-capability';
 import { SettingsOverlayController } from './browser/settings-overlay-controller';
+import { DownloadsOverlayController } from './browser/downloads-overlay-controller';
 import { ContinuityEngine } from './continuity/continuity-engine';
 import { ProfileStore } from './continuity/profile-store';
 import {
@@ -76,6 +77,7 @@ let tandemCredentials: TandemCredentialStore | null = null;
 let poppinPadStore: PoppinPadStore | null = null;
 let poppinPadEngine: PoppinPadEngine | null = null;
 let settingsOverlay: SettingsOverlayController | null = null;
+let downloadsOverlay: DownloadsOverlayController | null = null;
 let profileStore: ProfileStore | null = null;
 let continuityEngine: ContinuityEngine | null = null;
 let dataRootPath: string | null = null;
@@ -128,6 +130,10 @@ async function createWindow(): Promise<void> {
   };
 
   downloadManager = new DownloadManager(browserSession, () => mainWindow, (snapshot) => {
+    if (downloadsOverlay) {
+      downloadsOverlay.notify();
+      return;
+    }
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send(DOWNLOAD_CHANNELS.snapshot, snapshot);
     }
@@ -163,6 +169,12 @@ async function createWindow(): Promise<void> {
         },
       };
     },
+  );
+  downloadsOverlay = new DownloadsOverlayController(
+    mainWindow,
+    DOWNLOADS_OVERLAY_WEBPACK_ENTRY,
+    DOWNLOADS_OVERLAY_PRELOAD_WEBPACK_ENTRY,
+    () => downloadManager?.getSnapshot() ?? EMPTY_DOWNLOADS_SNAPSHOT,
   );
   workspaceEngine = new WorkspaceEngine(
     mainWindow, workspaceStore, browserEngine, git,
@@ -351,6 +363,8 @@ async function createWindow(): Promise<void> {
     const closingTaskEngine = taskEngine;
     settingsOverlay?.destroy();
     settingsOverlay = null;
+    downloadsOverlay?.destroy();
+    downloadsOverlay = null;
     mainWindow = null;
     browserEngine = null;
     downloadManager = null;
@@ -383,6 +397,10 @@ function isTrustedShellSender(sender: Electron.WebContents): boolean {
 
 function isTrustedSettingsSender(sender: Electron.WebContents): boolean {
   return isTrustedShellSender(sender) || Boolean(settingsOverlay?.isOverlaySender(sender));
+}
+
+function isTrustedDownloadsSender(sender: Electron.WebContents): boolean {
+  return isTrustedShellSender(sender) || Boolean(downloadsOverlay?.isOverlaySender(sender));
 }
 
 app.whenReady().then(async () => {
@@ -444,11 +462,25 @@ app.whenReady().then(async () => {
     return browserEngine?.execute(command) ?? { ok: false, message: 'Browser is not ready.' };
   });
   ipcMain.handle(DOWNLOAD_CHANNELS.getSnapshot, (event) => {
-    if (!isTrustedShellSender(event.sender)) throw new Error('Untrusted downloads snapshot request.');
-    return downloadManager?.getSnapshot() ?? EMPTY_DOWNLOADS_SNAPSHOT;
+    if (!isTrustedDownloadsSender(event.sender)) throw new Error('Untrusted downloads snapshot request.');
+    return downloadsOverlay?.getSnapshot() ?? downloadManager?.getSnapshot() ?? EMPTY_DOWNLOADS_SNAPSHOT;
   });
-  ipcMain.handle(DOWNLOAD_CHANNELS.command, (event, command: DownloadsCommand) => {
-    if (!isTrustedShellSender(event.sender)) throw new Error('Untrusted downloads command.');
+  ipcMain.handle(DOWNLOAD_CHANNELS.command, async (event, command: DownloadsCommand) => {
+    const fromShell = isTrustedShellSender(event.sender);
+    const fromOverlay = Boolean(downloadsOverlay?.isOverlaySender(event.sender));
+    if (!fromShell && !fromOverlay) throw new Error('Untrusted downloads command.');
+
+    if (command.type === 'openOverlay') {
+      if (!fromShell) return { ok: false, message: 'Only the Poppin shell can open downloads.' };
+      settingsOverlay?.close(false);
+      await downloadsOverlay?.open();
+      return { ok: true };
+    }
+    if (command.type === 'closeOverlay') {
+      downloadsOverlay?.close(fromOverlay);
+      return { ok: true };
+    }
+
     return downloadManager?.execute(command) ?? { ok: false, message: 'Downloads are not ready.' };
   });
   ipcMain.handle(WORKSPACE_CHANNELS.getSnapshot, (event) => {
@@ -509,6 +541,7 @@ app.whenReady().then(async () => {
 
     if (command.type === 'open') {
       if (!fromShell) return { ok: false, message: 'Only the Poppin shell can open Settings.' };
+      downloadsOverlay?.close(false);
       await settingsOverlay.open();
       return { ok: true };
     }

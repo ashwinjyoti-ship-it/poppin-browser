@@ -470,8 +470,9 @@ describe('packaged browser workflow', () => {
       return contents?.executeJavaScript("document.getElementById('download-blank').click()");
     }, origin);
 
-    // Downloads live in a settings-adjacent popover (no viewport shelf). Wait for
-    // the toolbar control to show activity, open it, then assert completion.
+    // Downloads open in a child overlay window so they paint above native page
+    // views without shrinking the viewport.
+    const boundsBeforeDownloads = await activeBrowserViewBounds(application);
     const downloadsButton = shell.getByRole('button', { name: /downloads/i });
     await expect.poll(() => downloadsButton.isVisible()).toBe(true);
     await expect.poll(async () => {
@@ -479,7 +480,10 @@ describe('packaged browser workflow', () => {
       return Boolean(label && /\d/.test(label));
     }).toBe(true);
     await downloadsButton.click();
-    await expect.poll(() => shell.getByRole('dialog', { name: /downloads/i }).isVisible()).toBe(true);
+    await expect.poll(() => downloadsButton.getAttribute('aria-expanded')).toBe('true');
+    const downloadsOverlay = await downloadsOverlayPage(application);
+    await expect.poll(() => downloadsOverlay.getByRole('dialog', { name: /downloads/i }).isVisible()).toBe(true);
+    expect(await activeBrowserViewBounds(application)).toEqual(boundsBeforeDownloads);
     await expect.poll(async () => {
       const snapshot = await shell.evaluate(async () => window.poppinDownloads.getSnapshot());
       return snapshot.items.some((item) => item.filename.includes('Poppin-Smoke-Fixture') && item.state === 'completed');
@@ -507,4 +511,9 @@ async function activeBrowserViewBounds(app: ElectronApplication) {
 async function settingsOverlayPage(app: ElectronApplication) {
   await expect.poll(() => app.windows().some((page) => page.url().includes('/renderer/settings_overlay/index.html'))).toBe(true);
   return app.windows().find((page) => page.url().includes('/renderer/settings_overlay/index.html'))!;
+}
+
+async function downloadsOverlayPage(app: ElectronApplication) {
+  await expect.poll(() => app.windows().some((page) => page.url().includes('/renderer/downloads_overlay/index.html'))).toBe(true);
+  return app.windows().find((page) => page.url().includes('/renderer/downloads_overlay/index.html'))!;
 }

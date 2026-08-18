@@ -56,6 +56,14 @@ const config: ForgeConfig = {
               js: './src/preload/settings-overlay.ts',
             },
           },
+          {
+            html: './src/renderer/downloads-overlay.html',
+            js: './src/renderer/downloads-overlay.tsx',
+            name: 'downloads_overlay',
+            preload: {
+              js: './src/preload/downloads-overlay.ts',
+            },
+          },
         ],
       },
     }),

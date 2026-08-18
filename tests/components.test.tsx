@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { BrowserSettingsPanel, BrowserToolbar } from '../src/renderer/ui/BrowserToolbar';
 import { TabStrip } from '../src/renderer/ui/TabStrip';
-import { CommandBar } from '../src/renderer/ui/CommandBar';
+import { CommandBar, CollapsedCommandControl } from '../src/renderer/ui/CommandBar';
 import { TaskTabView } from '../src/renderer/ui/TaskTabView';
 import { TandemSection } from '../src/renderer/ui/TandemSection';
 import { ProjectSection } from '../src/renderer/ui/ProjectSection';
@@ -629,6 +629,16 @@ describe('Codex controls', () => {
     await user.type(prompt, 'Tell me more');
     await user.click(screen.getByRole('button', { name: /send follow-up to codex/i }));
     expect(onCommand).toHaveBeenCalledWith({ type: 'continueTask', prompt: 'Tell me more' });
+  });
+
+  it('reopens the command bar from a compact chip instead of the toolbar', async () => {
+    const user = userEvent.setup();
+    const onOpen = vi.fn();
+    render(<CollapsedCommandControl running={false} onOpen={onOpen} />);
+    const reopen = screen.getByRole('button', { name: /open codex command bar/i });
+    expect(reopen).toHaveClass('command-bar-reopen');
+    await user.click(reopen);
+    expect(onOpen).toHaveBeenCalledTimes(1);
   });
 
   it('shows exactly what an approval will allow, in the task tab', async () => {
