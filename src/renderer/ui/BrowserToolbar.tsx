@@ -28,11 +28,10 @@ interface BrowserToolbarProps {
   onSubmit: (event: FormEvent) => void;
   onOverlayOpenChange?: (open: boolean) => void;
   /**
-   * Downloads control (icon + popover) rendered next to the Settings button.
-   * Provided by the App so `BrowserToolbar` stays stateless.
+   * Downloads trigger. The list opens in a child overlay window so it can
+   * paint above native page views without shrinking the viewport.
    */
   downloadsSlot?: ReactNode;
-  commandSlot?: ReactNode;
   padOpen?: boolean;
   onTogglePad?: () => void;
 }
@@ -60,7 +59,6 @@ export function BrowserToolbar({
   onSubmit,
   onOverlayOpenChange,
   downloadsSlot,
-  commandSlot,
   padOpen = false,
   onTogglePad,
 }: BrowserToolbarProps) {
@@ -258,7 +256,6 @@ export function BrowserToolbar({
             <span>Pad</span>
           </button>
         ) : null}
-        {commandSlot}
         {downloadsSlot}
         <button
           type="button"

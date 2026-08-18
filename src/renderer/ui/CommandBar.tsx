@@ -291,13 +291,12 @@ export function CollapsedCommandControl({
   return (
     <button
       type="button"
-      className={`command-bar-reopen ${running ? 'command-activity-running' : ''}`}
+      className={`command-bar-reopen ${running ? 'command-bar-reopen-running' : ''}`}
       onClick={onOpen}
       aria-label="Open Codex command bar"
       title="Open command bar"
     >
-      <Brand compact />
-      <ChevronUp size={13} />
+      <ChevronUp size={14} strokeWidth={2.2} />
     </button>
   );
 }

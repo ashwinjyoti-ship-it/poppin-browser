@@ -86,8 +86,8 @@ export function getFocusedRightPaneWidth(viewportWidth: number, leftPaneWidth: n
 }
 
 /** Native BrowserView right inset so the view stops before the pad + resize gutter. */
-export function browserRightInset(padWidth: number, downloadsOpen = false): number {
-  return Math.max(downloadsOpen ? 400 : 24, padWidth + PANE_BROWSER_GUTTER);
+export function browserRightInset(padWidth: number): number {
+  return Math.max(24, padWidth + PANE_BROWSER_GUTTER);
 }
 
 /** Native BrowserView left inset so the view starts after the context pane + gutter. */
@@ -97,7 +97,7 @@ export function browserLeftInset(leftPaneWidth: number, workspaceCollapsed: bool
 
 export const EXPANDED_COMMAND_BAR_HEIGHT = 94;
 
-/** Native BrowserView bottom inset. A collapsed command bar lives in top chrome. */
+/** Native BrowserView bottom inset. A collapsed reopen chip sits on the pad/rail, not in this inset. */
 export function browserBottomInset(options: {
   commandCollapsed: boolean;
   commandOverlayHeight: number;
