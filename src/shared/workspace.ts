@@ -148,8 +148,11 @@ export type WorkspaceCommand =
   | { type: 'chooseProjectFolder' }
   | {
       type: 'updateProjectSettings';
+      /** Optional. Blank keeps or infers an install from the project. */
       installCommand: string;
+      /** Optional. Blank keeps or infers a start command from package.json. */
       devCommand: string;
+      /** Optional HTTP(S) localhost address. Blank uses a detected or default preview. */
       previewUrl: string;
     }
   /** Opt the encrypted Memory brief in or out of the current context package. */

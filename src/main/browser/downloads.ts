@@ -11,28 +11,21 @@ import {
 } from 'electron';
 
 import {
-  downloadPercent,
   EMPTY_DOWNLOADS_SNAPSHOT,
-  type DownloadItemSnapshot,
-  type DownloadItemState,
   type DownloadsCommand,
   type DownloadsCommandResult,
   type DownloadsSnapshot,
 } from '../../shared/downloads';
+import { DownloadLedger } from './download-ledger';
+import type { DownloadsHistoryStore } from './downloads-store';
 
-const FINISHED_RETENTION_MS = 12_000;
 const LIKELY_DOWNLOAD_EXTENSION = /\.(dmg|pkg|zip|exe|msi|deb|rpm|7z|rar|gz|tgz|xz|iso|pdf|csv|xlsx?|docx?|pptx?|mp[34]|mov|mkv|avi|apk|ipa|tar|bz2)(\?|#|$)/i;
+const PROGRESS_POLL_MS = 200;
 
-interface TrackedDownload {
-  id: string;
-  item: DownloadItem;
-  filename: string;
-  url: string;
-  savePath: string;
-  receivedBytes: number;
-  totalBytes: number;
-  state: DownloadItemState;
-  clearTimer: NodeJS.Timeout | null;
+export interface DownloadManagerOptions {
+  historyStore?: DownloadsHistoryStore;
+  downloadsDirectory?: string;
+  now?: () => number;
 }
 
 /**
@@ -41,19 +34,33 @@ interface TrackedDownload {
  * downloads (especially target=_blank / redirected DMGs) can finish with a
  * missing or truncated file. This manager always pins a unique path under
  * the user's Downloads folder before bytes are written.
+ *
+ * Finished items stay in the ledger until the user dismisses or clears them,
+ * and are persisted so the dropdown still shows history after relaunch.
  */
 export class DownloadManager {
-  private readonly items = new Map<string, TrackedDownload>();
+  private readonly ledger = new DownloadLedger();
+  private readonly liveItems = new Map<string, DownloadItem>();
   private readonly windowRef: () => BrowserWindow | null;
+  private readonly historyStore: DownloadsHistoryStore | undefined;
+  private readonly downloadsDirectory: string | undefined;
+  private readonly now: () => number;
   private emitTimer: NodeJS.Timeout | null = null;
+  private persistTimer: NodeJS.Timeout | null = null;
+  private progressTimer: NodeJS.Timeout | null = null;
+  private persistQueue: Promise<void> = Promise.resolve();
   private registered = false;
 
   constructor(
     private readonly browserSession: Session,
     getWindow: () => BrowserWindow | null,
     private readonly onSnapshot: (snapshot: DownloadsSnapshot) => void,
+    options: DownloadManagerOptions = {},
   ) {
     this.windowRef = getWindow;
+    this.historyStore = options.historyStore;
+    this.downloadsDirectory = options.downloadsDirectory;
+    this.now = options.now ?? Date.now;
   }
 
   register(): void {
@@ -64,10 +71,16 @@ export class DownloadManager {
     });
   }
 
+  async restoreHistory(): Promise<void> {
+    if (!this.historyStore) return;
+    const items = await this.historyStore.load();
+    if (items.length === 0) return;
+    this.ledger.hydrate(items);
+    this.emitSoon();
+  }
+
   getSnapshot(): DownloadsSnapshot {
-    return {
-      items: Array.from(this.items.values(), (entry) => toSnapshot(entry)),
-    };
+    return this.ledger.size ? this.ledger.snapshot() : EMPTY_DOWNLOADS_SNAPSHOT;
   }
 
   execute(command: DownloadsCommand): DownloadsCommandResult {
@@ -76,26 +89,27 @@ export class DownloadManager {
     }
 
     if (command.type === 'clearFinished') {
-      for (const [id, entry] of this.items) {
-        if (entry.state === 'progressing') continue;
-        this.forget(id);
-      }
+      this.ledger.clearFinished();
       this.emitSoon();
+      this.persistSoon();
       return { ok: true };
     }
 
-    const entry = this.items.get(command.id);
+    const entry = this.ledger.get(command.id);
     if (!entry) return { ok: false, message: 'That download is no longer available.' };
 
     if (command.type === 'cancel') {
-      if (entry.state === 'progressing') entry.item.cancel();
+      const live = this.liveItems.get(command.id);
+      if (entry.state === 'progressing' && live) live.cancel();
       return { ok: true };
     }
 
     if (command.type === 'dismiss') {
-      if (entry.state === 'progressing') entry.item.cancel();
+      const live = this.liveItems.get(command.id);
+      if (entry.state === 'progressing' && live) live.cancel();
       this.forget(command.id);
       this.emitSoon();
+      this.persistSoon();
       return { ok: true };
     }
 
@@ -104,6 +118,13 @@ export class DownloadManager {
     }
     shell.showItemInFolder(entry.savePath);
     return { ok: true };
+  }
+
+  async dispose(): Promise<void> {
+    if (this.emitTimer) clearTimeout(this.emitTimer);
+    this.emitTimer = null;
+    this.stopProgressPump();
+    await this.flushPersist();
   }
 
   /** Prefer downloadURL over opening a tab when the link is clearly a file. */
@@ -117,82 +138,131 @@ export class DownloadManager {
 
   private begin(item: DownloadItem): void {
     const filename = sanitizeFilename(item.getFilename() || 'download');
-    const savePath = uniqueSavePath(app.getPath('downloads'), filename);
+    const savePath = uniqueSavePath(this.downloadsDirectory ?? app.getPath('downloads'), filename);
     // Must be synchronous inside will-download or Electron falls back to an
     // unreliable save-dialog path for sandboxed WebContentsViews.
     item.setSavePath(savePath);
 
     const id = randomUUID();
-    const entry: TrackedDownload = {
+    this.ledger.begin({
       id,
-      item,
       filename: path.basename(savePath),
       url: item.getURL(),
       savePath,
       receivedBytes: item.getReceivedBytes(),
       totalBytes: item.getTotalBytes(),
-      state: 'progressing',
-      clearTimer: null,
-    };
-    this.items.set(id, entry);
+      startedAt: this.now(),
+    });
+    this.liveItems.set(id, item);
+    this.ensureProgressPump();
     this.emitSoon();
 
     item.on('updated', (_event, state) => {
-      const current = this.items.get(id);
-      if (!current) return;
-      current.receivedBytes = item.getReceivedBytes();
-      current.totalBytes = item.getTotalBytes();
-      if (state === 'interrupted') {
-        current.state = 'interrupted';
-        if (item.canResume()) item.resume();
-      } else {
-        current.state = 'progressing';
-      }
+      if (!this.ledger.get(id)) return;
+      const resumable = state === 'interrupted' && item.canResume();
+      if (resumable) item.resume();
+      this.ledger.updateProgress(
+        id,
+        item.getReceivedBytes(),
+        item.getTotalBytes(),
+        state === 'interrupted' && !resumable ? 'interrupted' : 'progressing',
+      );
+      this.ensureProgressPump();
       this.emitSoon();
     });
 
     item.once('done', (_event, state) => {
-      const current = this.items.get(id);
-      if (!current) return;
-      current.receivedBytes = item.getReceivedBytes();
-      current.totalBytes = item.getTotalBytes();
-      current.state = state === 'completed' ? 'completed' : state === 'cancelled' ? 'cancelled' : 'interrupted';
-      // If Chromium reports completion but the file never landed, surface it.
-      if (current.state === 'completed' && !existsSync(current.savePath)) {
-        current.state = 'interrupted';
+      this.liveItems.delete(id);
+      const current = this.ledger.get(id);
+      if (!current) {
+        this.ensureProgressPump();
+        return;
       }
-      this.scheduleForget(id);
+      let nextState: 'completed' | 'cancelled' | 'interrupted' = state === 'completed'
+        ? 'completed'
+        : state === 'cancelled'
+          ? 'cancelled'
+          : 'interrupted';
+      // If Chromium reports completion but the file never landed, surface it.
+      if (nextState === 'completed' && !existsSync(current.savePath)) {
+        nextState = 'interrupted';
+      }
+      this.ledger.finish(id, nextState, item.getReceivedBytes(), item.getTotalBytes(), this.now());
+      this.ensureProgressPump();
       this.emitSoon();
+      this.persistSoon();
 
       const window = this.windowRef();
-      if (current.state === 'completed' && window && !window.isDestroyed()) {
+      if (nextState === 'completed' && window && !window.isDestroyed()) {
         app.dock?.bounce('informational');
       }
     });
   }
 
-  private scheduleForget(id: string): void {
-    const entry = this.items.get(id);
-    if (!entry || entry.clearTimer) return;
-    entry.clearTimer = setTimeout(() => {
-      this.forget(id);
-      this.emitSoon();
-    }, FINISHED_RETENTION_MS);
+  private forget(id: string): void {
+    this.liveItems.delete(id);
+    this.ledger.dismiss(id);
+    this.ensureProgressPump();
   }
 
-  private forget(id: string): void {
-    const entry = this.items.get(id);
-    if (!entry) return;
-    if (entry.clearTimer) clearTimeout(entry.clearTimer);
-    this.items.delete(id);
+  private ensureProgressPump(): void {
+    const hasLiveProgress = [...this.liveItems.keys()].some((id) => this.ledger.get(id)?.state === 'progressing');
+    if (hasLiveProgress && !this.progressTimer) {
+      this.progressTimer = setInterval(() => this.pumpProgress(), PROGRESS_POLL_MS);
+    } else if (!hasLiveProgress) {
+      this.stopProgressPump();
+    }
+  }
+
+  private stopProgressPump(): void {
+    if (!this.progressTimer) return;
+    clearInterval(this.progressTimer);
+    this.progressTimer = null;
+  }
+
+  private pumpProgress(): void {
+    let changed = false;
+    for (const [id, item] of this.liveItems) {
+      const entry = this.ledger.get(id);
+      if (!entry || entry.state !== 'progressing') continue;
+      const receivedBytes = item.getReceivedBytes();
+      const totalBytes = item.getTotalBytes();
+      if (receivedBytes === entry.receivedBytes && totalBytes === entry.totalBytes) continue;
+      this.ledger.updateProgress(id, receivedBytes, totalBytes);
+      changed = true;
+    }
+    if (changed) this.emitSoon();
   }
 
   private emitSoon(): void {
     if (this.emitTimer) return;
     this.emitTimer = setTimeout(() => {
       this.emitTimer = null;
-      this.onSnapshot(this.items.size ? this.getSnapshot() : EMPTY_DOWNLOADS_SNAPSHOT);
+      this.onSnapshot(this.getSnapshot());
     }, 50);
+  }
+
+  private persistSoon(): void {
+    if (!this.historyStore) return;
+    if (this.persistTimer) return;
+    this.persistTimer = setTimeout(() => {
+      this.persistTimer = null;
+      void this.flushPersist();
+    }, 100);
+  }
+
+  private flushPersist(): Promise<void> {
+    if (this.persistTimer) {
+      clearTimeout(this.persistTimer);
+      this.persistTimer = null;
+    }
+    const store = this.historyStore;
+    if (!store) return this.persistQueue;
+    const items = this.ledger.persistable();
+    this.persistQueue = this.persistQueue
+      .then(() => store.save(items))
+      .catch(() => undefined);
+    return this.persistQueue;
   }
 }
 
@@ -219,17 +289,4 @@ export function uniqueSavePath(directory: string, filename: string): string {
     index += 1;
   }
   return candidate;
-}
-
-function toSnapshot(entry: TrackedDownload): DownloadItemSnapshot {
-  return {
-    id: entry.id,
-    filename: entry.filename,
-    url: entry.url,
-    savePath: entry.savePath,
-    receivedBytes: entry.receivedBytes,
-    totalBytes: entry.totalBytes,
-    state: entry.state,
-    percent: downloadPercent(entry.receivedBytes, entry.totalBytes),
-  };
 }

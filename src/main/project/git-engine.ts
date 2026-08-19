@@ -5,6 +5,7 @@ import { promisify } from 'node:util';
 
 import { repositoryFolderName } from '../../shared/project-source';
 import type { WorkspaceProjectSnapshot } from '../../shared/workspace';
+import { detectProjectRuntime } from './project-runtime';
 
 const execFileAsync = promisify(execFile);
 const GIT_TIMEOUT_MS = 120_000;
@@ -16,13 +17,12 @@ export class GitEngine {
     const root = await this.run(['-C', repositoryPath, 'rev-parse', '--show-toplevel']);
     const branch = await this.run(['-C', root, 'branch', '--show-current']);
     const remote = await this.run(['-C', root, 'remote', 'get-url', 'origin'], true);
+    const runtime = await detectProjectRuntime(root);
     return {
       repositoryPath: root,
       remote: remote || null,
       branch: branch || 'detached HEAD',
-      installCommand: '',
-      devCommand: '',
-      previewUrl: 'http://localhost:3000',
+      ...runtime,
     };
   }
 

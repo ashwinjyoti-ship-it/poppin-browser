@@ -15,11 +15,13 @@ import { handleInternalPages, registerInternalScheme } from './browser/internal-
 import { searchEngineHomeUrl } from './browser/url-input';
 import { BrowserStateStore } from './browser/state-store';
 import { isAllowedBrowsingPermission } from './browser/permissions';
+import { chromeCompatibleUserAgent } from './browser/chromium-user-agent';
 import { clampWindowState, DEFAULT_WINDOW_STATE } from './browser/window-state';
 import { WORKSPACE_CHANNELS, type WorkspaceCommand } from '../shared/workspace';
 import { WorkspaceEngine } from './workspace/workspace-engine';
 import { WorkspaceStore } from './workspace/workspace-store';
 import { GitEngine } from './project/git-engine';
+import { detectProjectRuntime } from './project/project-runtime';
 import { TASK_CHANNELS, type TaskCommand } from '../shared/task';
 import { TaskEngine } from './task/task-engine';
 import { TaskStore } from './task/task-store';
@@ -50,6 +52,7 @@ import {
   type DownloadsCommand,
 } from '../shared/downloads';
 import { DownloadManager } from './browser/downloads';
+import { DownloadsHistoryStore } from './browser/downloads-store';
 import { POPPIN_PAD_CHANNELS, EMPTY_POPPIN_PAD_SNAPSHOT, type PoppinPadCommand } from '../shared/poppin-pad';
 import { PoppinPadStore } from './poppin-pad/poppin-pad-store';
 import { PoppinPadEngine } from './poppin-pad/poppin-pad-engine';
@@ -60,6 +63,7 @@ registerInternalScheme();
 // autoplay guard still pauses late-attaching players (YouTube); this blocks the
 // common Chromium autoplay path up front.
 app.commandLine.appendSwitch('autoplay-policy', 'user-gesture-required');
+app.userAgentFallback = chromeCompatibleUserAgent();
 
 let mainWindow: BrowserWindow | null = null;
 let browserEngine: BrowserEngine | null = null;
@@ -137,7 +141,10 @@ async function createWindow(): Promise<void> {
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send(DOWNLOAD_CHANNELS.snapshot, snapshot);
     }
+  }, {
+    historyStore: new DownloadsHistoryStore(dataRootPath ?? app.getPath('userData')),
   });
+  await downloadManager.restoreHistory();
   downloadManager.register();
   browserEngine = new BrowserEngine(mainWindow, browserSession, stateStore, getWindowState);
   if (!workspaceStore) throw new Error('Workspace storage is not ready.');
@@ -190,6 +197,7 @@ async function createWindow(): Promise<void> {
       },
     },
   );
+  void workspaceEngine.hydrateProjectRuntime();
   browserEngine.setSaveSessionHandler(() => {
     void workspaceEngine?.execute({ type: 'saveBrowserSession' });
   });
@@ -224,8 +232,9 @@ async function createWindow(): Promise<void> {
       else void browserAgentEngine?.execute({ type: 'stop' });
     },
     onOpenPreview: async (project) => {
-      await previewEngine?.start(project.repositoryPath, project.devCommand);
-      browserEngine?.openExternalUrl(project.previewUrl);
+      const runtime = await detectProjectRuntime(project.repositoryPath);
+      await previewEngine?.start(project.repositoryPath, project.devCommand.trim() || runtime.devCommand);
+      browserEngine?.openExternalUrl(project.previewUrl || runtime.previewUrl);
     },
     onOpenExternal: (url) => {
       pagesStore?.deactivateTabs();
@@ -367,6 +376,7 @@ async function createWindow(): Promise<void> {
     downloadsOverlay = null;
     mainWindow = null;
     browserEngine = null;
+    void downloadManager?.dispose();
     downloadManager = null;
     workspaceEngine = null;
     pagesEngine = null;

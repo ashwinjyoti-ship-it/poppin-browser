@@ -293,19 +293,33 @@ textarea:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
   width: 100%;
   height: 100%;
   max-height: none;
+  overflow: hidden;
   box-sizing: border-box;
 }
-.downloads-popover-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.downloads-popover-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex: 0 0 auto; }
 .downloads-popover-heading strong { color: #40352a; font-size: 12px; font-weight: 700; }
 .downloads-clear { border: none; background: transparent; color: #8d500d; font-size: 10px; font-weight: 600; cursor: pointer; }
 .downloads-clear:hover { text-decoration: underline; }
 .downloads-empty { margin: 6px 0 4px; color: #8a7b6a; font-size: 11px; text-align: center; }
-.downloads-popover-list { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.downloads-popover-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
 .downloads-popover-list .download-bar-item {
   display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(80px, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "copy actions"
+    "track track";
   align-items: center;
-  gap: 8px;
+  gap: 6px 8px;
   padding: 8px 10px;
   border: 1px solid rgba(228, 217, 204, .7);
   border-radius: 11px;
@@ -660,7 +674,7 @@ textarea:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
 .download-bar-item-completed { border-color: color-mix(in srgb, var(--group-green) 34%, var(--border)); }
 .download-bar-item-interrupted,
 .download-bar-item-cancelled { border-color: color-mix(in srgb, var(--error) 28%, var(--border)); }
-.download-bar-copy { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.download-bar-copy { grid-area: copy; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .download-bar-name {
   overflow: hidden;
   color: #3f352b;
@@ -671,9 +685,10 @@ textarea:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
 }
 .download-bar-meta { color: #8a7b6a; font-size: 10px; }
 .download-bar-track {
+  grid-area: track;
   position: relative;
   overflow: hidden;
-  height: 6px;
+  height: 8px;
   border-radius: 999px;
   background: rgba(112, 83, 48, .1);
 }
@@ -685,6 +700,9 @@ textarea:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
   background: linear-gradient(90deg, #d8892b, var(--amber-strong));
   transition: width 120ms ease;
 }
+.download-bar-item-completed .download-bar-fill {
+  background: linear-gradient(90deg, #8fb56c, var(--group-green));
+}
 .download-bar-fill-indeterminate {
   width: 36%;
   animation: download-bar-indeterminate 1.1s ease-in-out infinite;
@@ -693,7 +711,7 @@ textarea:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
   0% { transform: translateX(-120%); }
   100% { transform: translateX(320%); }
 }
-.download-bar-actions { display: flex; gap: 2px; }
+.download-bar-actions { grid-area: actions; display: flex; gap: 2px; }
 .download-bar-actions button {
   display: grid;
   place-items: center;
@@ -1106,6 +1124,7 @@ body.pane-is-resizing .poppin-pad-pane {
 .project-settings input { width: 100%; height: 34px; padding: 0 9px; border: 1px solid var(--border); border-radius: 8px; outline: 0; background: var(--surface); font-size: 10px; }
 .project-settings input:focus { border-color: #dc9a4f; }
 .secondary-button { min-height: 32px; padding: 0 10px; border: 1px solid #e4c9a8; border-radius: 8px; color: #935410; background: var(--amber-soft); font-size: 10px; font-weight: 680; }
+.secondary-button:disabled { opacity: .55; cursor: default; }
 .project-summary { padding: 10px; border: 1px solid var(--divider); border-radius: 10px; background: var(--surface-muted); }
 .project-summary > div { display: flex; align-items: center; gap: 7px; }
 .project-summary strong { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
@@ -1115,8 +1134,22 @@ body.pane-is-resizing .poppin-pad-pane {
 .project-summary dd { margin: 0; overflow: hidden; color: #685f56; text-overflow: ellipsis; white-space: nowrap; }
 .project-settings { margin-top: 8px; }
 .project-settings label { display: flex; flex-direction: column; gap: 4px; color: #777067; font-size: 9px; }
+.project-settings-copy { margin: 0 0 4px; color: #8a8178; font-size: 10px; line-height: 1.4; }
 .project-settings-disclosure { margin-top: 7px; }
-.project-settings-disclosure > summary { cursor: pointer; color: #82786d; font-size: 10px; font-weight: 700; list-style-position: inside; }
+.project-settings-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  color: #82786d;
+  background: transparent;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.project-settings-toggle:hover { color: #6a5f54; }
+.project-ready { margin: 8px 0 0; color: #7a5a2e; font-size: 10px; font-weight: 650; }
 .project-status { display: block; margin-top: 8px; color: #9b5911; font-size: 10px; }
 
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }

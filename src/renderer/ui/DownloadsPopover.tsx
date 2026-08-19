@@ -1,7 +1,13 @@
 import { Download, FolderOpen, X } from 'lucide-react';
 import { useEffect, useRef } from 'react';
 
-import { countProgressingDownloads, formatDownloadBytes, type DownloadItemSnapshot, type DownloadsSnapshot } from '../../shared/downloads';
+import {
+  countProgressingDownloads,
+  downloadDestinationFolder,
+  formatDownloadBytes,
+  type DownloadItemSnapshot,
+  type DownloadsSnapshot,
+} from '../../shared/downloads';
 
 interface DownloadsPanelProps {
   snapshot: DownloadsSnapshot;
@@ -134,27 +140,30 @@ function DownloadRow({
   onDismiss: (id: string) => void;
 }) {
   const label = statusLabel(item);
-  const percent = item.percent;
+  const percent = item.state === 'completed' ? 100 : item.percent;
+  const showTrack = item.state === 'progressing' || item.state === 'completed';
   return (
     <>
       <div className="download-bar-copy">
-        <strong className="download-bar-name" title={item.filename}>{item.filename}</strong>
+        <strong className="download-bar-name" title={item.savePath || item.filename}>{item.filename}</strong>
         <span className="download-bar-meta">{label}</span>
       </div>
-      <div
-        className="download-bar-track"
-        role="progressbar"
-        aria-label={`${item.filename} download progress`}
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-valuenow={percent ?? undefined}
-        aria-valuetext={percent === null ? label : `${percent} percent`}
-      >
-        <span
-          className={`download-bar-fill ${percent === null && item.state === 'progressing' ? 'download-bar-fill-indeterminate' : ''}`}
-          style={percent === null ? undefined : { width: `${percent}%` }}
-        />
-      </div>
+      {showTrack ? (
+        <div
+          className="download-bar-track"
+          role="progressbar"
+          aria-label={`${item.filename} download progress`}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={percent ?? undefined}
+          aria-valuetext={percent === null ? label : `${percent} percent`}
+        >
+          <span
+            className={`download-bar-fill ${percent === null && item.state === 'progressing' ? 'download-bar-fill-indeterminate' : ''}`}
+            style={percent === null ? undefined : { width: `${percent}%` }}
+          />
+        </div>
+      ) : null}
       <div className="download-bar-actions">
         {item.state === 'completed' ? (
           <button type="button" aria-label={`Show ${item.filename} in Finder`} title="Show in Finder" onClick={() => onReveal(item.id)}>
@@ -176,7 +185,12 @@ function DownloadRow({
 }
 
 function statusLabel(item: DownloadItemSnapshot): string {
-  if (item.state === 'completed') return 'Downloaded';
+  if (item.state === 'completed') {
+    const folder = downloadDestinationFolder(item.savePath);
+    const size = item.receivedBytes > 0 ? ` · ${formatDownloadBytes(item.receivedBytes)}` : '';
+    const destination = folder ? ` · Saved to ${folder}` : '';
+    return `Downloaded${size}${destination}`;
+  }
   if (item.state === 'cancelled') return 'Cancelled';
   if (item.state === 'interrupted') return 'Interrupted';
   if (item.percent !== null) {
