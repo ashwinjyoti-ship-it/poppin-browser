@@ -12,6 +12,7 @@ import {
   type Rectangle,
   type Session,
   type WebContents,
+  type WebPreferences,
   WebContentsView,
 } from 'electron';
 
@@ -42,7 +43,7 @@ import { HtmlFullscreenCoordinator, type HtmlFullscreenTransition } from './html
 import type { BrowserAgentAction, BrowserSemanticNode, BrowserSemanticSnapshot } from '../../shared/browser-agent';
 import { classifyMailboxControl, isSignedInMailboxUrl, outlookWebInboxUrl } from '../../shared/mail';
 import { signedInHumanUrlFor } from '../../shared/signed-in-session';
-import { applyChromiumUserAgent } from './chromium-user-agent';
+import { applyChromiumUserAgent, chromiumUserAgentDataScript } from './chromium-user-agent';
 import { showPageContextMenu } from './context-menu';
 import { DownloadManager } from './downloads';
 
@@ -59,9 +60,16 @@ const MAX_TAB_SEARCH_RESULTS = 20;
 const TAB_SEARCH_SNIPPET_RADIUS = 80;
 const CLOSED_TAB_LIMIT = 12;
 const BLANK_POPUP_ADOPT_TIMEOUT_MS = 30_000;
+const GOOGLE_WORKSPACE_BOUNCE_HOLD_MS = 3_000;
 const GROUP_COLORS: BrowserGroupColor[] = ['amber', 'blue', 'green', 'rose', 'violet'];
 /** Same-origin SPA hosts whose own click/history handling must not be rewritten into window.open. */
-export const GOOGLE_DOCS_LINK_HOSTS = new Set(['docs.google.com', 'drive.google.com']);
+export const GOOGLE_WORKSPACE_HOSTS = new Set([
+  'docs.google.com',
+  'drive.google.com',
+  'sheets.google.com',
+  'slides.google.com',
+]);
+export const GOOGLE_DOCS_LINK_HOSTS = GOOGLE_WORKSPACE_HOSTS;
 const AUTHENTICATION_HOSTS = new Set([
   'accounts.google.com', 'appleid.apple.com', 'auth.openai.com', 'chatgpt.com',
   'login.microsoftonline.com', 'login.live.com', 'claude.ai', 'auth.anthropic.com',
@@ -76,6 +84,7 @@ interface BrowserTabRecord {
   snapshot: BrowserTabSnapshot;
   lastExternalUrl: string;
   documentGeneration: number;
+  googleWorkspaceHold: { documentUrl: string; expiresAt: number; restores: number } | null;
 }
 
 interface SemanticReferenceRecord {
@@ -978,15 +987,7 @@ export class BrowserEngine {
     const normalized = normalizeTabInput(input, this.settings.searchEngine);
     const initialUrl = normalized.kind === 'invalid' ? NEW_TAB_URL : normalized.url;
     const view = new WebContentsView({
-      webPreferences: {
-        session: this.browserSession,
-        nodeIntegration: false,
-        contextIsolation: true,
-        sandbox: true,
-        webSecurity: true,
-        allowRunningInsecureContent: false,
-        devTools: !app.isPackaged,
-      },
+      webPreferences: this.pageWebPreferences(),
     });
     view.webContents.setUserAgent(this.browserSession.getUserAgent());
     view.setBorderRadius(18);
@@ -1014,6 +1015,7 @@ export class BrowserEngine {
       snapshot,
       lastExternalUrl: initialUrl,
       documentGeneration: 0,
+      googleWorkspaceHold: null,
     };
     this.tabs.set(id, record);
     this.insertTabId(id, position);
@@ -1033,11 +1035,15 @@ export class BrowserEngine {
 
   private attachTabEvents(tab: BrowserTabRecord): void {
     const contents = tab.view.webContents;
-    contents.setWindowOpenHandler(({ url }) => this.applyWindowOpenAction(tab, resolveWindowOpenAction({
-      url,
+    void contents.executeJavaScriptInIsolatedWorld(0, [{ code: chromiumUserAgentDataScript() }], true)
+      .catch(() => undefined);
+    contents.setWindowOpenHandler((details) => this.applyWindowOpenAction(tab, resolveWindowOpenAction({
+      url: details.url,
       openerUrl: contents.getURL(),
       isTaskTab: Boolean(tab.snapshot.taskSpaceId),
       linkOpening: this.settings.linkOpening,
+      disposition: details.disposition,
+      focusNewTabs: this.settings.focusNewTabs,
     }), contents));
     contents.on('did-create-window', (popup, details) => {
       if (!tab.snapshot.taskSpaceId && isAuthenticationPopup(details.url, contents.getURL())) {
@@ -1101,6 +1107,10 @@ export class BrowserEngine {
         event.preventDefault();
         return;
       }
+      if (this.shouldHoldGoogleWorkspaceDocument(tab, url)) {
+        event.preventDefault();
+        return;
+      }
       if (isGoogleWidgetMainFrameUrl(url)) {
         event.preventDefault();
         const recovered = recoverMailUrlFromGoogleWidget(url);
@@ -1109,6 +1119,11 @@ export class BrowserEngine {
         }
         return;
       }
+    });
+    contents.on('did-start-navigation', (details) => {
+      if (!details.isMainFrame) return;
+      void contents.executeJavaScriptInIsolatedWorld(0, [{ code: chromiumUserAgentDataScript() }], true)
+        .catch(() => undefined);
     });
     contents.on('before-input-event', (event, input) => {
       if (this.handleShortcut(input)) event.preventDefault();
@@ -1193,7 +1208,12 @@ export class BrowserEngine {
     tab: BrowserTabRecord,
     action: WindowOpenAction,
     contents: WebContents,
-  ): { action: 'allow' | 'deny'; overrideBrowserWindowOptions?: BrowserWindowConstructorOptions } {
+  ): {
+    action: 'allow' | 'deny';
+    overrideBrowserWindowOptions?: BrowserWindowConstructorOptions;
+    outlivesOpener?: boolean;
+    createWindow?: (options: BrowserWindowConstructorOptions) => WebContents;
+  } {
     switch (action.type) {
       case 'authentication':
         return {
@@ -1205,15 +1225,93 @@ export class BrowserEngine {
         return { action: 'deny' };
       case 'deny':
         return { action: 'deny' };
-      case 'adopt-blank':
+      case 'open-as-tab':
         return {
           action: 'allow',
-          overrideBrowserWindowOptions: this.blankAdoptionWindowOptions(),
+          outlivesOpener: true,
+          createWindow: (options) => this.adoptWindowOpenAsTab(tab, action.url, options, action.activate),
         };
       case 'open':
         this.openResolvedWindowUrl(tab, action.url, action.target);
         return { action: 'deny' };
     }
+  }
+
+  private pageWebPreferences(): WebPreferences {
+    return {
+      session: this.browserSession,
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
+      webSecurity: true,
+      allowRunningInsecureContent: false,
+      devTools: !app.isPackaged,
+    };
+  }
+
+  /**
+   * Turn `window.open` into a real Poppin tab *without* denying the popup.
+   * Google Docs/Drive call history.back() on the list when window.open returns
+   * null; a live WebContents keeps the document in the new tab.
+   */
+  private adoptWindowOpenAsTab(
+    opener: BrowserTabRecord,
+    url: string,
+    options: BrowserWindowConstructorOptions & { webContents?: WebContents },
+    activate: boolean,
+  ): WebContents {
+    const id = randomUUID();
+    const initialUrl = isBlankWindowOpenUrl(url) ? 'about:blank' : url;
+    const view = new WebContentsView({
+      ...(options.webContents ? { webContents: options.webContents } : {}),
+      webPreferences: this.pageWebPreferences(),
+    });
+    view.webContents.setUserAgent(this.browserSession.getUserAgent());
+    view.setBorderRadius(18);
+    view.setBackgroundColor('#fbf8f2');
+    view.setVisible(false);
+    const snapshot: BrowserTabSnapshot = {
+      id,
+      url: displayUrl(initialUrl === 'about:blank' ? NEW_TAB_URL : initialUrl),
+      title: 'Loading…',
+      faviconUrls: faviconForUrl(initialUrl, this.faviconByOrigin),
+      pinned: false,
+      groupId: opener.snapshot.groupId,
+      taskSpaceId: opener.snapshot.taskSpaceId,
+      isLoading: true,
+      canGoBack: false,
+      canGoForward: false,
+      historyIndex: 0,
+      history: [],
+      failure: null,
+    };
+    const record: BrowserTabRecord = {
+      view,
+      snapshot,
+      lastExternalUrl: initialUrl === 'about:blank' ? NEW_TAB_URL : initialUrl,
+      documentGeneration: 0,
+      googleWorkspaceHold: null,
+    };
+    this.tabs.set(id, record);
+    this.insertTabId(id, 'preferred');
+    this.window.contentView.addChildView(view);
+    this.attachTabEvents(record);
+    if (!options.webContents && !isBlankWindowOpenUrl(initialUrl) && (safeProtocol(initialUrl) === 'http:' || safeProtocol(initialUrl) === 'https:')) {
+      void view.webContents.loadURL(initialUrl).catch(() => undefined);
+    }
+    if (activate && !opener.snapshot.taskSpaceId) this.activateTab(id);
+    else {
+      this.layoutViews();
+      this.emitSnapshot();
+    }
+    this.scheduleSave();
+    return view.webContents;
+  }
+
+  private shouldHoldGoogleWorkspaceDocument(tab: BrowserTabRecord, nextUrl: string): boolean {
+    const hold = tab.googleWorkspaceHold;
+    if (!hold || Date.now() > hold.expiresAt) return false;
+    return shouldBlockGoogleWorkspaceBounce(hold.documentUrl, nextUrl);
   }
 
   private openPageLink(tab: BrowserTabRecord, url: string, disposition: 'current' | 'new-tab'): void {
@@ -1224,7 +1322,7 @@ export class BrowserEngine {
       void tab.view.webContents.loadURL(url).catch(() => undefined);
       return;
     }
-    this.createTab(url, randomUUID(), false, undefined, this.settings.focusNewTabs);
+    this.createTab(url, randomUUID(), false, undefined, this.settings.focusNewTabs || isGoogleWorkspaceDocumentUrl(url));
   }
 
   private openResolvedWindowUrl(tab: BrowserTabRecord, url: string, target: 'new-tab' | 'same-tab'): void {
@@ -1233,7 +1331,7 @@ export class BrowserEngine {
       void tab.view.webContents.loadURL(url).catch(() => undefined);
       return;
     }
-    this.createTab(url, randomUUID(), false, undefined, this.settings.focusNewTabs);
+    this.createTab(url, randomUUID(), false, undefined, this.settings.focusNewTabs || isGoogleWorkspaceDocumentUrl(url));
   }
 
   /**
@@ -1270,40 +1368,21 @@ export class BrowserEngine {
     popup.webContents.on('did-redirect-navigation', (_event, url) => {
       tryAdopt(url);
     });
-    popup.webContents.setWindowOpenHandler(({ url }) => this.applyWindowOpenAction(
+    popup.webContents.setWindowOpenHandler((details) => this.applyWindowOpenAction(
       opener,
       resolveWindowOpenAction({
-        url,
+        url: details.url,
         openerUrl: popup.webContents.getURL() || opener.view.webContents.getURL(),
         isTaskTab: Boolean(opener.snapshot.taskSpaceId),
         linkOpening: this.settings.linkOpening,
+        disposition: details.disposition,
+        focusNewTabs: this.settings.focusNewTabs,
       }),
       opener.view.webContents,
     ));
     setTimeout(() => {
       if (!popup.isDestroyed() && isBlankWindowOpenUrl(popup.webContents.getURL())) popup.close();
     }, BLANK_POPUP_ADOPT_TIMEOUT_MS);
-  }
-
-  private blankAdoptionWindowOptions(): BrowserWindowConstructorOptions {
-    return {
-      show: false,
-      frame: true,
-      title: 'Opening…',
-      backgroundColor: '#fbf8f2',
-      autoHideMenuBar: true,
-      minimizable: false,
-      maximizable: false,
-      fullscreenable: false,
-      webPreferences: {
-        session: this.browserSession,
-        nodeIntegration: false,
-        contextIsolation: true,
-        sandbox: true,
-        webSecurity: true,
-        allowRunningInsecureContent: false,
-      },
-    };
   }
 
   private authenticationWindowOptions(): BrowserWindowConstructorOptions {
@@ -1420,6 +1499,22 @@ export class BrowserEngine {
     if (recovered) {
       void tab.view.webContents.loadURL(recovered).catch(() => undefined);
       return;
+    }
+    if (this.shouldHoldGoogleWorkspaceDocument(tab, url)) {
+      const hold = tab.googleWorkspaceHold;
+      if (hold && hold.documentUrl !== url && hold.restores < 2) {
+        hold.restores += 1;
+        void tab.view.webContents.loadURL(hold.documentUrl).catch(() => undefined);
+        return;
+      }
+      if (hold) tab.googleWorkspaceHold = null;
+    }
+    if (isGoogleWorkspaceDocumentUrl(url)) {
+      tab.googleWorkspaceHold = {
+        documentUrl: url,
+        expiresAt: Date.now() + GOOGLE_WORKSPACE_BOUNCE_HOLD_MS,
+        restores: 0,
+      };
     }
     if (resetFavicon) {
       tab.documentGeneration += 1;
@@ -2073,7 +2168,7 @@ export class BrowserEngine {
         const href = target.href;
         if (!href || href.startsWith('javascript:') || href.startsWith('mailto:') || href.startsWith('tel:') || target.hash && target.origin === location.origin && target.pathname === location.pathname) return;
         if (target.target === '_blank' || target.target === '_new') return;
-        if (${JSON.stringify([...GOOGLE_DOCS_LINK_HOSTS])}.includes(location.hostname) && target.origin === location.origin) return;
+        if (${JSON.stringify([...GOOGLE_WORKSPACE_HOSTS])}.includes(location.hostname) && target.origin === location.origin) return;
         if (${JSON.stringify(previewExternal)} && target.origin === location.origin) return;
         event.preventDefault();
         event.stopImmediatePropagation();
@@ -2264,28 +2359,41 @@ export type WindowOpenAction =
   | { type: 'authentication' }
   | { type: 'download'; url: string }
   | { type: 'deny' }
-  | { type: 'adopt-blank' }
-  | { type: 'open'; url: string; target: 'new-tab' | 'same-tab' };
+  | { type: 'open'; url: string; target: 'new-tab' | 'same-tab' }
+  | { type: 'open-as-tab'; url: string; activate: boolean };
+
+export type WindowOpenDisposition = 'default' | 'foreground-tab' | 'background-tab' | 'new-window' | 'other';
 
 export function resolveWindowOpenAction(input: {
   url: string;
   openerUrl: string;
   isTaskTab: boolean;
   linkOpening: BrowserSettings['linkOpening'];
+  disposition?: WindowOpenDisposition;
+  focusNewTabs?: boolean;
 }): WindowOpenAction {
   const { url, openerUrl, isTaskTab, linkOpening } = input;
+  const disposition = input.disposition ?? 'foreground-tab';
+  const focusNewTabs = input.focusNewTabs !== false;
   if (!isTaskTab && isAuthenticationPopup(url, openerUrl)) return { type: 'authentication' };
   if (DownloadManager.isLikelyDownloadUrl(url)) return { type: 'download', url };
   if (isGoogleWidgetMainFrameUrl(url)) return { type: 'deny' };
-  if (isBlankWindowOpenUrl(url)) return { type: 'adopt-blank' };
+  const workspaceOpen = isGoogleWorkspaceHost(openerUrl) || isGoogleWorkspaceHost(url);
+  if (isBlankWindowOpenUrl(url)) {
+    if (isTaskTab) return { type: 'deny' };
+    return { type: 'open-as-tab', url: url.trim() || 'about:blank', activate: disposition !== 'background-tab' && (focusNewTabs || workspaceOpen) };
+  }
   try {
     const protocol = new URL(url).protocol;
     if (protocol !== 'http:' && protocol !== 'https:') return { type: 'deny' };
   } catch {
     return { type: 'deny' };
   }
-  if (isTaskTab || linkOpening === 'same-tab') return { type: 'open', url, target: 'same-tab' };
-  return { type: 'open', url, target: 'new-tab' };
+  const activate = disposition !== 'background-tab' && (focusNewTabs || workspaceOpen);
+  if (isTaskTab) return { type: 'open', url, target: 'same-tab' };
+  if (workspaceOpen) return { type: 'open-as-tab', url, activate: disposition !== 'background-tab' };
+  if (linkOpening === 'same-tab' || disposition === 'default') return { type: 'open', url, target: 'same-tab' };
+  return { type: 'open-as-tab', url, activate };
 }
 
 /** True when a page click should keep native/SPA handling instead of forced window.open. */
@@ -2295,10 +2403,48 @@ export function shouldDeferPageLinkHandling(pageUrl: string, linkHref: string, l
   try {
     const page = new URL(pageUrl);
     const link = new URL(linkHref, pageUrl);
-    return GOOGLE_DOCS_LINK_HOSTS.has(page.hostname) && link.origin === page.origin;
+    return GOOGLE_WORKSPACE_HOSTS.has(page.hostname) && link.origin === page.origin;
   } catch {
     return false;
   }
+}
+
+export function isGoogleWorkspaceHost(value: string): boolean {
+  try {
+    const hostname = value.includes('://') ? new URL(value).hostname : value;
+    return GOOGLE_WORKSPACE_HOSTS.has(hostname);
+  } catch {
+    return false;
+  }
+}
+
+export function isGoogleWorkspaceDocumentUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    if (!GOOGLE_WORKSPACE_HOSTS.has(url.hostname)) return false;
+    return /\/(?:document|spreadsheets|presentation|file|drawings|forms)\/d\//.test(url.pathname)
+      || url.pathname.startsWith('/open');
+  } catch {
+    return false;
+  }
+}
+
+export function isGoogleWorkspaceListUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    if (!GOOGLE_WORKSPACE_HOSTS.has(url.hostname)) return false;
+    if (isGoogleWorkspaceDocumentUrl(value)) return false;
+    if (url.hostname === 'drive.google.com') return true;
+    return /\/(?:document|spreadsheets|presentation|drawings|forms)\/(?:u\/|$)/.test(url.pathname)
+      || /\/(?:document|spreadsheets|presentation)\/?$/.test(url.pathname);
+  } catch {
+    return false;
+  }
+}
+
+/** Docs/Drive open a file then history.back() the list; do not honor that bounce. */
+export function shouldBlockGoogleWorkspaceBounce(currentUrl: string, nextUrl: string): boolean {
+  return isGoogleWorkspaceDocumentUrl(currentUrl) && isGoogleWorkspaceListUrl(nextUrl);
 }
 
 /** Rewrites a persisted or in-flight Gmail widget URL back to the inbox. */

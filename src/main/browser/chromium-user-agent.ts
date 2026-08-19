@@ -92,6 +92,65 @@ export function applyClientHintHeaders(
   return { ...next, ...chromiumClientHintHeaders(chromeVersion, platform) };
 }
 
+/**
+ * Page-world shim so Google’s JS `navigator.userAgentData` check matches the
+ * request headers. Electron still brands itself in UA-CH even after setUserAgent.
+ */
+export function chromiumUserAgentDataScript(
+  chromeVersion = process.versions.chrome,
+  platform = process.platform,
+): string {
+  const major = chromeMajorVersion(chromeVersion);
+  const full = chromeVersionForUserAgent(chromeVersion);
+  const ua = chromeCompatibleUserAgent(chromeVersion, platform);
+  const platformName = platform === 'win32' ? 'Windows' : platform === 'linux' ? 'Linux' : 'macOS';
+  const architecture = process.arch === 'arm64' || process.arch === 'arm' ? 'arm' : 'x86';
+  const bitness = process.arch === 'ia32' ? '32' : '64';
+  return `(() => {
+    const ua = ${JSON.stringify(ua)};
+    const brands = [
+      { brand: 'Chromium', version: ${JSON.stringify(major)} },
+      { brand: 'Not:A-Brand', version: '24' },
+      { brand: 'Google Chrome', version: ${JSON.stringify(major)} },
+    ];
+    const fullVersionList = [
+      { brand: 'Chromium', version: ${JSON.stringify(full)} },
+      { brand: 'Not:A-Brand', version: '10.0.1.4' },
+      { brand: 'Google Chrome', version: ${JSON.stringify(full)} },
+    ];
+    const data = {
+      brands,
+      mobile: false,
+      platform: ${JSON.stringify(platformName)},
+      getHighEntropyValues: async (hints) => {
+        const values = {
+          brands,
+          fullVersionList,
+          mobile: false,
+          model: '',
+          platform: ${JSON.stringify(platformName)},
+          platformVersion: ${JSON.stringify(platform === 'darwin' ? '15.0.0' : '10.0.0')},
+          uaFullVersion: ${JSON.stringify(full)},
+          architecture: ${JSON.stringify(architecture)},
+          bitness: ${JSON.stringify(bitness)},
+          wow64: false,
+        };
+        if (!Array.isArray(hints) || hints.length === 0) return values;
+        const requested = {};
+        for (const hint of hints) {
+          if (hint in values) requested[hint] = values[hint];
+        }
+        return requested;
+      },
+      toJSON() { return { brands: this.brands, mobile: this.mobile, platform: this.platform }; },
+    };
+    try { Object.defineProperty(Navigator.prototype, 'userAgent', { configurable: true, get: () => ua }); } catch {}
+    try { Object.defineProperty(navigator, 'userAgent', { configurable: true, get: () => ua }); } catch {}
+    try { Object.defineProperty(Navigator.prototype, 'userAgentData', { configurable: true, get: () => data }); } catch {}
+    try { Object.defineProperty(navigator, 'userAgentData', { configurable: true, get: () => data }); } catch {}
+  })()`;
+}
+
 /** Apply a Chromium-compatible UA and Client Hints to the browsing session. */
 export function applyChromiumUserAgent(target: Session, chromeVersion = process.versions.chrome): void {
   const ua = chromeCompatibleUserAgent(chromeVersion);

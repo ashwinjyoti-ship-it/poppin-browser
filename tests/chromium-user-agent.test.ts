@@ -5,6 +5,7 @@ import {
   chromeCompatibleUserAgent,
   chromeMajorVersion,
   chromiumClientHintHeaders,
+  chromiumUserAgentDataScript,
   frozenChromeVersion,
 } from '../src/main/browser/chromium-user-agent';
 
@@ -50,5 +51,13 @@ describe('chromium-compatible user agent', () => {
     expect(headers['User-Agent']).not.toMatch(/Electron/i);
     expect(headers['sec-ch-ua']).not.toMatch(/Electron/i);
     expect(headers['sec-ch-ua']).toContain('"Chromium";v="144"');
+  });
+
+  it('shims navigator.userAgentData in the page world without an Electron brand', () => {
+    const script = chromiumUserAgentDataScript(chrome, 'darwin');
+    expect(script).toContain('Google Chrome');
+    expect(script).toContain('"144"');
+    expect(script).toContain('userAgentData');
+    expect(script).not.toMatch(/Electron/i);
   });
 });
