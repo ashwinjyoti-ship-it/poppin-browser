@@ -23,6 +23,7 @@ import { parseProjectSource, repositoryFolderName } from '../../shared/project-s
 import { WorkspaceStore } from './workspace-store';
 import { BrowserEngine } from '../browser/browser-engine';
 import { GitEngine } from '../project/git-engine';
+import { detectProjectRuntime, mergeProjectRuntime, normalizeOptionalPreviewUrl } from '../project/project-runtime';
 import { PagesStore } from '../pages/pages-store';
 import { memoryBrief, selectedPageContexts } from '../pages/page-context';
 
@@ -142,7 +143,7 @@ export class WorkspaceEngine {
       case 'chooseProjectFolder':
         return this.chooseProjectFolder();
       case 'updateProjectSettings':
-        return this.updateProjectSettings(command);
+        return await this.updateProjectSettings(command);
       case 'setMemorySelected':
         return this.setMemorySelected(command.selected);
       case 'saveContextPack':
@@ -611,16 +612,34 @@ export class WorkspaceEngine {
     }
   }
 
-  private updateProjectSettings(command: Extract<WorkspaceCommand, { type: 'updateProjectSettings' }>): WorkspaceCommandResult {
+  /**
+   * Fill blank install/dev/preview from the repo so an already-connected
+   * project becomes usable for Code without asking the user for npm commands.
+   */
+  async hydrateProjectRuntime(): Promise<void> {
+    const project = this.store.getProject();
+    if (!project) return;
+    const merged = { ...project, ...mergeProjectRuntime(project, await detectProjectRuntime(project.repositoryPath)) };
+    if (
+      merged.installCommand === project.installCommand
+      && merged.devCommand === project.devCommand
+      && merged.previewUrl === project.previewUrl
+    ) return;
+    this.store.saveProject(merged);
+    this.emitSnapshot();
+  }
+
+  private async updateProjectSettings(command: Extract<WorkspaceCommand, { type: 'updateProjectSettings' }>): Promise<WorkspaceCommandResult> {
     const project = this.store.getProject();
     if (!project) return { ok: false, message: 'Connect a project first.' };
-    const previewUrl = normalizePreviewUrl(command.previewUrl);
-    if (!previewUrl) return { ok: false, message: 'Use a valid HTTP preview URL.' };
+    const previewUrl = normalizeOptionalPreviewUrl(command.previewUrl);
+    if (previewUrl === null) return { ok: false, message: 'Use a valid HTTP preview address, or leave it blank.' };
+    const detected = await detectProjectRuntime(project.repositoryPath);
     this.store.saveProject({
       ...project,
       installCommand: command.installCommand.trim(),
       devCommand: command.devCommand.trim(),
-      previewUrl,
+      previewUrl: previewUrl || detected.previewUrl,
     });
     this.emitSnapshot();
     return { ok: true };
@@ -636,7 +655,13 @@ export class WorkspaceEngine {
 
   private async runGitOperation(operation: () => Promise<import('../../shared/workspace').WorkspaceProjectSnapshot>): Promise<WorkspaceCommandResult> {
     try {
-      this.store.saveProject(await operation());
+      const previous = this.store.getProject();
+      const inspected = await operation();
+      const sameRepo = previous?.repositoryPath === inspected.repositoryPath;
+      this.store.saveProject({
+        ...inspected,
+        ...mergeProjectRuntime(sameRepo ? previous : null, inspected),
+      });
       this.emitSnapshot();
       return { ok: true };
     } catch (error) {
@@ -673,16 +698,6 @@ function expandLocalPath(value: string): string {
   if (value === '~') return os.homedir();
   if (value.startsWith('~/') || value.startsWith('~\\')) return path.join(os.homedir(), value.slice(2));
   return path.resolve(value);
-}
-
-function normalizePreviewUrl(input: string): string | null {
-  try {
-    const value = input.trim();
-    const url = new URL(/^https?:\/\//i.test(value) ? value : `http://${value}`);
-    return url.protocol === 'http:' || url.protocol === 'https:' ? url.toString().replace(/\/$/, '') : null;
-  } catch {
-    return null;
-  }
 }
 
 async function captureDocument(filePath: string, sizeBytes: number): Promise<{ text: string | null; truncated: boolean }> {

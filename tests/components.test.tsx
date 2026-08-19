@@ -533,12 +533,22 @@ describe('browser chrome', () => {
     expect(onTandemCommand).toHaveBeenCalledWith({ type: 'connect', baseUrl: 'tandem.example.com', apiKey: 'udm_secret' });
   });
 
-  it('keeps connected project settings collapsed until requested', async () => {
+  it('keeps connected run settings collapsed until requested and saves without terminal commands', async () => {
     const user = userEvent.setup();
-    render(<ProjectSection project={{ repositoryPath: '/tmp/poppin', remote: 'origin', branch: 'main', installCommand: 'npm ci', devCommand: 'npm run dev', previewUrl: 'http://localhost:3000' }} onCommand={vi.fn().mockResolvedValue(null)} />);
-    expect(screen.queryByLabelText('Install command')).not.toBeVisible();
-    await user.click(screen.getByText('Project settings'));
-    expect(screen.getByLabelText('Install command')).toBeVisible();
+    const onCommand = vi.fn().mockResolvedValue(null);
+    render(<ProjectSection project={{ repositoryPath: '/tmp/poppin', remote: 'origin', branch: 'main', installCommand: '', devCommand: '', previewUrl: 'http://localhost:3000' }} onCommand={onCommand} />);
+    expect(screen.getByText(/ready for code/i)).toBeVisible();
+    expect(screen.queryByLabelText('Install dependencies')).toBeNull();
+    await user.click(screen.getByRole('button', { name: /how to run this project/i }));
+    expect(screen.getByLabelText('Install dependencies')).toBeVisible();
+    await user.click(screen.getByRole('button', { name: /save run settings/i }));
+    expect(onCommand).toHaveBeenCalledWith({
+      type: 'updateProjectSettings',
+      installCommand: '',
+      devCommand: '',
+      previewUrl: 'http://localhost:3000',
+    });
+    expect(await screen.findByRole('status')).toHaveTextContent(/saved/i);
   });
 
   it('adds a project from one field that accepts a folder or Git URL', async () => {
@@ -576,11 +586,13 @@ const PROJECT_WORKSPACE: WorkspaceSnapshot = {
 };
 
 describe('Codex controls', () => {
-  it('sends the selected model, reasoning, and prompt', async () => {
+  it('starts a Code task from a connected folder without install or dev commands', async () => {
     const user = userEvent.setup();
     const onCommand = vi.fn().mockResolvedValue({ ok: true });
     const onOverlayHeightChange = vi.fn();
     render(<CommandBar snapshot={READY_TASK} workspace={PROJECT_WORKSPACE} pad={EMPTY_POPPIN_PAD_SNAPSHOT} collapsed={false} onCollapseChange={vi.fn()} onCommand={onCommand} onPadCommand={vi.fn()} onOverlayHeightChange={onOverlayHeightChange} />);
+    expect(PROJECT_WORKSPACE.project?.installCommand).toBe('');
+    expect(PROJECT_WORKSPACE.project?.devCommand).toBe('');
     await user.type(screen.getByRole('textbox', { name: /prompt/i }), 'Make the button amber');
     await user.click(screen.getByRole('button', { name: /send to codex/i }));
     expect(screen.getByRole('region', { name: /task preflight/i })).toBeVisible();

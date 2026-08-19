@@ -4,6 +4,9 @@ export const DOWNLOAD_CHANNELS = {
   snapshot: 'downloads:snapshot',
 } as const;
 
+export const DOWNLOADS_HISTORY_VERSION = 1;
+export const DOWNLOADS_HISTORY_LIMIT = 50;
+
 export type DownloadItemState = 'progressing' | 'completed' | 'cancelled' | 'interrupted';
 
 export interface DownloadItemSnapshot {
@@ -16,6 +19,13 @@ export interface DownloadItemSnapshot {
   state: DownloadItemState;
   /** 0–100 when totalBytes is known; otherwise null. */
   percent: number | null;
+  startedAt: number;
+  endedAt: number | null;
+}
+
+export interface PersistedDownloadsHistory {
+  version: typeof DOWNLOADS_HISTORY_VERSION;
+  items: DownloadItemSnapshot[];
 }
 
 export interface DownloadsSnapshot {
@@ -56,6 +66,14 @@ export function formatDownloadBytes(bytes: number): string {
   if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KB`;
   if (bytes < 1024 ** 3) return `${(bytes / (1024 ** 2)).toFixed(1)} MB`;
   return `${(bytes / (1024 ** 3)).toFixed(2)} GB`;
+}
+
+/** Parent folder name from a download save path, for trusted-shell display only. */
+export function downloadDestinationFolder(savePath: string): string {
+  const normalized = savePath.replace(/\\/g, '/').replace(/\/+$/, '');
+  const parts = normalized.split('/').filter(Boolean);
+  if (parts.length < 2) return '';
+  return parts[parts.length - 2] ?? '';
 }
 
 /**

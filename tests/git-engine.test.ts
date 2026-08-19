@@ -43,6 +43,22 @@ describe('git engine', () => {
     await expect(engine.getHead(repositoryPath)).resolves.toMatch(/^[0-9a-f]{40}$/);
   });
 
+  it('inspects a Node project and infers npm install plus the dev script', async () => {
+    const repositoryPath = await mkdtemp(path.join(tmpdir(), 'poppin-project-runtime-'));
+    const engine = new GitEngine();
+    await engine.create(repositoryPath);
+    await writeFile(path.join(repositoryPath, 'package.json'), JSON.stringify({
+      name: 'app',
+      scripts: { dev: 'vite', test: 'vitest' },
+      devDependencies: { vite: '6.0.0' },
+    }));
+    await expect(engine.inspect(repositoryPath)).resolves.toMatchObject({
+      installCommand: 'npm install',
+      devCommand: 'npm run dev',
+      previewUrl: 'http://localhost:5173',
+    });
+  });
+
   it('rejects remote values that could be interpreted as Git options', async () => {
     const destination = path.join(await mkdtemp(path.join(tmpdir(), 'poppin-clone-')), 'repo');
     await expect(new GitEngine().clone('--upload-pack=bad', destination)).rejects.toThrow(/HTTPS, SSH/);

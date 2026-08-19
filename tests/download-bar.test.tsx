@@ -17,16 +17,20 @@ const SNAPSHOT: DownloadsSnapshot = {
       totalBytes: 100_000_000,
       state: 'progressing',
       percent: 75,
+      startedAt: 1,
+      endedAt: null,
     },
     {
       id: 'dl-2',
       filename: 'Notes.zip',
       url: 'https://example.com/Notes.zip',
-      savePath: '/tmp/Notes.zip',
+      savePath: '/Users/ashwin/Downloads/Notes.zip',
       receivedBytes: 2048,
       totalBytes: 2048,
       state: 'completed',
       percent: 100,
+      startedAt: 1,
+      endedAt: 2,
     },
   ],
 };
@@ -77,6 +81,8 @@ describe('DownloadsPopover', () => {
     expect(screen.getByRole('dialog', { name: /downloads/i })).toBeVisible();
     expect(screen.getByRole('progressbar', { name: /chatgpt\.dmg download progress/i })).toHaveAttribute('aria-valuenow', '75');
     expect(screen.getByText(/75% · 71\.5 MB of 95\.4 MB/i)).toBeInTheDocument();
+    expect(screen.getByRole('progressbar', { name: /notes\.zip download progress/i })).toHaveAttribute('aria-valuenow', '100');
+    expect(screen.getByText(/downloaded · 2\.0 kb · saved to downloads/i)).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: /show notes\.zip in finder/i }));
     expect(onReveal).toHaveBeenCalledWith('dl-2');
@@ -89,6 +95,18 @@ describe('DownloadsPopover', () => {
     const trigger = screen.getByRole('button', { name: /^downloads$/i });
     expect(trigger).toBeVisible();
     expect(trigger.querySelector('.downloads-badge')).toBeNull();
+  });
+
+  it('keeps completed downloads visible when the user reopens the list', async () => {
+    const user = userEvent.setup();
+    render(<Harness snapshot={{ items: [SNAPSHOT.items[1]!] }} />);
+    await user.click(screen.getByRole('button', { name: /downloads \(1\)/i }));
+    expect(screen.getByRole('dialog', { name: /downloads/i })).toBeVisible();
+    expect(screen.getByText('Notes.zip')).toBeVisible();
+    expect(screen.getByText(/downloaded · 2\.0 kb · saved to downloads/i)).toBeVisible();
+    expect(screen.getByRole('button', { name: /show notes\.zip in finder/i })).toBeVisible();
+    expect(screen.getByRole('button', { name: /dismiss notes\.zip/i })).toBeVisible();
+    expect(screen.getByRole('progressbar', { name: /notes\.zip download progress/i })).toHaveAttribute('aria-valuenow', '100');
   });
 
   it('counts only downloads still in progress', () => {
