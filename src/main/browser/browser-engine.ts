@@ -84,7 +84,8 @@ interface BrowserTabRecord {
   snapshot: BrowserTabSnapshot;
   lastExternalUrl: string;
   documentGeneration: number;
-  googleWorkspaceHold: { documentUrl: string; expiresAt: number; restores: number } | null;
+  googleWorkspaceHold: GoogleWorkspaceHold | null;
+  suppressGoogleWorkspaceHoldUntil: number;
 }
 
 interface SemanticReferenceRecord {
@@ -1016,6 +1017,7 @@ export class BrowserEngine {
       lastExternalUrl: initialUrl,
       documentGeneration: 0,
       googleWorkspaceHold: null,
+      suppressGoogleWorkspaceHoldUntil: 0,
     };
     this.tabs.set(id, record);
     this.insertTabId(id, position);
@@ -1053,6 +1055,8 @@ export class BrowserEngine {
         this.registerAuthenticationWindow(popup);
         return;
       }
+      const hostedInTab = this.tabOwnsWebContents(popup.webContents);
+      if (!shouldDisposeWindowOpenGuest({ hostedInTab, isAuthentication: false })) return;
       if (isBlankWindowOpenUrl(details.url) || isBlankWindowOpenUrl(popup.webContents.getURL())) {
         this.adoptBlankPopup(tab, popup);
         return;
@@ -1290,12 +1294,19 @@ export class BrowserEngine {
       snapshot,
       lastExternalUrl: initialUrl === 'about:blank' ? NEW_TAB_URL : initialUrl,
       documentGeneration: 0,
-      googleWorkspaceHold: null,
+      googleWorkspaceHold: isGoogleWorkspaceDocumentUrl(initialUrl)
+        ? {
+          documentUrl: initialUrl,
+          expiresAt: Date.now() + GOOGLE_WORKSPACE_BOUNCE_HOLD_MS,
+        }
+        : null,
+      suppressGoogleWorkspaceHoldUntil: 0,
     };
     this.tabs.set(id, record);
     this.insertTabId(id, 'preferred');
     this.window.contentView.addChildView(view);
     this.attachTabEvents(record);
+    this.suppressGoogleWorkspaceListHold(opener);
     if (!options.webContents && !isBlankWindowOpenUrl(initialUrl) && (safeProtocol(initialUrl) === 'http:' || safeProtocol(initialUrl) === 'https:')) {
       void view.webContents.loadURL(initialUrl).catch(() => undefined);
     }
@@ -1309,9 +1320,24 @@ export class BrowserEngine {
   }
 
   private shouldHoldGoogleWorkspaceDocument(tab: BrowserTabRecord, nextUrl: string): boolean {
-    const hold = tab.googleWorkspaceHold;
-    if (!hold || Date.now() > hold.expiresAt) return false;
-    return shouldBlockGoogleWorkspaceBounce(hold.documentUrl, nextUrl);
+    return resolveGoogleWorkspaceHoldNavigation(
+      tab.googleWorkspaceHold,
+      nextUrl,
+      Date.now(),
+      { suppressHold: tab.suppressGoogleWorkspaceHoldUntil > Date.now() },
+    ).prevent;
+  }
+
+  private tabOwnsWebContents(contents: WebContents): boolean {
+    for (const candidate of this.tabs.values()) {
+      if (!candidate.view.webContents.isDestroyed() && candidate.view.webContents === contents) return true;
+    }
+    return false;
+  }
+
+  private suppressGoogleWorkspaceListHold(opener: BrowserTabRecord): void {
+    opener.googleWorkspaceHold = null;
+    opener.suppressGoogleWorkspaceHoldUntil = Date.now() + GOOGLE_WORKSPACE_BOUNCE_HOLD_MS;
   }
 
   private openPageLink(tab: BrowserTabRecord, url: string, disposition: 'current' | 'new-tab'): void {
@@ -1322,6 +1348,7 @@ export class BrowserEngine {
       void tab.view.webContents.loadURL(url).catch(() => undefined);
       return;
     }
+    if (isGoogleWorkspaceDocumentUrl(url)) this.suppressGoogleWorkspaceListHold(tab);
     this.createTab(url, randomUUID(), false, undefined, this.settings.focusNewTabs || isGoogleWorkspaceDocumentUrl(url));
   }
 
@@ -1330,6 +1357,9 @@ export class BrowserEngine {
     if (tab.snapshot.taskSpaceId || target === 'same-tab') {
       void tab.view.webContents.loadURL(url).catch(() => undefined);
       return;
+    }
+    if (isGoogleWorkspaceDocumentUrl(url) || isGoogleWorkspaceHost(tab.view.webContents.getURL())) {
+      this.suppressGoogleWorkspaceListHold(tab);
     }
     this.createTab(url, randomUUID(), false, undefined, this.settings.focusNewTabs || isGoogleWorkspaceDocumentUrl(url));
   }
@@ -1500,22 +1530,14 @@ export class BrowserEngine {
       void tab.view.webContents.loadURL(recovered).catch(() => undefined);
       return;
     }
-    if (this.shouldHoldGoogleWorkspaceDocument(tab, url)) {
-      const hold = tab.googleWorkspaceHold;
-      if (hold && hold.documentUrl !== url && hold.restores < 2) {
-        hold.restores += 1;
-        void tab.view.webContents.loadURL(hold.documentUrl).catch(() => undefined);
-        return;
-      }
-      if (hold) tab.googleWorkspaceHold = null;
-    }
-    if (isGoogleWorkspaceDocumentUrl(url)) {
-      tab.googleWorkspaceHold = {
-        documentUrl: url,
-        expiresAt: Date.now() + GOOGLE_WORKSPACE_BOUNCE_HOLD_MS,
-        restores: 0,
-      };
-    }
+    const holdDecision = resolveGoogleWorkspaceHoldNavigation(
+      tab.googleWorkspaceHold,
+      url,
+      Date.now(),
+      { suppressHold: tab.suppressGoogleWorkspaceHoldUntil > Date.now() },
+    );
+    tab.googleWorkspaceHold = holdDecision.hold;
+    if (holdDecision.prevent) return;
     if (resetFavicon) {
       tab.documentGeneration += 1;
       for (const [id, record] of this.semanticReferences) if (record.tabId === tab.snapshot.id) this.semanticReferences.delete(id);
@@ -2445,6 +2467,49 @@ export function isGoogleWorkspaceListUrl(value: string): boolean {
 /** Docs/Drive open a file then history.back() the list; do not honor that bounce. */
 export function shouldBlockGoogleWorkspaceBounce(currentUrl: string, nextUrl: string): boolean {
   return isGoogleWorkspaceDocumentUrl(currentUrl) && isGoogleWorkspaceListUrl(nextUrl);
+}
+
+export type GoogleWorkspaceHold = {
+  documentUrl: string;
+  expiresAt: number;
+};
+
+/**
+ * Decide whether a Google Workspace navigation should be ignored.
+ * Never reload the document URL — that fights history.back() and loops.
+ */
+export function resolveGoogleWorkspaceHoldNavigation(
+  hold: GoogleWorkspaceHold | null,
+  nextUrl: string,
+  now = Date.now(),
+  options: { suppressHold?: boolean } = {},
+): { hold: GoogleWorkspaceHold | null; prevent: boolean; reloadDocument: false } {
+  if (options.suppressHold) {
+    return { hold: null, prevent: false, reloadDocument: false };
+  }
+  const active = hold && now <= hold.expiresAt ? hold : null;
+  if (active && shouldBlockGoogleWorkspaceBounce(active.documentUrl, nextUrl)) {
+    return { hold: active, prevent: true, reloadDocument: false };
+  }
+  if (isGoogleWorkspaceDocumentUrl(nextUrl)) {
+    return {
+      hold: {
+        documentUrl: nextUrl,
+        expiresAt: now + GOOGLE_WORKSPACE_BOUNCE_HOLD_MS,
+      },
+      prevent: false,
+      reloadDocument: false,
+    };
+  }
+  return { hold: null, prevent: false, reloadDocument: false };
+}
+
+/** Window.open guests already hosted as tabs must not be closed; that retriggers Docs' list bounce. */
+export function shouldDisposeWindowOpenGuest(input: {
+  hostedInTab: boolean;
+  isAuthentication: boolean;
+}): boolean {
+  return !input.hostedInTab && !input.isAuthentication;
 }
 
 /** Rewrites a persisted or in-flight Gmail widget URL back to the inbox. */

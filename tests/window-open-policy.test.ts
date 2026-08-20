@@ -6,9 +6,11 @@ import {
   isGoogleWidgetMainFrameUrl,
   isGoogleWorkspaceDocumentUrl,
   isGoogleWorkspaceListUrl,
+  resolveGoogleWorkspaceHoldNavigation,
   resolveWindowOpenAction,
   shouldBlockGoogleWorkspaceBounce,
   shouldDeferPageLinkHandling,
+  shouldDisposeWindowOpenGuest,
 } from '../src/main/browser/browser-engine';
 
 const docsList = 'https://docs.google.com/document/u/0/';
@@ -129,5 +131,40 @@ describe('window-open and Google Docs navigation policy', () => {
     expect(shouldBlockGoogleWorkspaceBounce(docsFile, docsList)).toBe(true);
     expect(shouldBlockGoogleWorkspaceBounce(docsList, docsFile)).toBe(false);
     expect(shouldBlockGoogleWorkspaceBounce(docsFile, 'https://example.com/')).toBe(false);
+  });
+
+  it('blocks a document-to-list bounce without reloading the document', () => {
+    const hold = { documentUrl: docsFile, expiresAt: 10_000 };
+    expect(resolveGoogleWorkspaceHoldNavigation(hold, docsList, 1_000)).toEqual({
+      hold,
+      prevent: true,
+      reloadDocument: false,
+    });
+    expect(resolveGoogleWorkspaceHoldNavigation(hold, docsFile, 2_000).reloadDocument).toBe(false);
+    expect(resolveGoogleWorkspaceHoldNavigation(hold, docsList, 3_000).reloadDocument).toBe(false);
+  });
+
+  it('lets the list tab return to the list after the document opened in another tab', () => {
+    expect(resolveGoogleWorkspaceHoldNavigation(null, docsFile, 1_000, { suppressHold: true })).toEqual({
+      hold: null,
+      prevent: false,
+      reloadDocument: false,
+    });
+    expect(resolveGoogleWorkspaceHoldNavigation(
+      { documentUrl: docsFile, expiresAt: 10_000 },
+      docsList,
+      1_000,
+      { suppressHold: true },
+    )).toEqual({
+      hold: null,
+      prevent: false,
+      reloadDocument: false,
+    });
+  });
+
+  it('does not dispose a window.open guest that is already hosted as a Poppin tab', () => {
+    expect(shouldDisposeWindowOpenGuest({ hostedInTab: true, isAuthentication: false })).toBe(false);
+    expect(shouldDisposeWindowOpenGuest({ hostedInTab: false, isAuthentication: true })).toBe(false);
+    expect(shouldDisposeWindowOpenGuest({ hostedInTab: false, isAuthentication: false })).toBe(true);
   });
 });
