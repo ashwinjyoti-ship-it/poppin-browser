@@ -6,7 +6,9 @@ import {
   chromeMajorVersion,
   chromiumClientHintHeaders,
   chromiumUserAgentDataScript,
+  firefoxCompatibleUserAgent,
   frozenChromeVersion,
+  isGoogleAccountUrl,
 } from '../src/main/browser/chromium-user-agent';
 
 describe('chromium-compatible user agent', () => {
@@ -51,6 +53,20 @@ describe('chromium-compatible user agent', () => {
     expect(headers['User-Agent']).not.toMatch(/Electron/i);
     expect(headers['sec-ch-ua']).not.toMatch(/Electron/i);
     expect(headers['sec-ch-ua']).toContain('"Chromium";v="144"');
+  });
+
+  it('uses Firefox UA for Google Account requests and strips Client Hints', () => {
+    const headers = applyClientHintHeaders({
+      'User-Agent': 'Mozilla/5.0 Electron/43.3.0',
+      'sec-ch-ua': '"Electron";v="43"',
+      Accept: 'text/html',
+    }, chrome, 'darwin', 'https://accounts.google.com/v3/signin/identifier');
+    expect(headers.Accept).toBe('text/html');
+    expect(headers['User-Agent']).toBe(firefoxCompatibleUserAgent('darwin'));
+    expect(headers['User-Agent']).toMatch(/Firefox\/134\.0/);
+    expect(headers['sec-ch-ua']).toBeUndefined();
+    expect(isGoogleAccountUrl('https://accounts.google.com/signin')).toBe(true);
+    expect(isGoogleAccountUrl('https://docs.google.com/document/u/0/')).toBe(false);
   });
 
   it('shims navigator.userAgentData in the page world without an Electron brand', () => {

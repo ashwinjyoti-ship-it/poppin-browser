@@ -11,6 +11,8 @@ import {
   shouldBlockGoogleWorkspaceBounce,
   shouldDeferPageLinkHandling,
   shouldDisposeWindowOpenGuest,
+  shouldPruneGoogleWorkspaceHistoryEntry,
+  googleWorkspaceHistoryGuardScript,
 } from '../src/main/browser/browser-engine';
 
 const docsList = 'https://docs.google.com/document/u/0/';
@@ -124,41 +126,70 @@ describe('window-open and Google Docs navigation policy', () => {
   it('classifies Google Workspace document vs list URLs and blocks the open-then-bounce', () => {
     expect(isGoogleWorkspaceDocumentUrl(docsFile)).toBe(true);
     expect(isGoogleWorkspaceDocumentUrl('https://docs.google.com/spreadsheets/d/abc/edit')).toBe(true);
+    expect(isGoogleWorkspaceDocumentUrl('https://docs.google.com/document/u/0/d/abc123/edit')).toBe(true);
+    expect(isGoogleWorkspaceDocumentUrl('https://docs.google.com/spreadsheets/u/0/d/abc/edit')).toBe(true);
     expect(isGoogleWorkspaceDocumentUrl(docsList)).toBe(false);
     expect(isGoogleWorkspaceListUrl(docsList)).toBe(true);
+    expect(isGoogleWorkspaceListUrl('https://docs.google.com/')).toBe(true);
+    expect(isGoogleWorkspaceListUrl('https://docs.google.com/document/u/0/home')).toBe(true);
+    expect(isGoogleWorkspaceListUrl('https://docs.google.com/document/u/0/d/abc123/edit')).toBe(false);
     expect(isGoogleWorkspaceListUrl('https://drive.google.com/drive/u/0/home')).toBe(true);
     expect(isGoogleWorkspaceListUrl(docsFile)).toBe(false);
     expect(shouldBlockGoogleWorkspaceBounce(docsFile, docsList)).toBe(true);
+    expect(shouldBlockGoogleWorkspaceBounce(docsFile, 'https://docs.google.com/')).toBe(true);
+    expect(shouldBlockGoogleWorkspaceBounce(
+      'https://docs.google.com/document/u/0/d/abc123/edit',
+      docsList,
+    )).toBe(true);
     expect(shouldBlockGoogleWorkspaceBounce(docsList, docsFile)).toBe(false);
     expect(shouldBlockGoogleWorkspaceBounce(docsFile, 'https://example.com/')).toBe(false);
   });
 
-  it('blocks a document-to-list bounce without reloading the document', () => {
-    const hold = { documentUrl: docsFile, expiresAt: 10_000 };
-    expect(resolveGoogleWorkspaceHoldNavigation(hold, docsList, 1_000)).toEqual({
+  it('keeps a document hold after the document has painted so a later list bounce is restored', () => {
+    const hold = { documentUrl: docsFile };
+    expect(resolveGoogleWorkspaceHoldNavigation(hold, docsList)).toEqual({
       hold,
       prevent: true,
-      reloadDocument: false,
+      restoreDocumentUrl: docsFile,
     });
-    expect(resolveGoogleWorkspaceHoldNavigation(hold, docsFile, 2_000).reloadDocument).toBe(false);
-    expect(resolveGoogleWorkspaceHoldNavigation(hold, docsList, 3_000).reloadDocument).toBe(false);
+    expect(resolveGoogleWorkspaceHoldNavigation(hold, 'https://docs.google.com/')).toEqual({
+      hold,
+      prevent: true,
+      restoreDocumentUrl: docsFile,
+    });
+    expect(resolveGoogleWorkspaceHoldNavigation(hold, docsFile)).toEqual({
+      hold,
+      prevent: false,
+      restoreDocumentUrl: null,
+    });
   });
 
   it('lets the list tab return to the list after the document opened in another tab', () => {
-    expect(resolveGoogleWorkspaceHoldNavigation(null, docsFile, 1_000, { suppressHold: true })).toEqual({
-      hold: null,
+    expect(resolveGoogleWorkspaceHoldNavigation(null, docsFile, { suppressHold: true })).toEqual({
+      hold: { documentUrl: docsFile },
       prevent: false,
-      reloadDocument: false,
+      restoreDocumentUrl: null,
     });
     expect(resolveGoogleWorkspaceHoldNavigation(
-      { documentUrl: docsFile, expiresAt: 10_000 },
+      { documentUrl: docsFile },
       docsList,
-      1_000,
       { suppressHold: true },
     )).toEqual({
       hold: null,
       prevent: false,
-      reloadDocument: false,
+      restoreDocumentUrl: null,
+    });
+  });
+
+  it('lets the user leave a document tab with chrome back or the address bar', () => {
+    expect(resolveGoogleWorkspaceHoldNavigation(
+      { documentUrl: docsFile },
+      docsList,
+      { allowListNavigation: true },
+    )).toEqual({
+      hold: null,
+      prevent: false,
+      restoreDocumentUrl: null,
     });
   });
 
@@ -166,5 +197,19 @@ describe('window-open and Google Docs navigation policy', () => {
     expect(shouldDisposeWindowOpenGuest({ hostedInTab: true, isAuthentication: false })).toBe(false);
     expect(shouldDisposeWindowOpenGuest({ hostedInTab: false, isAuthentication: true })).toBe(false);
     expect(shouldDisposeWindowOpenGuest({ hostedInTab: false, isAuthentication: false })).toBe(true);
+  });
+
+  it('prunes list and blank history entries left behind by window.open', () => {
+    expect(shouldPruneGoogleWorkspaceHistoryEntry('about:blank')).toBe(true);
+    expect(shouldPruneGoogleWorkspaceHistoryEntry(docsList)).toBe(true);
+    expect(shouldPruneGoogleWorkspaceHistoryEntry('https://docs.google.com/')).toBe(true);
+    expect(shouldPruneGoogleWorkspaceHistoryEntry(docsFile)).toBe(false);
+  });
+
+  it('installs a page-world guard that ignores history.back onto the list', () => {
+    const script = googleWorkspaceHistoryGuardScript(1_000);
+    expect(script).toContain('history.back');
+    expect(script).toContain('replaceState');
+    expect(script).toContain('docs.google.com');
   });
 });
