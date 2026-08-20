@@ -86,10 +86,55 @@ export function applyClientHintHeaders(
   requestHeaders: Record<string, string>,
   chromeVersion = process.versions.chrome,
   platform = process.platform,
+  requestUrl = '',
 ): Record<string, string> {
   const next = { ...requestHeaders };
   for (const name of CLIENT_HINT_HEADER_NAMES) delete next[name];
+  // Google Account rejects Chromium-shaped Electron sessions even without an
+  // Electron token. Firefox UA avoids that check; keep Chrome UA elsewhere.
+  if (requestUrl && isGoogleAccountUrl(requestUrl)) {
+    return { ...next, 'User-Agent': firefoxCompatibleUserAgent(platform) };
+  }
   return { ...next, ...chromiumClientHintHeaders(chromeVersion, platform) };
+}
+
+/** True for Google Account hosts that enforce the insecure-browser gate. */
+export function isGoogleAccountUrl(value: string): boolean {
+  try {
+    const hostname = value.includes('://') ? new URL(value).hostname : value;
+    return hostname === 'accounts.google.com'
+      || hostname === 'account.google.com'
+      || hostname.endsWith('.accounts.google.com');
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Firefox UA for Google Account only. Electron browsers that look like Chrome
+ * are still rejected at /v3/signin/rejected; Firefox-shaped UA is the durable
+ * workaround used by other Chromium-shell browsers.
+ */
+export function firefoxCompatibleUserAgent(platform = process.platform): string {
+  if (platform === 'win32') {
+    return 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:134.0) Gecko/20100101 Firefox/134.0';
+  }
+  if (platform === 'linux') {
+    return 'Mozilla/5.0 (X11; Linux x86_64; rv:134.0) Gecko/20100101 Firefox/134.0';
+  }
+  return 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:134.0) Gecko/20100101 Firefox/134.0';
+}
+
+/** Page-world Firefox UA (and no Chromium UA-CH) for Google Account documents. */
+export function firefoxUserAgentScript(platform = process.platform): string {
+  const ua = firefoxCompatibleUserAgent(platform);
+  return `(() => {
+    const ua = ${JSON.stringify(ua)};
+    try { Object.defineProperty(Navigator.prototype, 'userAgent', { configurable: true, get: () => ua }); } catch {}
+    try { Object.defineProperty(navigator, 'userAgent', { configurable: true, get: () => ua }); } catch {}
+    try { Object.defineProperty(Navigator.prototype, 'userAgentData', { configurable: true, get: () => undefined }); } catch {}
+    try { Object.defineProperty(navigator, 'userAgentData', { configurable: true, get: () => undefined }); } catch {}
+  })()`;
 }
 
 /**
@@ -158,7 +203,9 @@ export function applyChromiumUserAgent(target: Session, chromeVersion = process.
   target.webRequest.onBeforeSendHeaders(
     { urls: ['https://*/*', 'http://*/*'] },
     (details, callback) => {
-      callback({ requestHeaders: applyClientHintHeaders(details.requestHeaders, chromeVersion) });
+      callback({
+        requestHeaders: applyClientHintHeaders(details.requestHeaders, chromeVersion, process.platform, details.url),
+      });
     },
   );
 }

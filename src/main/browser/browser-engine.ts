@@ -43,7 +43,7 @@ import { HtmlFullscreenCoordinator, type HtmlFullscreenTransition } from './html
 import type { BrowserAgentAction, BrowserSemanticNode, BrowserSemanticSnapshot } from '../../shared/browser-agent';
 import { classifyMailboxControl, isSignedInMailboxUrl, outlookWebInboxUrl } from '../../shared/mail';
 import { signedInHumanUrlFor } from '../../shared/signed-in-session';
-import { applyChromiumUserAgent, chromiumUserAgentDataScript } from './chromium-user-agent';
+import { applyChromiumUserAgent, chromiumUserAgentDataScript, firefoxCompatibleUserAgent, firefoxUserAgentScript, isGoogleAccountUrl } from './chromium-user-agent';
 import { showPageContextMenu } from './context-menu';
 import { DownloadManager } from './downloads';
 
@@ -60,7 +60,8 @@ const MAX_TAB_SEARCH_RESULTS = 20;
 const TAB_SEARCH_SNIPPET_RADIUS = 80;
 const CLOSED_TAB_LIMIT = 12;
 const BLANK_POPUP_ADOPT_TIMEOUT_MS = 30_000;
-const GOOGLE_WORKSPACE_BOUNCE_HOLD_MS = 3_000;
+const GOOGLE_WORKSPACE_OPENER_SUPPRESS_MS = 3_000;
+const GOOGLE_WORKSPACE_HISTORY_GUARD_MS = 30_000;
 const GROUP_COLORS: BrowserGroupColor[] = ['amber', 'blue', 'green', 'rose', 'violet'];
 /** Same-origin SPA hosts whose own click/history handling must not be rewritten into window.open. */
 export const GOOGLE_WORKSPACE_HOSTS = new Set([
@@ -86,6 +87,8 @@ interface BrowserTabRecord {
   documentGeneration: number;
   googleWorkspaceHold: GoogleWorkspaceHold | null;
   suppressGoogleWorkspaceHoldUntil: number;
+  allowGoogleWorkspaceListNavigation: boolean;
+  googleWorkspaceRestoring: boolean;
 }
 
 interface SemanticReferenceRecord {
@@ -1016,8 +1019,12 @@ export class BrowserEngine {
       snapshot,
       lastExternalUrl: initialUrl,
       documentGeneration: 0,
-      googleWorkspaceHold: null,
+      googleWorkspaceHold: isGoogleWorkspaceDocumentUrl(initialUrl)
+        ? { documentUrl: initialUrl }
+        : null,
       suppressGoogleWorkspaceHoldUntil: 0,
+      allowGoogleWorkspaceListNavigation: false,
+      googleWorkspaceRestoring: false,
     };
     this.tabs.set(id, record);
     this.insertTabId(id, position);
@@ -1037,8 +1044,13 @@ export class BrowserEngine {
 
   private attachTabEvents(tab: BrowserTabRecord): void {
     const contents = tab.view.webContents;
-    void contents.executeJavaScriptInIsolatedWorld(0, [{ code: chromiumUserAgentDataScript() }], true)
-      .catch(() => undefined);
+    const injectBrowserIdentity = (url = contents.getURL()): void => {
+      const script = isGoogleAccountUrl(url) ? firefoxUserAgentScript() : chromiumUserAgentDataScript();
+      if (isGoogleAccountUrl(url)) contents.setUserAgent(firefoxCompatibleUserAgent());
+      else contents.setUserAgent(this.browserSession.getUserAgent());
+      void contents.executeJavaScriptInIsolatedWorld(0, [{ code: script }], true).catch(() => undefined);
+    };
+    injectBrowserIdentity();
     contents.setWindowOpenHandler((details) => this.applyWindowOpenAction(tab, resolveWindowOpenAction({
       url: details.url,
       openerUrl: contents.getURL(),
@@ -1056,7 +1068,8 @@ export class BrowserEngine {
         return;
       }
       const hostedInTab = this.tabOwnsWebContents(popup.webContents);
-      if (!shouldDisposeWindowOpenGuest({ hostedInTab, isAuthentication: false })) return;
+      const shouldDispose = shouldDisposeWindowOpenGuest({ hostedInTab, isAuthentication: false });
+      if (!shouldDispose) return;
       if (isBlankWindowOpenUrl(details.url) || isBlankWindowOpenUrl(popup.webContents.getURL())) {
         this.adoptBlankPopup(tab, popup);
         return;
@@ -1067,8 +1080,14 @@ export class BrowserEngine {
       showPageContextMenu(this.window, contents, params, {
         canGoBack: contents.navigationHistory.canGoBack(),
         canGoForward: contents.navigationHistory.canGoForward(),
-        onBack: () => contents.navigationHistory.goBack(),
-        onForward: () => contents.navigationHistory.goForward(),
+        onBack: () => {
+          tab.allowGoogleWorkspaceListNavigation = true;
+          contents.navigationHistory.goBack();
+        },
+        onForward: () => {
+          tab.allowGoogleWorkspaceListNavigation = true;
+          contents.navigationHistory.goForward();
+        },
         onReload: () => this.reload(tab.snapshot.id),
         onOpenLink: (url, disposition) => this.openPageLink(tab, url, disposition),
         onSearchSelection: (selection) => {
@@ -1124,10 +1143,18 @@ export class BrowserEngine {
         return;
       }
     });
+    contents.on('will-frame-navigate', (event) => {
+      if (!event.isMainFrame) return;
+      if (this.shouldHoldGoogleWorkspaceDocument(tab, event.url)) event.preventDefault();
+    });
+    contents.on('will-redirect', (event) => {
+      if (!event.isMainFrame) return;
+      if (this.shouldHoldGoogleWorkspaceDocument(tab, event.url)) event.preventDefault();
+    });
     contents.on('did-start-navigation', (details) => {
       if (!details.isMainFrame) return;
-      void contents.executeJavaScriptInIsolatedWorld(0, [{ code: chromiumUserAgentDataScript() }], true)
-        .catch(() => undefined);
+      injectBrowserIdentity(details.url);
+      if (isGoogleWorkspaceDocumentUrl(details.url)) this.injectGoogleWorkspaceHistoryGuard(tab);
     });
     contents.on('before-input-event', (event, input) => {
       if (this.handleShortcut(input)) event.preventDefault();
@@ -1295,12 +1322,11 @@ export class BrowserEngine {
       lastExternalUrl: initialUrl === 'about:blank' ? NEW_TAB_URL : initialUrl,
       documentGeneration: 0,
       googleWorkspaceHold: isGoogleWorkspaceDocumentUrl(initialUrl)
-        ? {
-          documentUrl: initialUrl,
-          expiresAt: Date.now() + GOOGLE_WORKSPACE_BOUNCE_HOLD_MS,
-        }
+        ? { documentUrl: initialUrl }
         : null,
       suppressGoogleWorkspaceHoldUntil: 0,
+      allowGoogleWorkspaceListNavigation: false,
+      googleWorkspaceRestoring: false,
     };
     this.tabs.set(id, record);
     this.insertTabId(id, 'preferred');
@@ -1320,12 +1346,42 @@ export class BrowserEngine {
   }
 
   private shouldHoldGoogleWorkspaceDocument(tab: BrowserTabRecord, nextUrl: string): boolean {
-    return resolveGoogleWorkspaceHoldNavigation(
-      tab.googleWorkspaceHold,
-      nextUrl,
-      Date.now(),
-      { suppressHold: tab.suppressGoogleWorkspaceHoldUntil > Date.now() },
-    ).prevent;
+    return resolveGoogleWorkspaceHoldNavigation(tab.googleWorkspaceHold, nextUrl, {
+      suppressHold: tab.suppressGoogleWorkspaceHoldUntil > Date.now(),
+      allowListNavigation: tab.allowGoogleWorkspaceListNavigation,
+    }).prevent;
+  }
+
+  private restoreGoogleWorkspaceDocument(tab: BrowserTabRecord, documentUrl: string): void {
+    if (tab.view.webContents.isDestroyed()) return;
+    const current = tab.view.webContents.getURL();
+    if (isGoogleWorkspaceDocumentUrl(current)) return;
+    const history = tab.view.webContents.navigationHistory;
+    const index = history.getAllEntries().findIndex((entry) => isGoogleWorkspaceDocumentUrl(entry.url));
+    if (index >= 0 && index !== history.getActiveIndex()) {
+      history.goToIndex(index);
+      return;
+    }
+    if (tab.googleWorkspaceRestoring) return;
+    tab.googleWorkspaceRestoring = true;
+    void tab.view.webContents.loadURL(documentUrl).catch(() => undefined);
+  }
+
+  private pruneGoogleWorkspaceOpenHistory(tab: BrowserTabRecord): void {
+    if (tab.view.webContents.isDestroyed()) return;
+    const history = tab.view.webContents.navigationHistory;
+    let attempts = 0;
+    while (history.getActiveIndex() > 0 && attempts < 32) {
+      attempts += 1;
+      const entry = history.getEntryAtIndex(0);
+      if (!entry || !shouldPruneGoogleWorkspaceHistoryEntry(entry.url)) break;
+      if (!history.removeEntryAtIndex(0)) break;
+    }
+  }
+
+  private injectGoogleWorkspaceHistoryGuard(tab: BrowserTabRecord): void {
+    if (tab.view.webContents.isDestroyed()) return;
+    void tab.view.webContents.executeJavaScript(googleWorkspaceHistoryGuardScript(), true).catch(() => undefined);
   }
 
   private tabOwnsWebContents(contents: WebContents): boolean {
@@ -1337,7 +1393,7 @@ export class BrowserEngine {
 
   private suppressGoogleWorkspaceListHold(opener: BrowserTabRecord): void {
     opener.googleWorkspaceHold = null;
-    opener.suppressGoogleWorkspaceHoldUntil = Date.now() + GOOGLE_WORKSPACE_BOUNCE_HOLD_MS;
+    opener.suppressGoogleWorkspaceHoldUntil = Date.now() + GOOGLE_WORKSPACE_OPENER_SUPPRESS_MS;
   }
 
   private openPageLink(tab: BrowserTabRecord, url: string, disposition: 'current' | 'new-tab'): void {
@@ -1447,6 +1503,18 @@ export class BrowserEngine {
     // Publish recovery controls before the child has painted. Some identity
     // providers delay their first paint or title update.
     this.emitSnapshot();
+    const injectAuthIdentity = (url = popup.webContents.getURL()): void => {
+      if (isGoogleAccountUrl(url)) {
+        popup.webContents.setUserAgent(firefoxCompatibleUserAgent());
+        void popup.webContents.executeJavaScriptInIsolatedWorld(0, [{ code: firefoxUserAgentScript() }], true)
+          .catch(() => undefined);
+        return;
+      }
+      popup.webContents.setUserAgent(this.browserSession.getUserAgent());
+      void popup.webContents.executeJavaScriptInIsolatedWorld(0, [{ code: chromiumUserAgentDataScript() }], true)
+        .catch(() => undefined);
+    };
+    injectAuthIdentity();
     popup.webContents.on('will-navigate', (event, url) => {
       const protocol = safeProtocol(url);
       if (protocol !== 'http:' && protocol !== 'https:' && protocol !== 'about:') event.preventDefault();
@@ -1456,6 +1524,10 @@ export class BrowserEngine {
     });
     popup.webContents.on('did-navigate-in-page', (_event, url) => {
       this.maybeCompleteAuthentication(url);
+    });
+    popup.webContents.on('did-start-navigation', (details) => {
+      if (!details.isMainFrame) return;
+      injectAuthIdentity(details.url);
     });
     // Google can continue its consent flow through another window. Preserve
     // only authentication-scoped children and keep every child sandboxed in
@@ -1533,11 +1605,22 @@ export class BrowserEngine {
     const holdDecision = resolveGoogleWorkspaceHoldNavigation(
       tab.googleWorkspaceHold,
       url,
-      Date.now(),
-      { suppressHold: tab.suppressGoogleWorkspaceHoldUntil > Date.now() },
+      {
+        suppressHold: tab.suppressGoogleWorkspaceHoldUntil > Date.now(),
+        allowListNavigation: tab.allowGoogleWorkspaceListNavigation,
+      },
     );
+    tab.allowGoogleWorkspaceListNavigation = false;
     tab.googleWorkspaceHold = holdDecision.hold;
-    if (holdDecision.prevent) return;
+    if (holdDecision.prevent) {
+      if (holdDecision.restoreDocumentUrl) this.restoreGoogleWorkspaceDocument(tab, holdDecision.restoreDocumentUrl);
+      return;
+    }
+    if (isGoogleWorkspaceDocumentUrl(url)) {
+      tab.googleWorkspaceRestoring = false;
+      this.pruneGoogleWorkspaceOpenHistory(tab);
+      this.injectGoogleWorkspaceHistoryGuard(tab);
+    }
     if (resetFavicon) {
       tab.documentGeneration += 1;
       for (const [id, record] of this.semanticReferences) if (record.tabId === tab.snapshot.id) this.semanticReferences.delete(id);
@@ -1674,6 +1757,7 @@ export class BrowserEngine {
     const normalized = normalizeAddressInput(input, this.settings.searchEngine);
     if (normalized.kind === 'invalid') return { ok: false, message: normalized.message };
     tab.snapshot.failure = null;
+    tab.allowGoogleWorkspaceListNavigation = true;
     if (normalized.kind === 'url') this.recordEnteredUrl(normalized.url, tab.snapshot.title);
     // A page can intentionally replace or redirect its initial navigation. Electron
     // rejects the superseded loadURL promise with ERR_ABORTED even when the final
@@ -1686,6 +1770,7 @@ export class BrowserEngine {
   private goBack(tabId: string): BrowserCommandResult {
     const tab = this.tabs.get(tabId);
     if (!tab?.view.webContents.navigationHistory.canGoBack()) return { ok: false };
+    tab.allowGoogleWorkspaceListNavigation = true;
     tab.view.webContents.navigationHistory.goBack();
     return { ok: true };
   }
@@ -1693,6 +1778,7 @@ export class BrowserEngine {
   private goForward(tabId: string): BrowserCommandResult {
     const tab = this.tabs.get(tabId);
     if (!tab?.view.webContents.navigationHistory.canGoForward()) return { ok: false };
+    tab.allowGoogleWorkspaceListNavigation = true;
     tab.view.webContents.navigationHistory.goForward();
     return { ok: true };
   }
@@ -2225,6 +2311,7 @@ export class BrowserEngine {
     if (!tab || tab.view.webContents.isDestroyed()) return { ok: false, message: 'That tab is no longer open.' };
     const navigation = tab.view.webContents.navigationHistory;
     if (index < 0 || index >= navigation.length()) return { ok: false, message: 'That history entry is not available.' };
+    tab.allowGoogleWorkspaceListNavigation = true;
     navigation.goToIndex(index);
     this.syncNavigationState(tab);
     this.emitSnapshot();
@@ -2444,7 +2531,8 @@ export function isGoogleWorkspaceDocumentUrl(value: string): boolean {
   try {
     const url = new URL(value);
     if (!GOOGLE_WORKSPACE_HOSTS.has(url.hostname)) return false;
-    return /\/(?:document|spreadsheets|presentation|file|drawings|forms)\/d\//.test(url.pathname)
+    // Docs often inserts /u/0 between the product and /d/<id>.
+    return /\/(?:document|spreadsheets|presentation|file|drawings|forms)(?:\/u\/\d+)?\/d\//.test(url.pathname)
       || url.pathname.startsWith('/open');
   } catch {
     return false;
@@ -2455,10 +2543,7 @@ export function isGoogleWorkspaceListUrl(value: string): boolean {
   try {
     const url = new URL(value);
     if (!GOOGLE_WORKSPACE_HOSTS.has(url.hostname)) return false;
-    if (isGoogleWorkspaceDocumentUrl(value)) return false;
-    if (url.hostname === 'drive.google.com') return true;
-    return /\/(?:document|spreadsheets|presentation|drawings|forms)\/(?:u\/|$)/.test(url.pathname)
-      || /\/(?:document|spreadsheets|presentation)\/?$/.test(url.pathname);
+    return !isGoogleWorkspaceDocumentUrl(value);
   } catch {
     return false;
   }
@@ -2469,39 +2554,81 @@ export function shouldBlockGoogleWorkspaceBounce(currentUrl: string, nextUrl: st
   return isGoogleWorkspaceDocumentUrl(currentUrl) && isGoogleWorkspaceListUrl(nextUrl);
 }
 
+export function shouldPruneGoogleWorkspaceHistoryEntry(url: string): boolean {
+  return isBlankWindowOpenUrl(url) || isGoogleWorkspaceListUrl(url);
+}
+
 export type GoogleWorkspaceHold = {
   documentUrl: string;
-  expiresAt: number;
 };
 
 /**
  * Decide whether a Google Workspace navigation should be ignored.
- * Never reload the document URL — that fights history.back() and loops.
+ * If the list URL already committed (in-page history), restore the document.
  */
 export function resolveGoogleWorkspaceHoldNavigation(
   hold: GoogleWorkspaceHold | null,
   nextUrl: string,
-  now = Date.now(),
-  options: { suppressHold?: boolean } = {},
-): { hold: GoogleWorkspaceHold | null; prevent: boolean; reloadDocument: false } {
-  if (options.suppressHold) {
-    return { hold: null, prevent: false, reloadDocument: false };
+  options: { suppressHold?: boolean; allowListNavigation?: boolean } = {},
+): { hold: GoogleWorkspaceHold | null; prevent: boolean; restoreDocumentUrl: string | null } {
+  if (options.suppressHold || options.allowListNavigation) {
+    if (isGoogleWorkspaceDocumentUrl(nextUrl)) {
+      return { hold: { documentUrl: nextUrl }, prevent: false, restoreDocumentUrl: null };
+    }
+    return { hold: null, prevent: false, restoreDocumentUrl: null };
   }
-  const active = hold && now <= hold.expiresAt ? hold : null;
-  if (active && shouldBlockGoogleWorkspaceBounce(active.documentUrl, nextUrl)) {
-    return { hold: active, prevent: true, reloadDocument: false };
+  if (hold && shouldBlockGoogleWorkspaceBounce(hold.documentUrl, nextUrl)) {
+    return { hold, prevent: true, restoreDocumentUrl: hold.documentUrl };
   }
   if (isGoogleWorkspaceDocumentUrl(nextUrl)) {
-    return {
-      hold: {
-        documentUrl: nextUrl,
-        expiresAt: now + GOOGLE_WORKSPACE_BOUNCE_HOLD_MS,
-      },
-      prevent: false,
-      reloadDocument: false,
-    };
+    return { hold: { documentUrl: nextUrl }, prevent: false, restoreDocumentUrl: null };
   }
-  return { hold: null, prevent: false, reloadDocument: false };
+  return { hold: null, prevent: false, restoreDocumentUrl: null };
+}
+
+export function googleWorkspaceHistoryGuardScript(holdMs = GOOGLE_WORKSPACE_HISTORY_GUARD_MS): string {
+  return `(() => {
+    const key = '__poppinWorkspaceHistoryGuard';
+    const hosts = ${JSON.stringify([...GOOGLE_WORKSPACE_HOSTS])};
+    const documentPath = /\\/(?:document|spreadsheets|presentation|file|drawings|forms)(?:\\/u\\/\\d+)?\\/d\\//;
+    const isWorkspaceList = (value) => {
+      try {
+        const next = new URL(value, location.href);
+        if (!hosts.includes(next.hostname)) return false;
+        return !documentPath.test(next.pathname) && !next.pathname.startsWith('/open');
+      } catch {
+        return false;
+      }
+    };
+    const existing = window[key];
+    if (existing) window.clearTimeout(existing.timeout);
+    const history = window.history;
+    const restore = existing?.restore ?? {
+      back: history.back.bind(history),
+      go: history.go.bind(history),
+      pushState: history.pushState.bind(history),
+      replaceState: history.replaceState.bind(history),
+    };
+    history.back = function poppinWorkspaceBack() {};
+    history.go = function poppinWorkspaceGo(delta) {
+      if (typeof delta === 'number' && delta < 0) return;
+      return restore.go(delta);
+    };
+    const guardedState = (original) => function poppinWorkspaceHistoryState(state, title, url) {
+      if (typeof url === 'string' && url.length > 0 && isWorkspaceList(url)) return;
+      return original(state, title, url);
+    };
+    history.pushState = guardedState(restore.pushState);
+    history.replaceState = guardedState(restore.replaceState);
+    const timeout = window.setTimeout(() => {
+      history.back = restore.back;
+      history.go = restore.go;
+      history.pushState = restore.pushState;
+      history.replaceState = restore.replaceState;
+      window[key] = null;
+    }, ${holdMs});
+    window[key] = { timeout, restore };
+  })()`;
 }
 
 /** Window.open guests already hosted as tabs must not be closed; that retriggers Docs' list bounce. */
